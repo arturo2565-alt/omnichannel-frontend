@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
-const socket = io('http://localhost:3000');
+const socket = io('omnichannel-backend-production.up.railway.app');
 
 function App() {
   const [messages, setMessages] = useState([]);
