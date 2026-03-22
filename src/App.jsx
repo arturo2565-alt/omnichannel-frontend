@@ -18,7 +18,7 @@ function App() {
 
   const fetchMessages = async () => {
     try {
-      const response = await fetch('https://omnichannel-backend-production.up.railway.app/webhook');
+      const response = await fetch('https://omnichannel-backend-production.up.railway.app/conversations');
       const data = await response.json();
       setMessages(data);
     } catch (error) { console.error("Error al traer mensajes:", error); }
@@ -59,7 +59,7 @@ function App() {
     };
 
     try {
-      await fetch('https://omnichannel-backend-production.up.railway.app/webhook/webhook', {
+      await fetch('https://omnichannel-backend-production.up.railway.app/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMessage),
