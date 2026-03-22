@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 
 function ChatView({ 
   contacts, 
@@ -10,10 +10,22 @@ function ChatView({
   setReply, 
   onSendMessage, 
   onRefresh,
-  aiSuggestion,      // Sugerencia recibida
-  onGetAiSuggestion, // Función para pedir la sugerencia
-  isAiLoading        // Estado de carga del botón
+  aiSuggestion,      
+  onGetAiSuggestion, 
+  isAiLoading        
 }) {
+
+  // --- 1. REFERENCIA PARA EL AUTO-SCROLL ---
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // --- 2. EFECTO: BAJAR CADA VEZ QUE CAMBIEN LOS MENSAJES ---
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   // --- FUNCIÓN DE DETECCIÓN DE IMAGEN ---
   const isImage = (url) => {
@@ -119,12 +131,13 @@ function ChatView({
                   )}
                 </div>
               ))}
+              {/* --- 3. ELEMENTO ANCLA PARA EL SCROLL --- */}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* --- SECCIÓN DE ENTRADA Y IA --- */}
             <div className="p-4 border-t bg-white">
               
-              {/* BURBUJA DE SUGERENCIA DE IA (Solo aparece si hay una respuesta lista) */}
               {aiSuggestion && (
                 <div 
                   onClick={() => setReply(aiSuggestion)}
@@ -139,18 +152,17 @@ function ChatView({
               )}
 
               <div className="flex space-x-2 items-center">
-                {/* BOTÓN MÁGICO DE IA */}
                 <button 
                   onClick={onGetAiSuggestion}
                   disabled={isAiLoading}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm border ${
                     isAiLoading 
-                    ? 'bg-gray-100 border-gray-200 animate-spin' 
+                    ? 'bg-gray-100 border-gray-200' 
                     : 'bg-purple-100 border-purple-200 text-purple-600 hover:bg-purple-200 hover:scale-110 active:scale-95'
                   }`}
                   title="Generar respuesta inteligente"
                 >
-                  {isAiLoading ? '⏳' : '✨'}
+                  {isAiLoading ? <span className="animate-spin inline-block">⏳</span> : '✨'}
                 </button>
 
                 <input 
