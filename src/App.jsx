@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
-const socket = io('https://omnichannel-backend-production.up.railway.app');
+const socket = io('https://omnichannel-backend-production.up.railway.app', {
+  transports: ['websocket'], // Forzamos WebSocket puro
+  upgrade: false
+});
 
 function App() {
   const [messages, setMessages] = useState([]);
