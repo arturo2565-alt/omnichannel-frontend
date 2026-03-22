@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
-const socket = io('omnichannel-backend-production.up.railway.app');
+const socket = io('https://omnichannel-backend-production.up.railway.app');
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -15,7 +15,7 @@ function App() {
 
   const fetchMessages = async () => {
     try {
-      const response = await fetch('http://localhost:3000/webhook');
+      const response = await fetch('https://omnichannel-backend-production.up.railway.app/webhook');
       const data = await response.json();
       setMessages(data);
     } catch (error) { console.error("Error al traer mensajes:", error); }
@@ -29,7 +29,7 @@ function App() {
     setAiSuggestion(null); // Limpiamos la anterior mientras carga
     try {
       // Nota: Asegúrate de que la URL coincida con tu controlador (/webhook/ai-suggest)
-      const response = await fetch(`http://localhost:3000/webhook/ai-suggest/${selectedConvId}`, {
+      const response = await fetch(`https://omnichannel-backend-production.up.railway.app/webhook/ai-suggest/${selectedConvId}`, {
         method: 'POST'
       });
       const data = await response.json();
@@ -56,7 +56,7 @@ function App() {
     };
 
     try {
-      await fetch('http://localhost:3000/webhook', {
+      await fetch('https://omnichannel-backend-production.up.railway.app/webhook/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMessage),
