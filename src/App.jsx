@@ -2,78 +2,64 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
+// URL base para no repetirla
+const API_BASE_URL = 'https://omnichannel-backend-production.up.railway.app/webhook';
+
 const socket = io('https://omnichannel-backend-production.up.railway.app', {
-  transports: ['websocket'], // Forzamos WebSocket puro
+  transports: ['websocket'],
   upgrade: false
 });
 
 function App() {
-  const [messages, setMessages] = useState([]);
+  // --- ESTADOS ---
+  const [contacts, setContacts] = useState([]); // Lista de conversaciones (Sidebar)
+  const [messages, setMessages] = useState([]); // Mensajes del chat seleccionado
   const [selectedConvId, setSelectedConvId] = useState(null);
   const [reply, setReply] = useState("");
-  
-  // --- ESTADOS PARA LA IA ---
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
-  const [isAiLoading, setIsAiLoading] = useState(false); // Estado de carga para el botón
+  const [isConnected, setIsConnected] = useState(socket.connected);
 
-  const fetchMessages = async () => {
+  // 1. Cargar solo la lista de conversaciones (Sidebar)
+  const fetchConversations = async () => {
     try {
-      const response = await fetch('https://omnichannel-backend-production.up.railway.app/webhook');
+      const response = await fetch(`${API_BASE_URL}/conversations`);
       const data = await response.json();
-      setMessages(data);
-    } catch (error) { console.error("Error al traer mensajes:", error); }
-  };
-
-  // --- FUNCIÓN PARA PEDIR SUGERENCIA MANUAL (POST) ---
-  const handleGetAiSuggestion = async () => {
-    if (!selectedConvId) return;
-    
-    setIsAiLoading(true);
-    setAiSuggestion(null); // Limpiamos la anterior mientras carga
-    try {
-      // Nota: Asegúrate de que la URL coincida con tu controlador (/webhook/ai-suggest)
-      const response = await fetch(`https://omnichannel-backend-production.up.railway.app/webhook/ai-suggest/${selectedConvId}`, {
-        method: 'POST'
-      });
-      const data = await response.json();
-      setAiSuggestion(data.suggestion);
+      setContacts(data);
     } catch (error) {
-      console.error("Error pidiendo sugerencia manual:", error);
-    } finally {
-      setIsAiLoading(false);
+      console.error("Error al traer conversaciones:", error);
     }
   };
 
-  const sendMessage = async () => {
-    if (!reply.trim() || !selectedConvId) return;
-
-    const currentContact = messages.find(m => m.conversationId === selectedConvId);
-
-    const newMessage = {
-      message: reply,
-      platform: 'web-dashboard',
-      user: 'Arturo (Agente)', 
-      id: currentContact?.externalId, 
-      conversationId: selectedConvId, 
-      direction: 'outbound'
-    };
-
+  // 2. Cargar mensajes de una conversación específica
+  const fetchMessagesForConv = async (convId) => {
+    if (!convId) return;
     try {
-      await fetch('https://omnichannel-backend-production.up.railway.app/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMessage),
-      });
-      setReply("");
-      setAiSuggestion(null); 
-    } catch (error) { console.error("Error al enviar:", error); }
+      const response = await fetch(`${API_BASE_URL}/messages/${convId}`);
+      const data = await response.json();
+      // Invertimos el orden si el backend los manda DESC para que el scroll funcione bien
+      setMessages(data.reverse());
+    } catch (error) {
+      console.error("Error al traer mensajes:", error);
+    }
   };
 
+  // --- EFECTOS ---
+
+  // Al montar la app: traer contactos y configurar Sockets
   useEffect(() => {
-    fetchMessages();
+    fetchConversations();
+
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
 
     socket.on('newMessage', (msg) => {
-      setMessages((prev) => [msg, ...prev]);
+      // Si el mensaje es de la conversación que tengo abierta, lo agrego al chat
+      if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
+        setMessages((prev) => [...prev, msg]);
+      }
+      // Siempre refrescamos la lista de contactos para que el último mensaje suba al principio
+      fetchConversations();
     });
 
     socket.on('aiSuggestion', (data) => {
@@ -83,44 +69,84 @@ function App() {
     });
 
     return () => {
+      socket.off('connect');
+      socket.off('disconnect');
       socket.off('newMessage');
       socket.off('aiSuggestion');
     };
   }, [selectedConvId]);
 
+  // Cada vez que el usuario cambie de chat en el Sidebar
   useEffect(() => {
-    setAiSuggestion(null);
+    if (selectedConvId) {
+      fetchMessagesForConv(selectedConvId);
+      setAiSuggestion(null);
+    }
   }, [selectedConvId]);
 
-  // --- LÓGICA DE DATOS ---
-  const contacts = Array.from(new Set(messages.map(msg => msg.conversationId)))
-    .map(id => {
-        const conversationMsgs = messages.filter(m => m.conversationId === id);
-        const clientMsg = conversationMsgs.find(m => m.direction === 'inbound');
-        return {
-            ...conversationMsgs[0],
-            senderName: clientMsg ? clientMsg.senderName : conversationMsgs[0].senderName
-        };
-    })
-    .filter(c => c !== undefined);
+  // --- ACCIONES ---
 
-  const filteredMessages = messages.filter(msg => msg.conversationId === selectedConvId);
-  const selectedUserName = contacts.find(c => c.conversationId === selectedConvId)?.senderName;
+  const handleGetAiSuggestion = async () => {
+    if (!selectedConvId) return;
+    setIsAiLoading(true);
+    setAiSuggestion(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai-suggest/${selectedConvId}`, { method: 'POST' });
+      const data = await response.json();
+      setAiSuggestion(data.suggestion);
+    } catch (error) {
+      console.error("Error en sugerencia manual:", error);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!reply.trim() || !selectedConvId) return;
+
+    // Buscamos el externalId para que la plataforma sepa a quién responder
+    const currentConv = contacts.find(c => c.id === selectedConvId);
+
+    const newMessage = {
+      message: reply,
+      platform: currentConv?.platform || 'web-dashboard',
+      user: 'Arturo (Agente)',
+      id: currentConv?.externalId,
+      conversationId: selectedConvId,
+      direction: 'outbound'
+    };
+
+    try {
+      await fetch(API_BASE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMessage),
+      });
+      setReply("");
+      setAiSuggestion(null);
+    } catch (error) {
+      console.error("Error al enviar:", error);
+    }
+  };
+
+  // Buscamos el nombre del contacto seleccionado para el header del chat
+  const selectedUserName = contacts.find(c => c.id === selectedConvId)?.contactName || "Usuario";
 
   return (
     <ChatView 
-      contacts={contacts}
+      contacts={contacts} // Ahora vienen directamente de la DB de conversaciones
       selectedConvId={selectedConvId}
       setSelectedConvId={setSelectedConvId}
       selectedUserName={selectedUserName}
-      messages={filteredMessages}
+      messages={messages} // Solo los de la conversación activa
       reply={reply}
       setReply={setReply}
       onSendMessage={sendMessage}
-      onRefresh={fetchMessages}
+      onRefresh={fetchConversations}
       aiSuggestion={aiSuggestion}
-      isAiLoading={isAiLoading} // Pasamos el estado de carga
-      onGetAiSuggestion={handleGetAiSuggestion} // Pasamos la función manual
+      isAiLoading={isAiLoading}
+      onGetAiSuggestion={handleGetAiSuggestion}
+      isConnected={isConnected} // Nueva prop opcional por si quieres mostrar el estado
     />
   );
 }

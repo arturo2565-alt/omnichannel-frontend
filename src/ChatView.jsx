@@ -12,17 +12,18 @@ function ChatView({
   onRefresh,
   aiSuggestion,      
   onGetAiSuggestion, 
-  isAiLoading        
+  isAiLoading,
+  isConnected // Recibimos el estado de conexión
 }) {
 
-  // --- 1. REFERENCIA PARA EL AUTO-SCROLL ---
+  // --- 1. REFERENCIA Y LÓGICA DE AUTO-SCROLL ---
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // --- 2. EFECTO: BAJAR CADA VEZ QUE CAMBIEN LOS MENSAJES ---
+  // Bajamos el scroll cada vez que lleguen mensajes nuevos
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -36,49 +37,57 @@ function ChatView({
   return (
     <div className="flex h-screen bg-gray-100 text-gray-900 overflow-hidden">
       
-      {/* 1. SIDEBAR DE CANALES */}
+      {/* 1. SIDEBAR DE CANALES (Estático por ahora) */}
       <div className="w-20 bg-gray-900 flex flex-col items-center py-4 space-y-4 shadow-xl z-10">
-        <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition">W</div>
-        <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition">Z</div>
+        <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition shadow-lg">W</div>
+        <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition shadow-lg">I</div>
       </div>
 
-      {/* 2. LISTA DE CONTACTOS */}
-      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-4 border-b font-bold text-xl flex justify-between items-center bg-white">
-          Bandeja
-          <button onClick={onRefresh} className="text-[10px] text-blue-500 hover:text-blue-700 underline">Actualizar</button>
+      {/* 2. LISTA DE CONTACTOS (Optimizado para entidad Conversation) */}
+      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col shadow-inner">
+        <div className="p-4 border-b font-bold text-xl flex justify-between items-center bg-white sticky top-0 z-10">
+          <span>Bandeja</span>
+          <button 
+            onClick={onRefresh} 
+            className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition"
+          >
+            🔄 Actualizar
+          </button>
         </div>
         
-        <div className="flex-1 overflow-y-auto bg-white">
-          {contacts.map((contact) => (
-            <div 
-              key={contact.id} 
-              onClick={() => setSelectedConvId(contact.conversationId)}
-              className={`p-4 cursor-pointer border-b transition flex items-center space-x-3 ${
-                selectedConvId === contact.conversationId ? 'bg-blue-50 border-r-4 border-r-blue-500' : 'hover:bg-gray-50'
-              }`}
-            >
-              <div className="relative flex-shrink-0">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-600 to-blue-400 flex items-center justify-center text-white font-bold shadow-md">
-                  {contact.senderName ? contact.senderName.charAt(0).toUpperCase() : '?'}
+        <div className="flex-1 overflow-y-auto">
+          {contacts.length > 0 ? (
+            contacts.map((contact) => (
+              <div 
+                key={contact.id} 
+                onClick={() => setSelectedConvId(contact.id)} // Usamos .id de la conversación
+                className={`p-4 cursor-pointer border-b transition flex items-center space-x-3 ${
+                  selectedConvId === contact.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : 'hover:bg-gray-50'
+                }`}
+              >
+                <div className="relative flex-shrink-0">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-md text-lg">
+                    {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
+                  </div>
                 </div>
-                <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-              </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-baseline">
-                  <p className="font-bold text-gray-800 truncate">{contact.senderName}</p>
-                  <span className="text-[10px] text-gray-400 ml-2">
-                    {contact.createdAt ? new Date(contact.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                  </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-baseline">
+                    <p className="font-bold text-gray-800 truncate">{contact.contactName}</p>
+                    <span className="text-[10px] text-gray-400 ml-2">
+                      {contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 truncate mt-1 italic">
+                    {/* Mostramos el último mensaje guardado en la conversación */}
+                    {contact.lastMessage || 'Sin mensajes aún...'}
+                  </p>
                 </div>
-                <p className="text-xs text-gray-500 truncate mt-1">
-                  {contact.direction === 'outbound' ? <span className="text-blue-500 font-medium">Tú: </span> : ''}
-                  {isImage(contact.content) ? '📷 Imagen' : contact.content}
-                </p>
               </div>
-            </div>
-          ))}
+            ))
+          ) : (
+            <div className="p-10 text-center text-gray-400 text-sm">No hay conversaciones activas</div>
+          )}
         </div>
       </div>
 
@@ -86,27 +95,33 @@ function ChatView({
       <div className="flex-1 flex flex-col bg-white">
         {selectedConvId ? (
           <>
+            {/* Header del Chat */}
             <div className="p-4 border-b shadow-sm font-semibold bg-white flex justify-between items-center">
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold border border-blue-200">
                   {selectedUserName?.charAt(0).toUpperCase()}
                 </div>
-                <span>Chat con {selectedUserName}</span>
+                <div className="flex flex-col">
+                  <span className="text-sm">{selectedUserName}</span>
+                  <span className="text-[10px] text-gray-400 font-normal">ID de Conversación: {selectedConvId}</span>
+                </div>
               </div>
-              <span className="text-xs text-green-500 font-normal flex items-center">
-                <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
-                Online
+              <span className={`text-xs font-normal flex items-center ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
+                <span className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                {isConnected ? 'Online' : 'Desconectado'}
               </span>
             </div>
             
-            <div className="flex-1 p-6 bg-[#f0f2f5] overflow-y-auto flex flex-col space-y-3">
-              {messages.slice().reverse().map((msg) => (
+            {/* Área de Mensajes */}
+            <div className="flex-1 p-6 bg-[#e5ddd5] overflow-y-auto flex flex-col space-y-3">
+              {/* Quitamos el .reverse() porque el App.jsx ya los ordena cronológicamente */}
+              {messages.map((msg) => (
                 <div 
                   key={msg.id} 
-                  className={`p-3 rounded-2xl shadow-sm max-w-md ${
+                  className={`p-3 rounded-2xl shadow-sm max-w-[80%] ${
                     msg.direction === 'inbound' 
-                      ? 'bg-white self-start text-gray-800' 
-                      : 'bg-blue-600 text-white self-end'
+                      ? 'bg-white self-start text-gray-800 rounded-tl-none' 
+                      : 'bg-indigo-600 text-white self-end rounded-tr-none'
                   }`}
                 >
                   {isImage(msg.content) ? (
@@ -114,40 +129,38 @@ function ChatView({
                       <img 
                         src={msg.content} 
                         alt="Adjunto" 
-                        className="rounded-lg max-h-64 object-cover cursor-pointer hover:opacity-95 transition"
+                        className="rounded-lg max-h-72 object-cover cursor-pointer hover:opacity-95 transition"
                         onClick={() => window.open(msg.content, '_blank')} 
                       />
-                      <span className={`text-[9px] opacity-70 text-right ${msg.direction === 'inbound' ? 'text-gray-400' : 'text-blue-100'}`}>
-                        {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                      </span>
                     </div>
                   ) : (
-                    <>
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                      <div className={`text-[9px] mt-1 text-right ${msg.direction === 'inbound' ? 'text-gray-400' : 'text-blue-100'}`}>
-                        {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                      </div>
-                    </>
+                    <p className="text-sm leading-relaxed">{msg.content}</p>
                   )}
+                  <div className={`text-[9px] mt-1 text-right opacity-60 ${msg.direction === 'inbound' ? 'text-gray-500' : 'text-indigo-100'}`}>
+                    {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  </div>
                 </div>
               ))}
-              {/* --- 3. ELEMENTO ANCLA PARA EL SCROLL --- */}
+              {/* ANCLA PARA EL AUTO-SCROLL */}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* --- SECCIÓN DE ENTRADA Y IA --- */}
-            <div className="p-4 border-t bg-white">
+            {/* Sección de Entrada */}
+            <div className="p-4 border-t bg-gray-50">
               
+              {/* Sugerencia de IA */}
               {aiSuggestion && (
                 <div 
                   onClick={() => setReply(aiSuggestion)}
-                  className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer hover:bg-purple-100 transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 group"
+                  className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer hover:bg-purple-100 transition-all animate-in fade-in slide-in-from-bottom-2 duration-300 group shadow-sm"
                 >
                   <div className="flex justify-between items-center mb-1">
-                    <p className="text-[10px] text-purple-600 font-bold uppercase tracking-wider">✨ Sugerencia de IA (Click para usar)</p>
-                    <span className="text-gray-300 group-hover:text-purple-400 transition-colors">✕</span>
+                    <p className="text-[10px] text-purple-600 font-bold uppercase tracking-wider flex items-center">
+                      <span className="mr-1">✨</span> Sugerencia de IA
+                    </p>
+                    <span className="text-gray-300 group-hover:text-purple-400">✕</span>
                   </div>
-                  <p className="text-sm text-gray-700 italic">"{aiSuggestion}"</p>
+                  <p className="text-sm text-gray-700 italic font-medium">"{aiSuggestion}"</p>
                 </div>
               )}
 
@@ -155,27 +168,27 @@ function ChatView({
                 <button 
                   onClick={onGetAiSuggestion}
                   disabled={isAiLoading}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm border ${
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md border ${
                     isAiLoading 
                     ? 'bg-gray-100 border-gray-200' 
-                    : 'bg-purple-100 border-purple-200 text-purple-600 hover:bg-purple-200 hover:scale-110 active:scale-95'
+                    : 'bg-white border-purple-200 text-purple-600 hover:bg-purple-50 hover:scale-110 active:scale-95'
                   }`}
                   title="Generar respuesta inteligente"
                 >
-                  {isAiLoading ? <span className="animate-spin inline-block">⏳</span> : '✨'}
+                  {isAiLoading ? <span className="animate-spin">⏳</span> : '✨'}
                 </button>
 
                 <input 
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && onSendMessage()}
-                  className="flex-1 border border-gray-200 rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-purple-400 transition-all" 
-                  placeholder={`Escribe o usa la IA para responder a ${selectedUserName}...`} 
+                  className="flex-1 border border-gray-200 rounded-full px-5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-400 transition-all bg-white shadow-inner" 
+                  placeholder={`Responder a ${selectedUserName}...`} 
                 />
                 
                 <button 
                   onClick={onSendMessage} 
-                  className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold hover:bg-blue-700 shadow-md active:scale-95 transition"
+                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-full font-bold hover:bg-indigo-700 shadow-md active:scale-95 transition-all"
                 >
                   Enviar
                 </button>
@@ -184,10 +197,10 @@ function ChatView({
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-400 text-center bg-gray-50">
-            <div>
-              <div className="text-7xl mb-4 opacity-20">💬</div>
-              <p className="text-lg font-medium text-gray-500">Selecciona una conversación</p>
-              <p className="text-sm opacity-60">Tus mensajes e imágenes aparecerán aquí</p>
+            <div className="animate-in zoom-in duration-500">
+              <div className="text-8xl mb-4 opacity-10">💬</div>
+              <p className="text-xl font-semibold text-gray-400">Bandeja de Entrada</p>
+              <p className="text-sm opacity-60">Selecciona un chat para empezar a gestionar</p>
             </div>
           </div>
         )}
