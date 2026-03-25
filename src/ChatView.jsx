@@ -1,21 +1,18 @@
 import React, { useRef, useEffect } from 'react';
 
-// --- FUNCIONES DE UTILIDAD (Fuera del componente para limpieza) ---
+// --- FUNCIONES DE UTILIDAD ---
 
 const isImage = (url) => {
   if (!url) return false;
-  return (url.match(/\.(jpeg|jpg|gif|png|webp)$/) != null) || url.includes('images.unsplash.com');
+  // Detecta extensiones comunes o links de Unsplash/Cloudinary
+  return (url.match(/\.(jpeg|jpg|gif|png|webp)$/) != null) || 
+         url.includes('images.unsplash.com') || 
+         url.includes('res.cloudinary.com');
 };
 
 const getPreviewText = (content) => {
   if (!content) return 'Sin mensajes aún...';
-  
-  // Si el contenido detecta una URL de imagen, devolvemos el emoji
-  if (isImage(content)) {
-    return '📷 Imagen';
-  }
-  
-  // Retornamos el texto normal (el CSS 'truncate' se encarga de cortarlo visualmente)
+  if (isImage(content)) return '📷 Imagen';
   return content;
 };
 
@@ -32,11 +29,13 @@ function ChatView({
   aiSuggestion,      
   onGetAiSuggestion, 
   isAiLoading,
-  isConnected 
+  isConnected,
+  onUploadImage // <--- Nueva prop para manejar la subida
 }) {
 
-  // --- 1. REFERENCIA Y LÓGICA DE AUTO-SCROLL ---
+  // --- REFERENCIAS ---
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null); // <--- Referencia para el input de archivos
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -55,7 +54,7 @@ function ChatView({
         <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition shadow-lg">I</div>
       </div>
 
-      {/* 2. LISTA DE CONTACTOS (Sidebar) */}
+      {/* 2. LISTA DE CONTACTOS */}
       <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col shadow-inner">
         <div className="p-4 border-b font-bold text-xl flex justify-between items-center bg-white sticky top-0 z-10">
           <span>Bandeja</span>
@@ -90,8 +89,6 @@ function ChatView({
                       {contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                     </span>
                   </div>
-                  
-                  {/* --- PREVIEW INTELIGENTE IMPLEMENTADO --- */}
                   <p className="text-xs text-gray-500 truncate mt-1 italic">
                     {contact.direction === 'outbound' ? <span className="text-blue-500 font-medium">Tú: </span> : ''}
                     {getPreviewText(contact.lastMessage)}
@@ -155,7 +152,7 @@ function ChatView({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input & IA */}
+            {/* Sección de Entrada */}
             <div className="p-4 border-t bg-gray-50">
               {aiSuggestion && (
                 <div 
@@ -171,6 +168,27 @@ function ChatView({
               )}
 
               <div className="flex space-x-2 items-center">
+                {/* BOTÓN CLIP (ADJUNTAR) */}
+                <button 
+                  onClick={() => fileInputRef.current.click()}
+                  className="w-10 h-10 rounded-full flex items-center justify-center bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-indigo-600 transition shadow-sm"
+                  title="Adjuntar imagen"
+                >
+                  📎
+                </button>
+
+                {/* INPUT FILE OCULTO */}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files[0]) onUploadImage(e.target.files[0]);
+                  }} 
+                  accept="image/*"
+                />
+
+                {/* BOTÓN IA */}
                 <button 
                   onClick={onGetAiSuggestion}
                   disabled={isAiLoading}
@@ -185,7 +203,7 @@ function ChatView({
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && onSendMessage()}
-                  className="flex-1 border border-gray-200 rounded-full px-5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-400 transition-all bg-white" 
+                  className="flex-1 border border-gray-200 rounded-full px-5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-400 transition-all bg-white shadow-inner" 
                   placeholder={`Responder a ${selectedUserName}...`} 
                 />
                 

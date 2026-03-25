@@ -37,16 +37,38 @@ function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/messages/${convId}`);
       const data = await response.json();
-      // Invertimos el orden si el backend los manda DESC para que el scroll funcione bien
+      // Usamos reverse() para que el scroll y el orden cronológico coincidan
       setMessages(data.reverse());
     } catch (error) {
       console.error("Error al traer mensajes:", error);
     }
   };
 
+  // --- ACCIÓN DE SUBIDA DE IMAGEN ---
+  const uploadAndSendImage = async (file) => {
+    if (!selectedConvId) return;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      // 1. Subimos la imagen al backend para obtener URL de Cloudinary
+      const response = await fetch(`${API_BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const { url } = await response.json();
+
+      // 2. Enviamos la URL automáticamente como un mensaje
+      await sendMessage(url); 
+      
+    } catch (error) {
+      console.error("Error al subir imagen:", error);
+    }
+  };
+
   // --- EFECTOS ---
 
-  // Al montar la app: traer contactos y configurar Sockets
   useEffect(() => {
     fetchConversations();
 
@@ -54,11 +76,10 @@ function App() {
     socket.on('disconnect', () => setIsConnected(false));
 
     socket.on('newMessage', (msg) => {
-      // Si el mensaje es de la conversación que tengo abierta, lo agrego al chat
+      // Si el mensaje es de la conversación que tengo abierta, lo agrego
       if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
         setMessages((prev) => [...prev, msg]);
       }
-      // Siempre refrescamos la lista de contactos para que el último mensaje suba al principio
       fetchConversations();
     });
 
@@ -76,7 +97,6 @@ function App() {
     };
   }, [selectedConvId]);
 
-  // Cada vez que el usuario cambie de chat en el Sidebar
   useEffect(() => {
     if (selectedConvId) {
       fetchMessagesForConv(selectedConvId);
@@ -84,7 +104,7 @@ function App() {
     }
   }, [selectedConvId]);
 
-  // --- ACCIONES ---
+  // --- ACCIONES DE MENSAJERÍA ---
 
   const handleGetAiSuggestion = async () => {
     if (!selectedConvId) return;
@@ -101,14 +121,15 @@ function App() {
     }
   };
 
-  const sendMessage = async () => {
-    if (!reply.trim() || !selectedConvId) return;
+  // Modificamos sendMessage para que acepte un parámetro opcional (útil para imágenes)
+  const sendMessage = async (contentOverride = null) => {
+    const textToSend = contentOverride || reply;
+    if (!textToSend.trim() || !selectedConvId) return;
 
-    // Buscamos el externalId para que la plataforma sepa a quién responder
     const currentConv = contacts.find(c => c.id === selectedConvId);
 
     const newMessage = {
-      message: reply,
+      message: textToSend,
       platform: currentConv?.platform || 'web-dashboard',
       user: 'Arturo (Agente)',
       id: currentConv?.externalId,
@@ -122,31 +143,32 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newMessage),
       });
-      setReply("");
+      
+      if (!contentOverride) setReply(""); // Solo limpiamos el input si no es una imagen
       setAiSuggestion(null);
     } catch (error) {
       console.error("Error al enviar:", error);
     }
   };
 
-  // Buscamos el nombre del contacto seleccionado para el header del chat
   const selectedUserName = contacts.find(c => c.id === selectedConvId)?.contactName || "Usuario";
 
   return (
     <ChatView 
-      contacts={contacts} // Ahora vienen directamente de la DB de conversaciones
+      contacts={contacts}
       selectedConvId={selectedConvId}
       setSelectedConvId={setSelectedConvId}
       selectedUserName={selectedUserName}
-      messages={messages} // Solo los de la conversación activa
+      messages={messages}
       reply={reply}
       setReply={setReply}
-      onSendMessage={sendMessage}
+      onSendMessage={() => sendMessage()} // Llamada normal desde el botón enviar
+      onUploadImage={uploadAndSendImage} // Nueva prop para manejar archivos
       onRefresh={fetchConversations}
       aiSuggestion={aiSuggestion}
       isAiLoading={isAiLoading}
       onGetAiSuggestion={handleGetAiSuggestion}
-      isConnected={isConnected} // Nueva prop opcional por si quieres mostrar el estado
+      isConnected={isConnected}
     />
   );
 }
