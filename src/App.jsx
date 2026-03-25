@@ -3,7 +3,10 @@ import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
 const API_BASE_URL = 'https://omnichannel-backend-production.up.railway.app/webhook';
-const socket = io('https://omnichannel-backend-production.up.railway.app', { transports: ['websocket'], upgrade: false });
+const socket = io('https://omnichannel-backend-production.up.railway.app', { 
+  transports: ['websocket'], 
+  upgrade: false 
+});
 
 function App() {
   // --- ESTADOS ---
@@ -15,13 +18,13 @@ function App() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
 
-  // --- 🌟 NUEVOS ESTADOS PARA MULTIMEDIA PRO 🌟 ---
-  const [selectedFile, setSelectedFile] = useState(null); // El archivo real para Multer
-  const [filePreviewUrl, setFilePreviewUrl] = useState(null); // La URL temporal para <img src>
-  const [isSending, setIsSending] = useState(false); // Estado de carga al enviar (texto o foto)
+  // --- 🌟 ESTADOS MULTIMEDIA 🌟 ---
+  const [selectedFile, setSelectedFile] = useState(null); 
+  const [filePreviewUrl, setFilePreviewUrl] = useState(null); 
+  const [isSending, setIsSending] = useState(false); 
 
   // --- LÓGICA DE CARGA ---
-  const fetchConversations = async () => { /* ... (Igual que antes) ... */
+  const fetchConversations = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/conversations`);
       const data = await response.json();
@@ -29,12 +32,12 @@ function App() {
     } catch (error) { console.error("Error conversaciones:", error); }
   };
 
-  const fetchMessagesForConv = async (convId) => { /* ... (Igual que antes) ... */
+  const fetchMessagesForConv = async (convId) => {
     if (!convId) return;
     try {
       const response = await fetch(`${API_BASE_URL}/messages/${convId}`);
       const data = await response.json();
-      setMessages(data.reverse()); // Asumimos que llegan DESC y los invertimos para orden cronológico
+      setMessages(data.reverse());
     } catch (error) { console.error("Error mensajes:", error); }
   };
 
@@ -52,69 +55,74 @@ function App() {
     socket.on('aiSuggestion', (data) => {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
     });
-    return () => { socket.off('connect'); socket.off('disconnect'); socket.off('newMessage'); socket.off('aiSuggestion'); };
+    return () => { 
+      socket.off('connect'); 
+      socket.off('disconnect'); 
+      socket.off('newMessage'); 
+      socket.off('aiSuggestion'); 
+    };
   }, [selectedConvId]);
 
   useEffect(() => {
-    if (selectedConvId) { fetchMessagesForConv(selectedConvId); setAiSuggestion(null); handleClearFile(); // Limpiamos preview al cambiar de chat
+    if (selectedConvId) { 
+      fetchMessagesForConv(selectedConvId); 
+      setAiSuggestion(null); 
+      handleClearFile(); 
     }
   }, [selectedConvId]);
 
-  // --- 🌟 ACCIONES DE MULTIMEDIA 🌟 ---
-
-  // 1. Cuando el usuario elige un archivo en su ordenador
+  // --- ACCIONES DE MULTIMEDIA ---
   const handleFileSelect = (file) => {
     if (!file) return;
-    setSelectedFile(file); // Guardamos el archivo para enviarlo después
-    
-    // Creamos una URL temporal local (blob:) para la miniatura
+    setSelectedFile(file);
     const localUrl = URL.createObjectURL(file);
     setFilePreviewUrl(localUrl);
-    
-    // Opcional: Limpiar texto si hay una imagen
     setReply(''); 
     setAiSuggestion(null);
   };
 
-  // 2. Cancelar la imagen (botón ✕ en la miniatura)
   const handleClearFile = () => {
     setSelectedFile(null);
-    // Revocamos la URL temporal para liberar memoria en el Mac
     if (filePreviewUrl) { URL.revokeObjectURL(filePreviewUrl); }
     setFilePreviewUrl(null);
   };
 
-  // 3. LA FUNCIÓN MAESTRA DE ENVÍO (Texto O Foto)
+  // --- 🌟 FUNCIÓN MAESTRA DE ENVÍO ACTUALIZADA 🌟 ---
   const sendMessage = async () => {
-    // Validación: Necesitamos o texto o archivo, y una conversación seleccionada
     if ((!reply.trim() && !selectedFile) || !selectedConvId || isSending) return;
 
-    setIsSending(true); // Bloqueamos el botón
-    let finalContent = reply; // Por defecto es el texto
+    setIsSending(true);
+    let finalContent = reply;
 
     try {
-      // --- 🌟 FLUJO DE SUBIDA SI HAY ARCHIVO 🌟 ---
+      // --- BLOQUE DE SUBIDA CON LOG DE ERRORES ---
       if (selectedFile) {
         const formData = new FormData();
-        formData.append('file', selectedFile); // Asegúrate que coincida con FileInterceptor('file') del Backend
+        formData.append('file', selectedFile); 
 
-        console.log("Subiendo imagen a Cloudinary vía Backend...");
+        console.log("Subiendo imagen a:", `${API_BASE_URL}/upload`);
+        
         const uploadResp = await fetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
-          body: formData, // No enviamos headers, fetch lo hace solo con FormData
+          body: formData,
+          // El navegador pone el Content-Type automáticamente con el boundary
         });
         
-        if (!uploadResp.ok) throw new Error("Fallo la subida al Backend");
+        if (!uploadResp.ok) {
+          const errorData = await uploadResp.json().catch(() => ({}));
+          console.error("Detalle del error backend:", errorData);
+          throw new Error(`Fallo la subida: ${uploadResp.status}`);
+        }
         
         const { url } = await uploadResp.json();
-        finalContent = url; // Reemplazamos el texto por la URL segura de Cloudinary
+        finalContent = url; 
         console.log("Imagen subida con éxito:", url);
       }
 
-      // --- FLUJO DE ENVÍO DE MENSAJE (Como antes) ---
+      // --- ENVÍO FINAL DEL MENSAJE ---
       const currentConv = contacts.find(c => c.id === selectedConvId);
       const newMessage = {
-        message: finalContent, // O texto o la URL de Cloudinary
+        message: finalContent,
         platform: currentConv?.platform || 'web-dashboard',
         user: 'Arturo (Agente)',
         id: currentConv?.externalId,
@@ -128,21 +136,20 @@ function App() {
         body: JSON.stringify(newMessage),
       });
 
-      // Limpieza total
       setReply("");
-      handleClearFile(); // Limpiamos selectedFile y filePreviewUrl
+      handleClearFile();
       setAiSuggestion(null);
 
     } catch (error) {
       console.error("Error crítico al enviar:", error);
-      alert("No se pudo enviar el mensaje o la imagen. Revisa la consola.");
+      alert(`Error: ${error.message}`);
     } finally {
-      setIsSending(false); // Desbloqueamos el botón
+      setIsSending(false);
     }
   };
 
   // --- ACCIONES DE IA ---
-  const handleGetAiSuggestion = async () => { /* ... (Igual que antes) ... */
+  const handleGetAiSuggestion = async () => {
     if (!selectedConvId) return;
     setIsAiLoading(true); setAiSuggestion(null);
     try {
@@ -170,12 +177,10 @@ function App() {
       isAiLoading={isAiLoading}
       onGetAiSuggestion={handleGetAiSuggestion}
       isConnected={isConnected}
-      
-      // --- 🌟 NUEVAS PROPS PARA MULTIMEDIA PRO 🌟 ---
-      filePreviewUrl={filePreviewUrl} // Para mostrar la miniatura
-      onFileSelect={handleFileSelect} // Para cuando eliges archivo
-      onClearFile={handleClearFile} // Para cancelar
-      isSending={isSending} // Para poner 'Enviando...' en el botón
+      filePreviewUrl={filePreviewUrl}
+      onFileSelect={handleFileSelect}
+      onClearFile={handleClearFile}
+      isSending={isSending}
     />
   );
 }
