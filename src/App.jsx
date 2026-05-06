@@ -39,18 +39,35 @@ function App() {
   const fetchConversations = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/conversations`);
+      if (!response.ok) {
+        console.error("Error conversaciones HTTP:", response.status);
+        setContacts([]);
+        return;
+      }
       const data = await response.json();
-      setContacts(data);
-    } catch (error) { console.error("Error conversaciones:", error); }
+      setContacts(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error conversaciones:", error);
+      setContacts([]);
+    }
   };
 
   const fetchMessagesForConv = async (convId) => {
     if (!convId) return;
     try {
       const response = await fetch(`${API_BASE_URL}/messages/${convId}`);
+      if (!response.ok) {
+        console.error("Error mensajes HTTP:", response.status);
+        setMessages([]);
+        return;
+      }
       const data = await response.json();
-      setMessages(data.reverse());
-    } catch (error) { console.error("Error mensajes:", error); }
+      const list = Array.isArray(data) ? data : [];
+      setMessages([...list].reverse());
+    } catch (error) {
+      console.error("Error mensajes:", error);
+      setMessages([]);
+    }
   };
 
   // --- EFECTOS ---
