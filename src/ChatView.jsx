@@ -1,6 +1,38 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
+import QuickReplies from './QuickReplies';
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
+const classifyPlatform = (raw) => {
+  if (!raw) return 'unknown';
+  const s = String(raw).toLowerCase().trim();
+  if (s.includes('whatsapp')) return 'whatsapp';
+  if (s.includes('instagram')) return 'instagram';
+  return 'other';
+};
+
+const PlatformBadge = ({ platform, className = '' }) => {
+  const kind = classifyPlatform(platform);
+  if (kind === 'whatsapp') {
+    return (
+      <span title="WhatsApp" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-500 text-[10px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+        W
+      </span>
+    );
+  }
+  if (kind === 'instagram') {
+    return (
+      <span title="Instagram" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-pink-500 text-[10px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+        I
+      </span>
+    );
+  }
+  return (
+    <span title="Canal desconocido" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-400 text-[9px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+      ?
+    </span>
+  );
+};
+
 const isImage = (url) => {
   if (!url) return false;
   // Soporte para URLs reales y para URLs temporales de blob
@@ -23,7 +55,7 @@ function ChatView({
   setReply, 
   onSendMessage, 
   onRefresh,
-  aiSuggestion,      
+  quickReplySuggestions,
   onGetAiSuggestion, 
   isAiLoading,
   isConnected,
@@ -37,9 +69,23 @@ function ChatView({
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
+  const [platformFilter, setPlatformFilter] = useState('all');
+
+  const filteredContacts = useMemo(() => {
+    if (platformFilter === 'all') return contacts;
+    return contacts.filter((c) => classifyPlatform(c.platform) === platformFilter);
+  }, [contacts, platformFilter]);
+
+  const selectedContact = contacts.find((c) => c.id === selectedConvId);
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => { scrollToBottom(); }, [messages]);
+
+  useEffect(() => {
+    if (!selectedConvId || platformFilter === 'all') return;
+    const visible = filteredContacts.some((c) => c.id === selectedConvId);
+    if (!visible) setSelectedConvId(null);
+  }, [filteredContacts, platformFilter, selectedConvId, setSelectedConvId]);
 
   return (
     <div className="flex h-screen bg-gray-100 text-gray-900 overflow-hidden font-sans">
@@ -52,20 +98,47 @@ function ChatView({
 
       {/* 2. LISTA CONTACTOS */}
       <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col shadow-inner">
-        <div className="p-4 border-b font-bold text-xl flex justify-between items-center bg-white sticky top-0 z-10">
-          <span>Bandeja</span>
-          <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
+        <div className="border-b bg-white sticky top-0 z-10 shadow-sm">
+          <div className="p-4 pb-3 font-bold text-xl flex justify-between items-center">
+            <span>Bandeja</span>
+            <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
+          </div>
+          <div className="px-4 pb-3 flex gap-1.5 flex-wrap items-center font-normal">
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'whatsapp', label: 'WhatsApp' },
+              { id: 'instagram', label: 'Instagram' },
+            ].map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPlatformFilter(id)}
+                className={`text-[11px] px-2.5 py-1 rounded-full border transition ${
+                  platformFilter === id
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {contacts.map((contact) => (
+          {filteredContacts.map((contact) => (
             <div key={contact.id} onClick={() => setSelectedConvId(contact.id)} className={`p-4 cursor-pointer border-b transition flex items-center space-x-3 ${selectedConvId === contact.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : 'hover:bg-gray-50'}`}>
-              <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-md text-lg">
-                {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
+              <div className="relative shrink-0">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-md text-lg">
+                  {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
+                </div>
+                <div className="absolute -bottom-0.5 -right-0.5 ring-2 ring-white rounded-full">
+                  <PlatformBadge platform={contact.platform} className="!w-5 !h-5 !text-[9px]" />
+                </div>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline">
                   <p className="font-bold text-gray-800 truncate">{contact.contactName}</p>
-                  <span className="text-[10px] text-gray-400 ml-2">{contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
+                  <span className="text-[10px] text-gray-400 ml-2 shrink-0">{contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
                 </div>
                 <p className="text-xs text-gray-500 truncate mt-1 italic">
                   {contact.direction === 'outbound' ? <span className="text-blue-500 font-medium">Tú: </span> : ''}
@@ -84,8 +157,16 @@ function ChatView({
             {/* Header Chat */}
             <div className="p-4 border-b shadow-sm font-semibold bg-white flex justify-between items-center z-10">
               <div className="flex items-center space-x-3">
-                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold border border-blue-200">{selectedUserName?.charAt(0).toUpperCase()}</div>
-                <div className="flex flex-col"><span className="text-sm">{selectedUserName}</span><span className="text-[10px] text-gray-400 font-normal">ID: {selectedConvId}</span></div>
+                <div className="relative">
+                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold border border-blue-200">{selectedUserName?.charAt(0).toUpperCase()}</div>
+                  <div className="absolute -bottom-0.5 -right-0.5 ring-2 ring-white rounded-full">
+                    <PlatformBadge platform={selectedContact?.platform} className="!w-5 !h-5 !text-[9px]" />
+                  </div>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm truncate">{selectedUserName}</span>
+                  <span className="text-[10px] text-gray-400 font-normal truncate">ID: {selectedConvId}</span>
+                </div>
               </div>
               <span className={`text-xs font-normal flex items-center ${isConnected ? 'text-green-500' : 'text-red-500'}`}><span className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>{isConnected ? 'Online' : 'Desconectado'}</span>
             </div>
@@ -106,13 +187,11 @@ function ChatView({
             {/* --- SECCIÓN DE ENTRADA PRO (Multimedia + IA) --- */}
             <div className="p-4 border-t bg-gray-50 mt-auto z-10">
               
-              {/* Sugerencia IA */}
-              {aiSuggestion && !filePreviewUrl && (
-                <div onClick={() => setReply(aiSuggestion)} className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer hover:bg-purple-100 transition-all shadow-sm group">
-                  <div className="flex justify-between items-center mb-1"><p className="text-[10px] text-purple-600 font-bold uppercase tracking-wider">✨ Sugerencia de IA</p><span className="text-gray-300 group-hover:text-purple-400">✕</span></div>
-                  <p className="text-sm text-gray-700 italic font-medium">"{aiSuggestion}"</p>
-                </div>
-              )}
+              <QuickReplies
+                suggestions={quickReplySuggestions}
+                onPick={setReply}
+                disabled={!!filePreviewUrl}
+              />
 
               {/* --- 🌟 VISTA PREVIA DE LA IMAGEN (Thumbnail) 🌟 --- */}
               {filePreviewUrl && (

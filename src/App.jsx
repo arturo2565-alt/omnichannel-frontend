@@ -1,8 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 
 const API_BASE_URL = 'https://omnichannel-backend-production.up.railway.app/webhook';
+
+/** Convierte el texto único de la IA en varias opciones para QuickReplies */
+function suggestionLinesFromAi(text) {
+  if (!text?.trim()) return [];
+  const raw = text.trim();
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(\d+[.)]|[-•*])\s+/, '').trim())
+    .filter(Boolean);
+  if (lines.length > 1) return lines;
+  return [raw];
+}
 const socket = io('https://omnichannel-backend-production.up.railway.app', { 
   transports: ['websocket'], 
   upgrade: false 
@@ -162,6 +174,11 @@ function App() {
 
   const selectedUserName = contacts.find(c => c.id === selectedConvId)?.contactName || "Usuario";
 
+  const quickReplySuggestions = useMemo(
+    () => suggestionLinesFromAi(aiSuggestion),
+    [aiSuggestion],
+  );
+
   return (
     <ChatView 
       contacts={contacts}
@@ -173,7 +190,7 @@ function App() {
       setReply={setReply}
       onSendMessage={sendMessage}
       onRefresh={fetchConversations}
-      aiSuggestion={aiSuggestion}
+      quickReplySuggestions={quickReplySuggestions}
       isAiLoading={isAiLoading}
       onGetAiSuggestion={handleGetAiSuggestion}
       isConnected={isConnected}
