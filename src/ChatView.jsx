@@ -10,24 +10,44 @@ const classifyPlatform = (raw) => {
   return 'other';
 };
 
-const PlatformBadge = ({ platform, className = '' }) => {
+const PlatformBadge = ({
+  platform,
+  size = 'md',
+  className = '',
+}) => {
   const kind = classifyPlatform(platform);
+  const dim =
+    size === 'sm'
+      ? 'h-[18px] min-w-[18px] px-0 text-[9px] leading-none'
+      : 'h-6 w-6 min-w-[24px] text-[10px]';
   if (kind === 'whatsapp') {
     return (
-      <span title="WhatsApp" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-500 text-[10px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+      <span
+        title="WhatsApp"
+        className={`inline-flex items-center justify-center rounded-full bg-green-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+        aria-hidden
+      >
         W
       </span>
     );
   }
   if (kind === 'instagram') {
     return (
-      <span title="Instagram" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-pink-500 text-[10px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+      <span
+        title="Instagram"
+        className={`inline-flex items-center justify-center rounded-full bg-pink-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+        aria-hidden
+      >
         I
       </span>
     );
   }
   return (
-    <span title="Canal desconocido" className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-400 text-[9px] font-bold text-white shadow-sm shrink-0 ${className}`} aria-hidden>
+    <span
+      title="Canal desconocido"
+      className={`inline-flex items-center justify-center rounded-full bg-gray-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+      aria-hidden
+    >
       ?
     </span>
   );
@@ -127,12 +147,12 @@ function ChatView({
         <div className="flex-1 overflow-y-auto">
           {filteredContacts.map((contact) => (
             <div key={contact.id} onClick={() => setSelectedConvId(contact.id)} className={`p-4 cursor-pointer border-b transition flex items-center space-x-3 ${selectedConvId === contact.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : 'hover:bg-gray-50'}`}>
-              <div className="relative shrink-0">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-md text-lg">
+              <div className="relative shrink-0 h-12 w-12">
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-lg font-bold text-white shadow-md">
                   {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
                 </div>
-                <div className="absolute -bottom-0.5 -right-0.5 ring-2 ring-white rounded-full">
-                  <PlatformBadge platform={contact.platform} className="!w-5 !h-5 !text-[9px]" />
+                <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white">
+                  <PlatformBadge platform={contact.platform} size="sm" />
                 </div>
               </div>
               <div className="flex-1 min-w-0">
@@ -157,10 +177,12 @@ function ChatView({
             {/* Header Chat */}
             <div className="p-4 border-b shadow-sm font-semibold bg-white flex justify-between items-center z-10">
               <div className="flex items-center space-x-3">
-                <div className="relative">
-                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold border border-blue-200">{selectedUserName?.charAt(0).toUpperCase()}</div>
-                  <div className="absolute -bottom-0.5 -right-0.5 ring-2 ring-white rounded-full">
-                    <PlatformBadge platform={selectedContact?.platform} className="!w-5 !h-5 !text-[9px]" />
+                <div className="relative h-9 w-9 shrink-0">
+                  <div className="flex h-full w-full items-center justify-center rounded-full border border-blue-200 bg-blue-100 text-sm font-bold text-blue-600">
+                    {selectedUserName?.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white">
+                    <PlatformBadge platform={selectedContact?.platform} size="sm" />
                   </div>
                 </div>
                 <div className="flex flex-col min-w-0">
