@@ -84,7 +84,7 @@ function App() {
     socket.on('aiSuggestion', (data) => {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
     });
-    socket.on('imageDamageAnalysis', (payload) => {
+    const mergeQuoteIntoMessages = (payload) => {
       if (payload.conversationId !== selectedConvId) {
         fetchConversations();
         return;
@@ -100,13 +100,16 @@ function App() {
             : m,
         ),
       );
-    });
+    };
+    socket.on('draftQuoteReady', mergeQuoteIntoMessages);
+    socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
     return () => { 
       socket.off('connect'); 
       socket.off('disconnect'); 
       socket.off('newMessage'); 
       socket.off('aiSuggestion');
-      socket.off('imageDamageAnalysis');
+      socket.off('draftQuoteReady', mergeQuoteIntoMessages);
+      socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
     };
   }, [selectedConvId]);
 
