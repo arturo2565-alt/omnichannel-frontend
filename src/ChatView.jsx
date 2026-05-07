@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import QuickReplies from './QuickReplies';
 import {
-  PIEZA_DANO_PRICE_MATRIX,
+  AUTO_FIX_BASE_PRICES,
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
@@ -115,6 +115,12 @@ function isPlaceholderPieza(pieza) {
   return String(pieza ?? '')
     .trim()
     .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
+}
+
+function recalcRowPriceFromMatrix(row) {
+  const n = calculateEstimate(row.pieza, row.severidad);
+  if (n <= 0) return row;
+  return { ...row, precioInput: String(Math.round(n)) };
 }
 
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
@@ -765,43 +771,37 @@ function ChatView({
                         </div>
                         <label className="block text-[10px] font-medium text-gray-700">
                           Pieza
-                          <input
-                            list="cotizacion-piezas-datalist"
+                          <select
                             value={row.pieza}
                             onChange={(e) => {
                               const v = e.target.value;
-                              setQuoteRows((prev) =>
-                                prev.map((r) =>
-                                  r.id === row.id ? { ...r, pieza: v } : r,
-                                ),
-                              );
-                              setQuoteFormDirty(true);
                               if (piezaMatrixDebounceRef.current) {
                                 clearTimeout(piezaMatrixDebounceRef.current);
+                                piezaMatrixDebounceRef.current = null;
                               }
-                              piezaMatrixDebounceRef.current = setTimeout(() => {
-                                setQuoteRows((prev) => {
-                                  const cur = prev.find((r) => r.id === row.id);
-                                  if (!cur) return prev;
-                                  const n = calculateEstimate(
-                                    cur.pieza,
-                                    cur.severidad,
-                                  );
-                                  if (n <= 0) return prev;
-                                  return prev.map((r) =>
-                                    r.id === row.id
-                                      ? {
-                                          ...r,
-                                          precioInput: String(Math.round(n)),
-                                        }
-                                      : r,
-                                  );
-                                });
-                              }, 450);
+                              setQuoteFormDirty(true);
+                              setQuoteRows((prev) =>
+                                prev.map((r) =>
+                                  r.id === row.id
+                                    ? recalcRowPriceFromMatrix({
+                                        ...r,
+                                        pieza: v,
+                                      })
+                                    : r,
+                                ),
+                              );
                             }}
                             className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            placeholder="Ej. Fascia, Puerta…"
-                          />
+                          >
+                            <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
+                              {MANUAL_ROW_PLACEHOLDER_PIEZA}
+                            </option>
+                            {AUTO_FIX_BASE_PRICES.map((pr) => (
+                              <option key={pr.pieza} value={pr.pieza}>
+                                {pr.pieza}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                         <label className="mt-2 block text-[10px] font-medium text-gray-700">
                           Severidad
@@ -909,12 +909,6 @@ function ChatView({
                     + Añadir Pieza Manualmente
                   </button>
                 </div>
-                <datalist id="cotizacion-piezas-datalist">
-                  {PIEZA_DANO_PRICE_MATRIX.map((pr) => (
-                    <option key={pr.pieza} value={pr.pieza} />
-                  ))}
-                </datalist>
-
                 <div className="shrink-0 rounded-lg border-2 border-emerald-300 bg-emerald-50 px-3 py-2.5 text-right">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
                     Gran total
