@@ -101,7 +101,8 @@ function ChatView({
   messages, 
   reply, 
   setReply, 
-  onSendMessage, 
+  onSendMessage,
+  onSendQuoteText,
   onRefresh,
   quickReplySuggestions,
   onGetAiSuggestion, 
@@ -125,6 +126,15 @@ function ChatView({
   }, [contacts, platformFilter]);
 
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
+
+  const latestDraftQuote = useMemo(() => {
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const q = list[i]?.draftQuote;
+      if (q && q.formalNarrative) return { messageId: list[i].id, quote: q };
+    }
+    return null;
+  }, [messages]);
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => { scrollToBottom(); }, [messages]);
@@ -159,8 +169,10 @@ function ChatView({
         ))}
       </div>
 
+      {/* 2–4. Bandeja + chat + panel cotización */}
+      <div className="flex min-w-0 flex-1 flex-row">
       {/* 2. LISTA CONTACTOS */}
-      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col shadow-inner">
+      <div className="flex w-[260px] shrink-0 flex-col border-r border-gray-200 bg-white shadow-inner xl:w-[280px]">
         <div className="border-b bg-white sticky top-0 z-10 shadow-sm">
           <div className="p-4 pb-3 font-bold text-xl flex justify-between items-center">
             <span>Bandeja</span>
@@ -214,8 +226,9 @@ function ChatView({
         </div>
       </div>
 
-      {/* 3. VENTANA CHAT */}
-      <div className="flex-1 flex flex-col bg-white">
+      {/* 3. VENTANA CHAT + 4. PANEL COTIZACIÓN */}
+      <div className="flex min-w-0 flex-1 flex-row">
+      <div className="flex min-w-0 flex-1 flex-col border-r border-gray-200 bg-white">
         {selectedConvId ? (
           <>
             {/* Header Chat */}
@@ -317,6 +330,7 @@ function ChatView({
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && !filePreviewUrl && onSendMessage()}
+                  id="chat-reply-input"
                   disabled={!!filePreviewUrl || isSending}
                   className={`flex-1 border border-gray-200 rounded-full px-5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-400 transition-all bg-white shadow-inner ${filePreviewUrl ? 'bg-gray-100 text-gray-400 italic' : ''}`} 
                   placeholder={filePreviewUrl ? "Imagen lista. Haz clic en Enviar ->" : `Responder a ${selectedUserName}...`} 
@@ -341,10 +355,96 @@ function ChatView({
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-400 text-center bg-gray-50">
-            <div><div className="text-8xl mb-4 opacity-10">💬</div><p className="text-xl font-semibold text-gray-400">Bandeja de Entrada</p><p className="text-sm opacity-60">Selecciona un chat para empezar a gestionar</p></div>
+          <div className="flex flex-1 items-center justify-center bg-gray-50 text-center text-gray-400">
+            <div><div className="mb-4 text-8xl opacity-10">💬</div><p className="text-xl font-semibold text-gray-400">Bandeja de Entrada</p><p className="text-sm opacity-60">Selecciona un chat para empezar a gestionar</p></div>
           </div>
         )}
+      </div>
+
+      {/* 4. Panel de Cotización */}
+      <aside className="flex w-[min(100%,360px)] shrink-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner">
+        <div className="border-b border-gray-200 bg-white px-4 py-3">
+          <h2 className="text-sm font-bold tracking-tight text-gray-900">Panel de Cotización</h2>
+          <p className="mt-0.5 text-[10px] text-gray-500">Borrador generado por IA · requiere tu validación</p>
+        </div>
+        <div className="flex flex-1 flex-col overflow-hidden p-3">
+          {!selectedConvId ? (
+            <p className="text-center text-xs text-gray-500">Selecciona una conversación para ver cotizaciones de este chat.</p>
+          ) : !latestDraftQuote ? (
+            <div className="rounded-lg border border-dashed border-gray-300 bg-white/80 p-4 text-center text-xs text-gray-500">
+              Aquí aparecerá la cotización cuando el sistema analice una imagen (daños / taller) en este chat.
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                  {latestDraftQuote.quote.status === 'PENDING_APPROVAL' ? 'Pendiente de aprobación' : latestDraftQuote.quote.status}
+                </span>
+                {latestDraftQuote.quote.reference ? (
+                  <span className="text-[10px] text-gray-500">{latestDraftQuote.quote.reference}</span>
+                ) : null}
+              </div>
+              {Array.isArray(latestDraftQuote.quote.lines) && latestDraftQuote.quote.lines.length > 0 ? (
+                <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
+                  <table className="w-full text-left">
+                    <thead className="sticky top-0 bg-gray-100 text-[9px] uppercase text-gray-600">
+                      <tr>
+                        <th className="px-2 py-1.5">Concepto</th>
+                        <th className="px-2 py-1.5 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {latestDraftQuote.quote.lines.map((line, idx) => (
+                        <tr key={idx} className="border-t border-gray-100">
+                          <td className="px-2 py-1.5 text-gray-800">{line.description}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-gray-900">
+                            {line.quantity}×{Number(line.unitPrice).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })}
+                            <br />
+                            <span className="text-[10px] text-gray-500">{Number(line.subtotal).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="border-t border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-xs font-bold text-gray-900">
+                    Total:{' '}
+                    {Number(latestDraftQuote.quote.total ?? latestDraftQuote.quote.subtotal ?? 0).toLocaleString('es-MX', {
+                      style: 'currency',
+                      currency: 'MXN',
+                      maximumFractionDigits: 0,
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
+                <pre className="whitespace-pre-wrap font-sans">{latestDraftQuote.quote.formalNarrative}</pre>
+              </div>
+              <div className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gray-200 pt-3">
+                <button
+                  type="button"
+                  disabled={isSending}
+                  onClick={() => onSendQuoteText?.(latestDraftQuote.quote.formalNarrative)}
+                  className="rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Autorizar y Enviar
+                </button>
+                <button
+                  type="button"
+                  disabled={isSending}
+                  onClick={() => {
+                    setReply(latestDraftQuote.quote.formalNarrative);
+                    document.getElementById('chat-reply-input')?.focus?.();
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Corregir
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+      </div>
       </div>
     </div>
   );

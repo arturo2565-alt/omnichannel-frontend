@@ -84,11 +84,29 @@ function App() {
     socket.on('aiSuggestion', (data) => {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
     });
+    socket.on('imageDamageAnalysis', (payload) => {
+      if (payload.conversationId !== selectedConvId) {
+        fetchConversations();
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === payload.messageId
+            ? {
+                ...m,
+                damageAnalysis: payload.damageAnalysis ?? m.damageAnalysis,
+                draftQuote: payload.draftQuote ?? m.draftQuote,
+              }
+            : m,
+        ),
+      );
+    });
     return () => { 
       socket.off('connect'); 
       socket.off('disconnect'); 
       socket.off('newMessage'); 
-      socket.off('aiSuggestion'); 
+      socket.off('aiSuggestion');
+      socket.off('imageDamageAnalysis');
     };
   }, [selectedConvId]);
 
@@ -117,11 +135,20 @@ function App() {
   };
 
   // --- 🌟 FUNCIÓN MAESTRA DE ENVÍO ACTUALIZADA 🌟 ---
-  const sendMessage = async () => {
-    if ((!reply.trim() && !selectedFile) || !selectedConvId || isSending) return;
+  /** @param {string|undefined} textOverride Si se pasa, se envía ese texto (p. ej. cotización) en lugar de `reply`. */
+  const sendMessage = async (textOverride) => {
+    const textFromInput = reply.trim();
+    const textFromOverride =
+      textOverride !== undefined && textOverride !== null
+        ? String(textOverride).trim()
+        : '';
+    const useOverride = textFromOverride.length > 0;
+    const textContent = useOverride ? textFromOverride : textFromInput;
+
+    if ((!textContent && !selectedFile) || !selectedConvId || isSending) return;
 
     setIsSending(true);
-    let finalContent = reply;
+    let finalContent = textContent;
 
     try {
       // --- BLOQUE DE SUBIDA CON LOG DE ERRORES ---
@@ -165,7 +192,7 @@ function App() {
         body: JSON.stringify(newMessage),
       });
 
-      setReply("");
+      if (!useOverride) setReply("");
       handleClearFile();
       setAiSuggestion(null);
 
@@ -205,7 +232,8 @@ function App() {
       messages={messages}
       reply={reply}
       setReply={setReply}
-      onSendMessage={sendMessage}
+      onSendMessage={() => sendMessage()}
+      onSendQuoteText={(text) => sendMessage(text)}
       onRefresh={fetchConversations}
       quickReplySuggestions={quickReplySuggestions}
       isAiLoading={isAiLoading}
