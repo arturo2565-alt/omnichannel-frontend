@@ -100,6 +100,7 @@ function App() {
             : m,
         ),
       );
+      fetchConversations();
     };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
@@ -139,7 +140,11 @@ function App() {
 
   // --- 🌟 FUNCIÓN MAESTRA DE ENVÍO ACTUALIZADA 🌟 ---
   /** @param {string|undefined} textOverride Si se pasa, se envía ese texto (p. ej. cotización) en lugar de `reply`. */
-  const sendMessage = async (textOverride) => {
+  /**
+   * @param {object} [sendOptions]
+   * @param {'cotizado'} [sendOptions.conversationLeadStatus] Marca el lead al enviar cotización final.
+   */
+  const sendMessage = async (textOverride, sendOptions = {}) => {
     const textFromInput = reply.trim();
     /** `.trim()` solo quita espacios al inicio/final; preserva `\n` internos (p. ej. plantilla de cotización). */
     const textFromOverride =
@@ -187,7 +192,10 @@ function App() {
         user: 'Arturo (Agente)',
         id: currentConv?.externalId,
         conversationId: selectedConvId,
-        direction: 'outbound'
+        direction: 'outbound',
+        ...(sendOptions?.conversationLeadStatus === 'cotizado'
+          ? { conversationLeadStatus: 'cotizado' }
+          : {}),
       };
 
       await fetch(API_BASE_URL, {
@@ -252,7 +260,7 @@ function App() {
       reply={reply}
       setReply={setReply}
       onSendMessage={() => sendMessage()}
-      onSendQuoteText={(text) => sendMessage(text)}
+      onSendQuoteText={(text, opts) => sendMessage(text, opts ?? {})}
       onRefresh={fetchConversations}
       quickReplySuggestions={quickReplySuggestions}
       isAiLoading={isAiLoading}

@@ -105,6 +105,44 @@ const getPreviewText = (content) => {
   return content;
 };
 
+/** Alinea con backend `Conversation.status` (compat. `open` legado). */
+function normalizeConversationLeadStatus(raw) {
+  const s = String(raw ?? '').toLowerCase().trim();
+  if (['nuevo', 'por_cotizar', 'cotizado', 'agendado'].includes(s)) return s;
+  if (s === 'open' || s === 'closed') return 'nuevo';
+  return 'nuevo';
+}
+
+const LeadStatusBadge = ({ status }) => {
+  const st = normalizeConversationLeadStatus(status);
+  const map = {
+    por_cotizar: {
+      label: 'Por cotizar',
+      className: 'bg-red-100 text-red-800 border-red-200',
+    },
+    cotizado: {
+      label: 'Cotizado',
+      className: 'bg-blue-100 text-blue-800 border-blue-200',
+    },
+    agendado: {
+      label: 'Agendado',
+      className: 'bg-green-100 text-green-800 border-green-200',
+    },
+    nuevo: {
+      label: 'Nuevo',
+      className: 'bg-gray-100 text-gray-600 border-gray-200',
+    },
+  };
+  const cfg = map[st] ?? map.nuevo;
+  return (
+    <span
+      className={`mt-0.5 inline-flex w-fit max-w-full items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${cfg.className}`}
+    >
+      {cfg.label}
+    </span>
+  );
+};
+
 const SEVERIDAD_LABELS = {
   DL: 'DL — Leve',
   DML: 'DML — Menor',
@@ -244,6 +282,30 @@ function ChatView({
     if (platformFilter === 'all') return contacts;
     return contacts.filter((c) => classifyPlatform(c.platform) === platformFilter);
   }, [contacts, platformFilter]);
+
+  /** Urgencia primero: `por_cotizar`, luego el resto por actividad reciente. */
+  const sortedBandejaContacts = useMemo(() => {
+    const list = [...filteredContacts];
+    list.sort((a, b) => {
+      const sa = normalizeConversationLeadStatus(a.status);
+      const sb = normalizeConversationLeadStatus(b.status);
+      const rank = (x) => (x === 'por_cotizar' ? 0 : 1);
+      const d = rank(sa) - rank(sb);
+      if (d !== 0) return d;
+      const ta = new Date(a.lastMessageAt ?? 0).getTime();
+      const tb = new Date(b.lastMessageAt ?? 0).getTime();
+      return tb - ta;
+    });
+    return list;
+  }, [filteredContacts]);
+
+  const pendingPorCotizarCount = useMemo(
+    () =>
+      contacts.filter(
+        (c) => normalizeConversationLeadStatus(c.status) === 'por_cotizar',
+      ).length,
+    [contacts],
+  );
 
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
 
@@ -545,7 +607,9 @@ function ChatView({
     try {
       const entity = await persistDraftQuotePatch();
       const mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
-      await onSendQuoteText?.(mensajeCliente);
+      await onSendQuoteText?.(mensajeCliente, {
+        conversationLeadStatus: 'cotizado',
+      });
     } catch (e) {
       if (e.message !== 'bad price' && e.message !== 'bad pieza') {
         setQuoteSaveError(e.message || 'Error al enviar la cotización');
@@ -579,9 +643,9 @@ function ChatView({
 
   useEffect(() => {
     if (!selectedConvId || platformFilter === 'all') return;
-    const visible = filteredContacts.some((c) => c.id === selectedConvId);
+    const visible = sortedBandejaContacts.some((c) => c.id === selectedConvId);
     if (!visible) setSelectedConvId(null);
-  }, [filteredContacts, platformFilter, selectedConvId, setSelectedConvId]);
+  }, [sortedBandejaContacts, platformFilter, selectedConvId, setSelectedConvId]);
 
   return (
     <div className="flex h-screen bg-gray-100 text-gray-900 overflow-hidden font-sans">
@@ -612,7 +676,19 @@ function ChatView({
       {/* 2. LISTA CONTACTOS */}
       <div className="flex w-[260px] shrink-0 flex-col border-r border-gray-200 bg-white shadow-inner xl:w-[280px]">
         <div className="border-b bg-white sticky top-0 z-10 shadow-sm">
-          <div className="p-4 pb-3 font-bold text-xl flex justify-between items-center">
+          {pendingPorCotizarCount > 0 ? (
+            <div className="border-b border-red-100 px-4 pt-3 pb-2 bg-red-50/30">
+              <p
+                role="status"
+                className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[11px] font-medium leading-snug text-red-900"
+              >
+                {pendingPorCotizarCount === 1
+                  ? 'Tienes 1 cotización pendiente de revisión.'
+                  : `Tienes ${pendingPorCotizarCount} cotizaciones pendientes de revisión.`}
+              </p>
+            </div>
+          ) : null}
+          <div className={`p-4 pb-3 font-bold text-xl flex justify-between items-center ${pendingPorCotizarCount === 0 ? 'pt-3' : 'pt-2'}`}>
             <span>Bandeja</span>
             <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
           </div>
@@ -639,9 +715,25 @@ function ChatView({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {filteredContacts.map((contact) => (
-            <div key={contact.id} onClick={() => setSelectedConvId(contact.id)} className={`p-4 cursor-pointer border-b transition flex items-center space-x-3 ${selectedConvId === contact.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : 'hover:bg-gray-50'}`}>
-              <div className="relative shrink-0 h-12 w-12">
+          {sortedBandejaContacts.map((contact) => {
+            const leadSt = normalizeConversationLeadStatus(contact.status);
+            const isUrgent = leadSt === 'por_cotizar';
+            const isSelected = selectedConvId === contact.id;
+            return (
+            <div
+              key={contact.id}
+              onClick={() => setSelectedConvId(contact.id)}
+              className={`flex cursor-pointer items-start space-x-3 border-b p-4 transition ${
+                isSelected
+                  ? 'bg-blue-50 border-r-4 border-r-blue-500'
+                  : 'hover:bg-gray-50'
+              } ${
+                isUrgent
+                  ? 'border-l-[3px] border-l-red-500 bg-red-50/55 ring-1 ring-inset ring-red-100'
+                  : ''
+              }`}
+            >
+              <div className="relative h-12 w-12 shrink-0">
                 <div className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-lg font-bold text-white shadow-md">
                   {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
                 </div>
@@ -649,18 +741,22 @@ function ChatView({
                   <PlatformBadge platform={contact.platform} size="sm" />
                 </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-baseline">
-                  <p className="font-bold text-gray-800 truncate">{contact.contactName}</p>
-                  <span className="text-[10px] text-gray-400 ml-2 shrink-0">{contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-1">
+                  <p className="truncate font-bold text-gray-800">{contact.contactName}</p>
+                  <span className="ml-2 shrink-0 text-[10px] text-gray-400">
+                    {contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                  </span>
                 </div>
-                <p className="text-xs text-gray-500 truncate mt-1 italic">
-                  {contact.direction === 'outbound' ? <span className="text-blue-500 font-medium">Tú: </span> : ''}
+                <LeadStatusBadge status={contact.status} />
+                <p className="mt-1 truncate text-xs italic text-gray-500">
+                  {contact.direction === 'outbound' ? <span className="font-medium text-blue-500">Tú: </span> : ''}
                   {getPreviewText(contact.lastMessage)}
                 </p>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
 
