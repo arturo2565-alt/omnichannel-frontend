@@ -108,6 +108,17 @@ const SEVERIDAD_LABELS = {
   DMFuerte: 'DMFuerte — Muy grave',
 };
 
+/** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
+function urlsFromInventoryItem(it) {
+  if (Array.isArray(it?.urls_origen) && it.urls_origen.length > 0) {
+    return [...it.urls_origen];
+  }
+  if (Array.isArray(it?.urls_asociadas) && it.urls_asociadas.length > 0) {
+    return [...it.urls_asociadas];
+  }
+  return [];
+}
+
 function parsePrecioInput(raw) {
   const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/,/g, '');
   const n = Number(s);
@@ -165,19 +176,26 @@ function ChatView({
   }, [messages, latestDraftQuote?.messageId]);
 
   const [conversationDraftRows, setConversationDraftRows] = useState([]);
-  /** Una fila por pieza: pieza, severidad, precio editable, URLs para galería */
+  /** Una fila por daño/pieza: pieza, severidad, precio editable, URLs para mini galería */
   const [quoteRows, setQuoteRows] = useState([]);
-  const [selectedRowIndex, setSelectedRowIndex] = useState(0);
   const [quoteFormDirty, setQuoteFormDirty] = useState(false);
   const [quoteSaveError, setQuoteSaveError] = useState('');
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
   const piezaMatrixDebounceRef = useRef(null);
 
-  const activeDraftRow = useMemo(() => {
-    if (!latestDraftQuote?.messageId || !Array.isArray(conversationDraftRows)) return null;
+  /** Borrador de sesión: prioriza fila cuyo messageId coincide con el mensaje que muestra la cotización; si no, el más reciente del API. */
+  const activeDraftForPanel = useMemo(() => {
+    if (!Array.isArray(conversationDraftRows) || conversationDraftRows.length === 0) {
+      return null;
+    }
+    if (!latestDraftQuote?.messageId) {
+      return conversationDraftRows[0] ?? null;
+    }
     return (
-      conversationDraftRows.find((r) => r.messageId === latestDraftQuote.messageId) ?? null
+      conversationDraftRows.find((r) => r.messageId === latestDraftQuote.messageId) ??
+      conversationDraftRows[0] ??
+      null
     );
   }, [conversationDraftRows, latestDraftQuote?.messageId]);
 
@@ -201,7 +219,13 @@ function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [selectedConvId, apiBaseUrl, latestDraftQuote?.messageId]);
+  }, [
+    selectedConvId,
+    apiBaseUrl,
+    latestDraftQuote?.messageId,
+    latestDraftQuote?.quote?.total,
+    latestDraftQuote?.quote?.subtotal,
+  ]);
 
   const quoteSyncKey = useMemo(() => {
     if (!latestDraftQuote?.quote) return '';
@@ -218,8 +242,19 @@ function ChatView({
     const linesKey = JSON.stringify(
       (q.lines ?? []).map((l) => Number(l.subtotal ?? 0)),
     );
-    return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}`;
-  }, [latestDraftQuote, latestQuoteMessage]);
+    const bkItems = activeDraftForPanel?.items;
+    const itemsKey =
+      Array.isArray(bkItems) && bkItems.length > 0
+        ? [...bkItems]
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map(
+              (it) =>
+                `${it.id ?? ''}:${it.pieza}:${it.severidad}:${it.precioMx}`,
+            )
+            .join('|')
+        : '';
+    return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}|bk:${itemsKey}|dk:${activeDraftForPanel?.id ?? ''}`;
+  }, [latestDraftQuote, latestQuoteMessage, activeDraftForPanel]);
 
   useEffect(() => {
     if (!latestDraftQuote?.quote) return;
@@ -238,8 +273,41 @@ function ChatView({
         ? [latestQuoteMessage.content]
         : [];
 
-    if (inv?.length) {
-      const lines = q.lines ?? [];
+    const lines = q.lines ?? [];
+    const backendItems = activeDraftForPanel?.items;
+
+    /** Prioridad 1: filas relacionales del backend (`DraftQuoteItem`). */
+    if (Array.isArray(backendItems) && backendItems.length > 0) {
+      const sorted = [...backendItems].sort(
+        (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+      );
+      const rows = sorted.map((it, idx) => {
+        const rawSev = String(it.severidad ?? 'DM');
+        const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
+          ? rawSev
+          : coerceDamageLevelCode(rawSev);
+        let precio = Number(it.precioMx ?? 0);
+        const lineAt = lines[idx];
+        if (
+          lineAt &&
+          Number.isFinite(Number(lineAt.subtotal)) &&
+          sorted.length === lines.length
+        ) {
+          precio = Number(lineAt.subtotal);
+        }
+        const urlsRaw = Array.isArray(it.urlsOrigen) ? it.urlsOrigen : [];
+        let urls = urlsRaw.map(String).filter(Boolean);
+        if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
+        return {
+          id: it.id ? String(it.id) : `row-be-${idx}-${String(it.pieza).slice(0, 20)}`,
+          pieza: it.pieza ?? '',
+          severidad: code,
+          precioInput: String(Math.round(precio)),
+          urls_origen: urls,
+        };
+      });
+      setQuoteRows(rows);
+    } else if (inv?.length) {
       const rows = inv.map((it, idx) => {
         const rawSev = String(it.severidad ?? 'DM');
         const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
@@ -247,21 +315,21 @@ function ChatView({
           : coerceDamageLevelCode(rawSev);
         let precio = calculateEstimate(it.pieza, code);
         const lineAt = lines[idx];
-        if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
+        if (
+          lineAt &&
+          Number.isFinite(Number(lineAt.subtotal)) &&
+          inv.length === lines.length
+        ) {
           precio = Number(lineAt.subtotal);
         }
-        const urls =
-          Array.isArray(it.urls_asociadas) && it.urls_asociadas.length > 0
-            ? [...it.urls_asociadas]
-            : idx === 0 && msgImg.length
-              ? [...msgImg]
-              : [];
+        let urls = urlsFromInventoryItem(it);
+        if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
         return {
           id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
           pieza: it.pieza ?? '',
           severidad: code,
           precioInput: String(Math.round(precio)),
-          urls_asociadas: urls,
+          urls_origen: urls,
         };
       });
       setQuoteRows(rows);
@@ -278,11 +346,10 @@ function ChatView({
           precioInput: String(
             Math.round(Number(q.total ?? q.subtotal ?? 0)),
           ),
-          urls_asociadas: msgImg,
+          urls_origen: msgImg,
         },
       ]);
     }
-    setSelectedRowIndex(0);
     setQuoteFormDirty(false);
     setQuoteSaveError('');
   }, [quoteSyncKey]);
@@ -291,18 +358,6 @@ function ChatView({
     return () => {
       if (piezaMatrixDebounceRef.current) clearTimeout(piezaMatrixDebounceRef.current);
     };
-  }, []);
-
-  const applyMatrixToRow = useCallback((rowId, piezaVal, severidadVal) => {
-    const suggested = calculateEstimate(piezaVal, severidadVal);
-    if (suggested <= 0) return;
-    setQuoteRows((prev) =>
-      prev.map((r) =>
-        r.id === rowId
-          ? { ...r, precioInput: String(Math.round(suggested)) }
-          : r,
-      ),
-    );
   }, []);
 
   const granTotalPanel = useMemo(
@@ -315,7 +370,7 @@ function ChatView({
   );
 
   const persistDraftQuotePatch = useCallback(async () => {
-    if (!apiBaseUrl || !activeDraftRow?.id) {
+    if (!apiBaseUrl || !activeDraftForPanel?.id) {
       const msg =
         'Aún no se puede guardar: espera a cargar el borrador o recarga la conversación.';
       setQuoteSaveError(msg);
@@ -325,7 +380,7 @@ function ChatView({
       pieza: r.pieza.trim(),
       severidad: r.severidad,
       precioMx: parsePrecioInput(r.precioInput),
-      urls_asociadas: r.urls_asociadas,
+      urls_origen: r.urls_origen ?? [],
     }));
     for (let i = 0; i < linesPayload.length; i++) {
       const L = linesPayload[i];
@@ -339,7 +394,7 @@ function ChatView({
       }
     }
     setQuoteSaveError('');
-    const res = await fetch(`${apiBaseUrl}/quote/${activeDraftRow.id}`, {
+    const res = await fetch(`${apiBaseUrl}/quote/${activeDraftForPanel.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ inventoryLines: linesPayload }),
@@ -356,7 +411,7 @@ function ChatView({
     });
     setQuoteFormDirty(false);
     return entity;
-  }, [apiBaseUrl, activeDraftRow?.id, quoteRows, onDraftQuotePatched]);
+  }, [apiBaseUrl, activeDraftForPanel?.id, quoteRows, onDraftQuotePatched]);
 
   const handleGuardarCambios = async () => {
     setIsSavingQuote(true);
@@ -639,43 +694,29 @@ function ChatView({
                 ) : null}
               </div>
 
-              <div className="mb-3 flex max-h-[min(72vh,520px)] shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex max-h-[min(78vh,640px)] min-h-0 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                 <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Piezas y precios (cada pieza tiene severidad y precio propios)
+                  Daños detectados ({quoteRows.length}) — editable por pieza
                 </p>
-                <div className="min-h-0 max-h-[220px] space-y-2 overflow-y-auto pr-0.5">
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
                   {quoteRows.map((row, idx) => {
-                    const selected = idx === selectedRowIndex;
+                    const thumbs = row.urls_origen ?? [];
                     return (
                       <div
                         key={row.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedRowIndex(idx)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setSelectedRowIndex(idx);
-                          }
-                        }}
-                        className={`rounded-lg border p-2.5 text-left transition ${
-                          selected
-                            ? 'border-indigo-500 bg-indigo-50/80 ring-1 ring-indigo-400'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
+                        className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm"
                       >
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-bold text-gray-600">
-                            Pieza {idx + 1}
-                            {quoteRows.length > 1 ? ` · ${row.pieza || '…'}` : ''}
+                        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200/80 pb-2">
+                          <span className="text-[11px] font-bold text-slate-800">
+                            Daño {idx + 1}
                           </span>
-                          {quoteRows.length > 1 ? (
-                            <span className="text-[9px] text-indigo-600">
-                              {selected ? 'Seleccionada' : 'Toca para fotos'}
+                          {row.pieza ? (
+                            <span className="truncate text-[10px] font-medium text-slate-500 max-w-[60%]" title={row.pieza}>
+                              {row.pieza}
                             </span>
                           ) : null}
                         </div>
-                        <label className="block text-[10px] font-medium text-gray-600">
+                        <label className="block text-[10px] font-medium text-gray-700">
                           Pieza
                           <input
                             list="cotizacion-piezas-datalist"
@@ -711,12 +752,11 @@ function ChatView({
                                 });
                               }, 450);
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             placeholder="Ej. Fascia, Puerta…"
                           />
                         </label>
-                        <label className="mt-2 block text-[10px] font-medium text-gray-600">
+                        <label className="mt-2 block text-[10px] font-medium text-gray-700">
                           Severidad
                           <select
                             value={row.severidad}
@@ -726,16 +766,20 @@ function ChatView({
                                 clearTimeout(piezaMatrixDebounceRef.current);
                                 piezaMatrixDebounceRef.current = null;
                               }
-                              setQuoteRows((prev) =>
-                                prev.map((r) =>
-                                  r.id === row.id ? { ...r, severidad: v } : r,
-                                ),
-                              );
                               setQuoteFormDirty(true);
-                              applyMatrixToRow(row.id, row.pieza, v);
+                              setQuoteRows((prev) =>
+                                prev.map((r) => {
+                                  if (r.id !== row.id) return r;
+                                  const suggested = calculateEstimate(r.pieza, v);
+                                  const precioInput =
+                                    suggested > 0
+                                      ? String(Math.round(suggested))
+                                      : r.precioInput;
+                                  return { ...r, severidad: v, precioInput };
+                                }),
+                              );
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
                             {DAMAGE_LEVEL_KEYS.map((k) => (
                               <option key={k} value={k}>
@@ -744,8 +788,11 @@ function ChatView({
                             ))}
                           </select>
                         </label>
-                        <label className="mt-2 block text-[10px] font-medium text-gray-600">
+                        <label className="mt-2 block text-[10px] font-medium text-gray-700">
                           Precio (MXN)
+                          <span className="ml-1 font-normal text-gray-400">
+                            — editable (redondeo / descuento)
+                          </span>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -759,11 +806,41 @@ function ChatView({
                               );
                               setQuoteFormDirty(true);
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             placeholder="0"
                           />
                         </label>
+
+                        <div className="mt-2.5 rounded-md border border-dashed border-slate-200 bg-white px-2 py-1.5">
+                          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                            Fotos (evidencia)
+                          </p>
+                          {thumbs.length > 0 ? (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {thumbs.map((url) => (
+                                <button
+                                  key={url}
+                                  type="button"
+                                  title="Abrir imagen"
+                                  onClick={() =>
+                                    window.open(url, '_blank', 'noopener,noreferrer')
+                                  }
+                                  className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
+                                >
+                                  <img
+                                    src={url}
+                                    alt=""
+                                    className="h-12 w-12 object-cover"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-0.5 text-[9px] italic text-gray-400">
+                              Sin fotos vinculadas a este daño.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -774,70 +851,23 @@ function ChatView({
                   ))}
                 </datalist>
 
-                {(() => {
-                  const i = Math.min(
-                    selectedRowIndex,
-                    Math.max(0, quoteRows.length - 1),
-                  );
-                  const sel = quoteRows[i];
-                  const thumbs = sel?.urls_asociadas ?? [];
-                  return (
-                    <div className="shrink-0 rounded-md border border-dashed border-gray-200 bg-slate-50/90 p-2">
-                      <p className="mb-1.5 text-[10px] font-semibold text-gray-600">
-                        Fotos de la pieza seleccionada
-                        {sel?.pieza ? (
-                          <span className="font-normal text-gray-500">
-                            {' '}
-                            — {sel.pieza}
-                          </span>
-                        ) : null}
-                      </p>
-                      {thumbs.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {thumbs.map((url) => (
-                            <button
-                              key={url}
-                              type="button"
-                              title="Abrir imagen"
-                              onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                              className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
-                            >
-                              <img
-                                src={url}
-                                alt=""
-                                className="h-14 w-14 object-cover sm:h-16 sm:w-16"
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] italic text-gray-400">
-                          No hay URLs vinculadas a esta pieza en el inventario. Si
-                          solo hay una imagen en el chat, suele asociarse a la
-                          primera pieza.
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                <div className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-right">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-800">
-                    Gran total (panel)
+                <div className="shrink-0 rounded-lg border-2 border-emerald-300 bg-emerald-50 px-3 py-2.5 text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
+                    Gran total
                   </p>
-                  <p className="text-lg font-bold tabular-nums text-emerald-900">
+                  <p className="text-xl font-bold tabular-nums text-emerald-950">
                     {granTotalPanel.toLocaleString('es-MX', {
                       style: 'currency',
                       currency: 'MXN',
                       maximumFractionDigits: 0,
                     })}
                   </p>
-                  <p className="text-[9px] text-emerald-700/90">
-                    Suma de todas las piezas · se envía al guardar
+                  <p className="text-[9px] text-emerald-800/90">
+                    Suma de todos los precios de la lista
                   </p>
                 </div>
 
-                {!activeDraftRow?.id ? (
+                {!activeDraftForPanel?.id ? (
                   <p className="text-[10px] text-amber-800">
                     Obteniendo enlace del borrador en el servidor…
                   </p>
@@ -889,7 +919,7 @@ function ChatView({
                     isSending ||
                     isSavingQuote ||
                     isSendingFinalQuote ||
-                    !activeDraftRow?.id
+                    !activeDraftForPanel?.id
                   }
                   onClick={handleGuardarCambios}
                   className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -902,7 +932,7 @@ function ChatView({
                     isSending ||
                     isSavingQuote ||
                     isSendingFinalQuote ||
-                    !activeDraftRow?.id
+                    !activeDraftForPanel?.id
                   }
                   onClick={handleEnviarCotizacionFinal}
                   className="w-full rounded-xl bg-emerald-600 px-4 py-4 text-base font-bold text-white shadow-lg transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
