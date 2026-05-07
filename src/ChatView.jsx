@@ -162,6 +162,55 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+/** Mapa Google del taller (`VITE_WORKSHOP_MAPS_URL` en `.env`; si no, sustituye la URL aquí). */
+const DEFAULT_WORKSHOP_MAPS_URL =
+  (typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    String(import.meta.env.VITE_WORKSHOP_MAPS_URL || '').trim()) ||
+  'https://goo.gl/maps/tu-ubicacion-real';
+
+function formatMoneyClienteQuoteMxAmount(n) {
+  const rounded = Math.round(Number(n));
+  if (!Number.isFinite(rounded) || rounded < 0) return '0';
+  return rounded.toLocaleString('es-MX', { maximumFractionDigits: 0 });
+}
+
+/**
+ * Mensaje corto para el cliente (webhook/WhatsApp): piezas del panel, total en negritas (* sintaxis típica de WhatsApp).
+ */
+function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_URL) {
+  const sorted = [...(rows ?? [])];
+  const list = sorted
+    .map((r) => {
+      const piezaNombre = String(r.pieza ?? '').trim() || 'Pieza';
+      const n = parsePrecioInput(r.precioInput);
+      const price = Number.isFinite(n) ? Math.max(0, n) : 0;
+      return `• ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
+    })
+    .join('\n');
+
+  const total = sorted.reduce((acc, r) => {
+    const n = parsePrecioInput(r.precioInput);
+    return acc + (Number.isFinite(n) ? Math.max(0, n) : 0);
+  }, 0);
+  const totalFmt = formatMoneyClienteQuoteMxAmount(total);
+
+  const mapLink = String(mapsUrl ?? DEFAULT_WORKSHOP_MAPS_URL).trim();
+
+  return [
+    '👋 Claro, el estimado para tu vehículo es:',
+    '',
+    list,
+    '',
+    `✨ Inversión Total Estimada: *$${totalFmt} MXN*`,
+    '(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens)',
+    '',
+    `📍 Estamos aquí, fácil de llegar: ${mapLink}`,
+    '',
+    '📅 Tenemos 2 espacios esta semana. ¿Te agendamos?',
+  ].join('\n');
+}
+
 function ChatView({ 
   contacts, 
   selectedConvId, 
@@ -409,6 +458,11 @@ function ChatView({
     [quoteRows],
   );
 
+  const mensajeClientePreview = useMemo(
+    () => buildClienteQuoteOutboundMessage(quoteRows),
+    [quoteRows],
+  );
+
   const persistDraftQuotePatch = useCallback(async () => {
     if (!apiBaseUrl || !activeDraftForPanel?.id) {
       const msg =
@@ -490,7 +544,8 @@ function ChatView({
     setQuoteSaveError('');
     try {
       const entity = await persistDraftQuotePatch();
-      await onSendQuoteText?.(entity.quotePayload.formalNarrative);
+      const mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
+      await onSendQuoteText?.(mensajeCliente);
     } catch (e) {
       if (e.message !== 'bad price' && e.message !== 'bad pieza') {
         setQuoteSaveError(e.message || 'Error al enviar la cotización');
@@ -1023,7 +1078,16 @@ function ChatView({
                 </div>
               ) : null}
               <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  Borrador formal (IA)
+                </p>
                 <pre className="whitespace-pre-wrap font-sans">{latestDraftQuote.quote.formalNarrative}</pre>
+              </div>
+              <div className="mt-2 min-h-0 max-h-56 overflow-y-auto rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                  Mensaje al cliente (envío / copiar)
+                </p>
+                <pre className="whitespace-pre-wrap font-sans">{mensajeClientePreview}</pre>
               </div>
               <div className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gray-200 pt-3">
                 <button
@@ -1058,12 +1122,12 @@ function ChatView({
                   type="button"
                   disabled={isSending || isSavingQuote || isSendingFinalQuote}
                   onClick={() => {
-                    setReply(latestDraftQuote.quote.formalNarrative);
+                    setReply(buildClienteQuoteOutboundMessage(quoteRows));
                     document.getElementById('chat-reply-input')?.focus?.();
                   }}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Copiar texto al cuadro de respuesta
+                  Copiar mensaje al cliente al cuadro de respuesta
                 </button>
               </div>
             </>
