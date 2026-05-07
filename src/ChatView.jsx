@@ -8,7 +8,14 @@ const classifyPlatform = (raw) => {
   const s = String(raw).toLowerCase().trim();
   if (s.includes('whatsapp')) return 'whatsapp';
   if (s.includes('instagram')) return 'instagram';
-  if (s.includes('facebook') || s.includes('meta')) return 'facebook';
+  if (
+    s.includes('facebook') ||
+    s.includes('messenger') ||
+    s.includes('fb_') ||
+    s === 'fb'
+  ) {
+    return 'facebook';
+  }
   return 'other';
 };
 
@@ -133,8 +140,23 @@ function ChatView({
       
       {/* 1. SIDEBAR CANALES */}
       <div className="w-20 bg-gray-900 flex flex-col items-center py-4 space-y-4 shadow-xl z-10">
-        <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition shadow-lg">W</div>
-        <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center text-white font-bold cursor-pointer hover:scale-105 transition shadow-lg">I</div>
+        {[
+          { id: 'whatsapp', letter: 'W', className: 'bg-green-500' },
+          { id: 'instagram', letter: 'I', className: 'bg-pink-500' },
+          { id: 'facebook', letter: 'F', className: 'bg-blue-600' },
+        ].map(({ id, letter, className }) => (
+          <button
+            key={id}
+            type="button"
+            title={id === 'whatsapp' ? 'WhatsApp' : id === 'instagram' ? 'Instagram' : 'Facebook'}
+            onClick={() => setPlatformFilter((prev) => (prev === id ? 'all' : id))}
+            className={`flex h-12 w-12 items-center justify-center rounded-full font-bold text-white shadow-lg transition hover:scale-105 ${className} ${
+              platformFilter === id ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-105' : ''
+            }`}
+          >
+            {letter}
+          </button>
+        ))}
       </div>
 
       {/* 2. LISTA CONTACTOS */}
@@ -149,6 +171,7 @@ function ChatView({
               { id: 'all', label: 'Todos' },
               { id: 'whatsapp', label: 'WhatsApp' },
               { id: 'instagram', label: 'Instagram' },
+              { id: 'facebook', label: 'Facebook' },
             ].map(({ id, label }) => (
               <button
                 key={id}
