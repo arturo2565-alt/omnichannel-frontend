@@ -108,6 +108,15 @@ const SEVERIDAD_LABELS = {
   DMFuerte: 'DMFuerte — Muy grave',
 };
 
+/** Valor inicial de pieza en filas añadidas manualmente hasta elegir una de la matriz. */
+const MANUAL_ROW_PLACEHOLDER_PIEZA = 'Seleccionar';
+
+function isPlaceholderPieza(pieza) {
+  return String(pieza ?? '')
+    .trim()
+    .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
+}
+
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
 function urlsFromInventoryItem(it) {
   if (Array.isArray(it?.urls_origen) && it.urls_origen.length > 0) {
@@ -199,32 +208,42 @@ function ChatView({
     );
   }, [conversationDraftRows, latestDraftQuote?.messageId]);
 
+  const refreshConversationDraftQuotes = useCallback(
+    async (signal) => {
+      if (!selectedConvId || !apiBaseUrl) {
+        setConversationDraftRows([]);
+        return;
+      }
+      try {
+        const r = await fetch(
+          `${apiBaseUrl}/conversations/${selectedConvId}/draft-quotes`,
+          signal ? { signal } : {},
+        );
+        const data = r.ok ? await r.json() : [];
+        setConversationDraftRows(Array.isArray(data) ? data : []);
+      } catch (e) {
+        if (signal?.aborted || e?.name === 'AbortError') return;
+        setConversationDraftRows([]);
+      }
+    },
+    [selectedConvId, apiBaseUrl],
+  );
+
   useEffect(() => {
     if (!selectedConvId || !apiBaseUrl) {
       setConversationDraftRows([]);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(
-          `${apiBaseUrl}/conversations/${selectedConvId}/draft-quotes`,
-        );
-        const data = r.ok ? await r.json() : [];
-        if (!cancelled) setConversationDraftRows(Array.isArray(data) ? data : []);
-      } catch {
-        if (!cancelled) setConversationDraftRows([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const ac = new AbortController();
+    void refreshConversationDraftQuotes(ac.signal);
+    return () => ac.abort();
   }, [
     selectedConvId,
     apiBaseUrl,
     latestDraftQuote?.messageId,
     latestDraftQuote?.quote?.total,
     latestDraftQuote?.quote?.subtotal,
+    refreshConversationDraftQuotes,
   ]);
 
   const quoteSyncKey = useMemo(() => {
@@ -388,6 +407,12 @@ function ChatView({
         setQuoteSaveError(`La pieza no puede estar vacía (fila ${i + 1}).`);
         throw new Error('bad pieza');
       }
+      if (isPlaceholderPieza(L.pieza)) {
+        setQuoteSaveError(
+          `Elige una pieza de la lista en la fila ${i + 1} (sustituir "${MANUAL_ROW_PLACEHOLDER_PIEZA}").`,
+        );
+        throw new Error('bad pieza');
+      }
       if (!Number.isFinite(L.precioMx) || L.precioMx < 0) {
         setQuoteSaveError(`Precio inválido en fila ${i + 1} (número ≥ 0).`);
         throw new Error('bad price');
@@ -409,9 +434,17 @@ function ChatView({
       draftQuote: entity.quotePayload,
       damageAnalysis: entity.damageAnalysis,
     });
+    await refreshConversationDraftQuotes();
     setQuoteFormDirty(false);
     return entity;
-  }, [apiBaseUrl, activeDraftForPanel?.id, quoteRows, onDraftQuotePatched]);
+  }, [
+    apiBaseUrl,
+    activeDraftForPanel?.id,
+    quoteRows,
+    onDraftQuotePatched,
+    selectedConvId,
+    refreshConversationDraftQuotes,
+  ]);
 
   const handleGuardarCambios = async () => {
     setIsSavingQuote(true);
@@ -441,6 +474,20 @@ function ChatView({
       setIsSendingFinalQuote(false);
     }
   };
+
+  const handleAddManualPiezaRow = useCallback(() => {
+    setQuoteRows((prev) => [
+      ...prev,
+      {
+        id: `row-manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        pieza: MANUAL_ROW_PLACEHOLDER_PIEZA,
+        severidad: 'DL',
+        precioInput: '0',
+        urls_origen: [],
+      },
+    ]);
+    setQuoteFormDirty(true);
+  }, []);
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => { scrollToBottom(); }, [messages]);
@@ -710,7 +757,7 @@ function ChatView({
                           <span className="text-[11px] font-bold text-slate-800">
                             Daño {idx + 1}
                           </span>
-                          {row.pieza ? (
+                          {row.pieza && !isPlaceholderPieza(row.pieza) ? (
                             <span className="truncate text-[10px] font-medium text-slate-500 max-w-[60%]" title={row.pieza}>
                               {row.pieza}
                             </span>
@@ -844,6 +891,23 @@ function ChatView({
                       </div>
                     );
                   })}
+                  <button
+                    type="button"
+                    disabled={
+                      !activeDraftForPanel?.id ||
+                      isSavingQuote ||
+                      isSendingFinalQuote
+                    }
+                    onClick={handleAddManualPiezaRow}
+                    title={
+                      activeDraftForPanel?.id
+                        ? 'Agregar línea editable con la misma matriz'
+                        : 'Esperando borrador del servidor'
+                    }
+                    className="w-full rounded-lg border border-dashed border-indigo-300 bg-white py-2.5 text-[11px] font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    + Añadir Pieza Manualmente
+                  </button>
                 </div>
                 <datalist id="cotizacion-piezas-datalist">
                   {PIEZA_DANO_PRICE_MATRIX.map((pr) => (
