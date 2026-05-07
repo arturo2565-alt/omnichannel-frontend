@@ -689,15 +689,28 @@ function ChatView({
             </div>
             
             {/* Mensajes Chat */}
-            <div className="flex-1 p-6 bg-[#e5ddd5] overflow-y-auto flex flex-col space-y-3">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`p-3 rounded-2xl shadow-sm max-w-[80%] ${msg.direction === 'inbound' ? 'bg-white self-start text-gray-800 rounded-tl-none' : 'bg-indigo-600 text-white self-end rounded-tr-none'}`}>
+            <div className="flex-1 overflow-y-auto flex flex-col space-y-3 bg-[#e5ddd5] p-6">
+              {messages.map((msg) => {
+                const isOut =
+                  String(msg.direction ?? '').toLowerCase() === 'outbound';
+                return (
+                <div
+                  key={msg.id}
+                  className={`flex w-full shrink-0 ${isOut ? 'justify-end' : 'justify-start'}`}
+                >
+                <div className={`p-3 rounded-2xl shadow-sm max-w-[80%] ${!isOut ? 'bg-white text-gray-800 rounded-tl-none' : 'bg-indigo-600 text-white rounded-tr-none'}`}>
                   {isImage(msg.content) ? (
                     <img src={msg.content} alt="Adjunto" className="rounded-lg max-h-72 object-cover cursor-pointer hover:opacity-95 transition" onClick={() => window.open(msg.content, '_blank')} />
-                  ) : ( <p className="text-sm leading-relaxed">{msg.content}</p> )}
-                  <div className={`text-[9px] mt-1 text-right opacity-60 ${msg.direction === 'inbound' ? 'text-gray-500' : 'text-indigo-100'}`}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                      {msg.content}
+                    </p>
+                  )}
+                  <div className={`text-[9px] mt-1 text-right opacity-60 ${!isOut ? 'text-gray-500' : 'text-indigo-100'}`}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
                 </div>
-              ))}
+                </div>
+              );
+              })}
               <div ref={messagesEndRef} />
             </div>
 

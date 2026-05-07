@@ -141,6 +141,7 @@ function App() {
   /** @param {string|undefined} textOverride Si se pasa, se envía ese texto (p. ej. cotización) en lugar de `reply`. */
   const sendMessage = async (textOverride) => {
     const textFromInput = reply.trim();
+    /** `.trim()` solo quita espacios al inicio/final; preserva `\n` internos (p. ej. plantilla de cotización). */
     const textFromOverride =
       textOverride !== undefined && textOverride !== null
         ? String(textOverride).trim()
