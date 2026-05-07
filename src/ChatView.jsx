@@ -5,7 +5,13 @@ import {
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
+  matchPiezaFromAnalysis,
 } from './autofix-pricing';
+
+/** Nombres canónicos de pieza en la matriz (coinciden con `value` del select). */
+const MATRIX_PIEZA_KEYS = new Set(
+  AUTO_FIX_BASE_PRICES.map((row) => row.pieza),
+);
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
 // Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
@@ -117,10 +123,26 @@ function isPlaceholderPieza(pieza) {
     .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
 }
 
+/** Alinea el texto IA / backend con una fila de la matriz cuando hay match seguro; si no, conserva texto (se muestra como opción extra en el select). */
+function normalizePiezaForPanel(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
+  if (MATRIX_PIEZA_KEYS.has(t)) return t;
+  const canon = matchPiezaFromAnalysis(t);
+  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
+  return t;
+}
+
 function recalcRowPriceFromMatrix(row) {
   const n = calculateEstimate(row.pieza, row.severidad);
   if (n <= 0) return row;
   return { ...row, precioInput: String(Math.round(n)) };
+}
+
+function piezaSelectShowsUnmappedFallback(pieza) {
+  const t = String(pieza ?? '').trim();
+  if (!t || isPlaceholderPieza(t)) return false;
+  return !MATRIX_PIEZA_KEYS.has(t);
 }
 
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
@@ -197,7 +219,6 @@ function ChatView({
   const [quoteSaveError, setQuoteSaveError] = useState('');
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
-  const piezaMatrixDebounceRef = useRef(null);
 
   /** Borrador de sesión: prioriza fila cuyo messageId coincide con el mensaje que muestra la cotización; si no, el más reciente del API. */
   const activeDraftForPanel = useMemo(() => {
@@ -325,7 +346,7 @@ function ChatView({
         if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
         return {
           id: it.id ? String(it.id) : `row-be-${idx}-${String(it.pieza).slice(0, 20)}`,
-          pieza: it.pieza ?? '',
+          pieza: normalizePiezaForPanel(it.pieza ?? ''),
           severidad: code,
           precioInput: String(Math.round(precio)),
           urls_origen: urls,
@@ -351,7 +372,7 @@ function ChatView({
         if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
         return {
           id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
-          pieza: it.pieza ?? '',
+          pieza: normalizePiezaForPanel(it.pieza ?? ''),
           severidad: code,
           precioInput: String(Math.round(precio)),
           urls_origen: urls,
@@ -366,7 +387,7 @@ function ChatView({
       setQuoteRows([
         {
           id: 'row-0-single',
-          pieza: basis.pieza ?? '',
+          pieza: normalizePiezaForPanel(basis.pieza ?? ''),
           severidad: code,
           precioInput: String(
             Math.round(Number(q.total ?? q.subtotal ?? 0)),
@@ -378,12 +399,6 @@ function ChatView({
     setQuoteFormDirty(false);
     setQuoteSaveError('');
   }, [quoteSyncKey]);
-
-  useEffect(() => {
-    return () => {
-      if (piezaMatrixDebounceRef.current) clearTimeout(piezaMatrixDebounceRef.current);
-    };
-  }, []);
 
   const granTotalPanel = useMemo(
     () =>
@@ -400,6 +415,10 @@ function ChatView({
         'Aún no se puede guardar: espera a cargar el borrador o recarga la conversación.';
       setQuoteSaveError(msg);
       throw new Error(msg);
+    }
+    if (quoteRows.length === 0) {
+      setQuoteSaveError('Añade al menos una pieza a la cotización.');
+      throw new Error('bad pieza');
     }
     const linesPayload = quoteRows.map((r) => ({
       pieza: r.pieza.trim(),
@@ -492,6 +511,11 @@ function ChatView({
         urls_origen: [],
       },
     ]);
+    setQuoteFormDirty(true);
+  }, []);
+
+  const handleRemoveQuoteRow = useCallback((rowId) => {
+    setQuoteRows((prev) => prev.filter((r) => r.id !== rowId));
     setQuoteFormDirty(true);
   }, []);
 
@@ -759,15 +783,51 @@ function ChatView({
                         key={row.id}
                         className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm"
                       >
-                        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200/80 pb-2">
-                          <span className="text-[11px] font-bold text-slate-800">
-                            Daño {idx + 1}
-                          </span>
-                          {row.pieza && !isPlaceholderPieza(row.pieza) ? (
-                            <span className="truncate text-[10px] font-medium text-slate-500 max-w-[60%]" title={row.pieza}>
-                              {row.pieza}
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+                          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                            <span className="shrink-0 text-[11px] font-bold text-slate-800">
+                              Daño {idx + 1}
                             </span>
-                          ) : null}
+                            {row.pieza && !isPlaceholderPieza(row.pieza) ? (
+                              <span
+                                className="truncate text-[10px] font-medium text-slate-500"
+                                title={row.pieza}
+                              >
+                                {row.pieza}
+                              </span>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={quoteRows.length <= 1}
+                            onClick={() => handleRemoveQuoteRow(row.id)}
+                            title={
+                              quoteRows.length <= 1
+                                ? 'Debe quedar al menos una pieza en el borrador'
+                                : 'Quitar esta pieza de la cotización'
+                            }
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                            aria-label="Eliminar pieza de la cotización"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                              <line x1="10" x2="10" y1="11" y2="17" />
+                              <line x1="14" x2="14" y1="11" y2="17" />
+                            </svg>
+                          </button>
                         </div>
                         <label className="block text-[10px] font-medium text-gray-700">
                           Pieza
@@ -775,10 +835,6 @@ function ChatView({
                             value={row.pieza}
                             onChange={(e) => {
                               const v = e.target.value;
-                              if (piezaMatrixDebounceRef.current) {
-                                clearTimeout(piezaMatrixDebounceRef.current);
-                                piezaMatrixDebounceRef.current = null;
-                              }
                               setQuoteFormDirty(true);
                               setQuoteRows((prev) =>
                                 prev.map((r) =>
@@ -794,8 +850,13 @@ function ChatView({
                             className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
                             <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
-                              {MANUAL_ROW_PLACEHOLDER_PIEZA}
+                              Seleccionar pieza…
                             </option>
+                            {piezaSelectShowsUnmappedFallback(row.pieza) ? (
+                              <option value={row.pieza}>
+                                {row.pieza} (texto IA — elige pieza de la lista)
+                              </option>
+                            ) : null}
                             {AUTO_FIX_BASE_PRICES.map((pr) => (
                               <option key={pr.pieza} value={pr.pieza}>
                                 {pr.pieza}
@@ -809,20 +870,14 @@ function ChatView({
                             value={row.severidad}
                             onChange={(e) => {
                               const v = e.target.value;
-                              if (piezaMatrixDebounceRef.current) {
-                                clearTimeout(piezaMatrixDebounceRef.current);
-                                piezaMatrixDebounceRef.current = null;
-                              }
                               setQuoteFormDirty(true);
                               setQuoteRows((prev) =>
                                 prev.map((r) => {
                                   if (r.id !== row.id) return r;
-                                  const suggested = calculateEstimate(r.pieza, v);
-                                  const precioInput =
-                                    suggested > 0
-                                      ? String(Math.round(suggested))
-                                      : r.precioInput;
-                                  return { ...r, severidad: v, precioInput };
+                                  return recalcRowPriceFromMatrix({
+                                    ...r,
+                                    severidad: v,
+                                  });
                                 }),
                               );
                             }}
