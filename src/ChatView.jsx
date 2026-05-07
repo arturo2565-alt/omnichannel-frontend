@@ -1,5 +1,11 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import QuickReplies from './QuickReplies';
+import {
+  PIEZA_DANO_PRICE_MATRIX,
+  DAMAGE_LEVEL_KEYS,
+  calculateEstimate,
+  coerceDamageLevelCode,
+} from './autofix-pricing';
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
 // Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
@@ -93,6 +99,21 @@ const getPreviewText = (content) => {
   return content;
 };
 
+const SEVERIDAD_LABELS = {
+  DL: 'DL — Leve',
+  DML: 'DML — Menor',
+  DM: 'DM — Moderado',
+  DMF: 'DMF',
+  DF: 'DF — Grave',
+  DMFuerte: 'DMFuerte — Muy grave',
+};
+
+function parsePrecioInput(raw) {
+  const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/,/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 function ChatView({ 
   contacts, 
   selectedConvId, 
@@ -113,7 +134,9 @@ function ChatView({
   filePreviewUrl, // URL temporal del blob
   onFileSelect,   // Función handleFileSelect de App.jsx
   onClearFile,    // Función handleClearFile de App.jsx
-  isSending       // Estado de carga del envío
+  isSending,       // Estado de carga del envío
+  apiBaseUrl,
+  onDraftQuotePatched,
 }) {
 
   const messagesEndRef = useRef(null);
@@ -135,6 +158,234 @@ function ChatView({
     }
     return null;
   }, [messages]);
+
+  const latestQuoteMessage = useMemo(() => {
+    const list = Array.isArray(messages) ? messages : [];
+    return list.find((m) => m.id === latestDraftQuote?.messageId) ?? null;
+  }, [messages, latestDraftQuote?.messageId]);
+
+  const [conversationDraftRows, setConversationDraftRows] = useState([]);
+  /** Una fila por pieza: pieza, severidad, precio editable, URLs para galería */
+  const [quoteRows, setQuoteRows] = useState([]);
+  const [selectedRowIndex, setSelectedRowIndex] = useState(0);
+  const [quoteFormDirty, setQuoteFormDirty] = useState(false);
+  const [quoteSaveError, setQuoteSaveError] = useState('');
+  const [isSavingQuote, setIsSavingQuote] = useState(false);
+  const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
+  const piezaMatrixDebounceRef = useRef(null);
+
+  const activeDraftRow = useMemo(() => {
+    if (!latestDraftQuote?.messageId || !Array.isArray(conversationDraftRows)) return null;
+    return (
+      conversationDraftRows.find((r) => r.messageId === latestDraftQuote.messageId) ?? null
+    );
+  }, [conversationDraftRows, latestDraftQuote?.messageId]);
+
+  useEffect(() => {
+    if (!selectedConvId || !apiBaseUrl) {
+      setConversationDraftRows([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(
+          `${apiBaseUrl}/conversations/${selectedConvId}/draft-quotes`,
+        );
+        const data = r.ok ? await r.json() : [];
+        if (!cancelled) setConversationDraftRows(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setConversationDraftRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConvId, apiBaseUrl, latestDraftQuote?.messageId]);
+
+  const quoteSyncKey = useMemo(() => {
+    if (!latestDraftQuote?.quote) return '';
+    const q = latestDraftQuote.quote;
+    const basis = q.analysisBasis ?? {};
+    const inv =
+      Array.isArray(basis.inventory) && basis.inventory.length > 0
+        ? basis.inventory
+        : Array.isArray(latestQuoteMessage?.damageAnalysis?.inventory) &&
+            latestQuoteMessage.damageAnalysis.inventory.length > 0
+          ? latestQuoteMessage.damageAnalysis.inventory
+          : null;
+    const invKey = inv?.map((x) => `${x.pieza}:${x.severidad}`).join('|') ?? '';
+    const linesKey = JSON.stringify(
+      (q.lines ?? []).map((l) => Number(l.subtotal ?? 0)),
+    );
+    return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}`;
+  }, [latestDraftQuote, latestQuoteMessage]);
+
+  useEffect(() => {
+    if (!latestDraftQuote?.quote) return;
+    const q = latestDraftQuote.quote;
+    const basis = q.analysisBasis ?? {};
+    const damage = latestQuoteMessage?.damageAnalysis ?? {};
+    const inv =
+      Array.isArray(basis.inventory) && basis.inventory.length > 0
+        ? basis.inventory
+        : Array.isArray(damage.inventory) && damage.inventory.length > 0
+          ? damage.inventory
+          : null;
+
+    const msgImg =
+      latestQuoteMessage?.content && isImage(latestQuoteMessage.content)
+        ? [latestQuoteMessage.content]
+        : [];
+
+    if (inv?.length) {
+      const lines = q.lines ?? [];
+      const rows = inv.map((it, idx) => {
+        const rawSev = String(it.severidad ?? 'DM');
+        const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
+          ? rawSev
+          : coerceDamageLevelCode(rawSev);
+        let precio = calculateEstimate(it.pieza, code);
+        const lineAt = lines[idx];
+        if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
+          precio = Number(lineAt.subtotal);
+        }
+        const urls =
+          Array.isArray(it.urls_asociadas) && it.urls_asociadas.length > 0
+            ? [...it.urls_asociadas]
+            : idx === 0 && msgImg.length
+              ? [...msgImg]
+              : [];
+        return {
+          id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
+          pieza: it.pieza ?? '',
+          severidad: code,
+          precioInput: String(Math.round(precio)),
+          urls_asociadas: urls,
+        };
+      });
+      setQuoteRows(rows);
+    } else {
+      const rawSev = String(basis.severidad ?? 'DM');
+      const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
+        ? rawSev
+        : coerceDamageLevelCode(rawSev);
+      setQuoteRows([
+        {
+          id: 'row-0-single',
+          pieza: basis.pieza ?? '',
+          severidad: code,
+          precioInput: String(
+            Math.round(Number(q.total ?? q.subtotal ?? 0)),
+          ),
+          urls_asociadas: msgImg,
+        },
+      ]);
+    }
+    setSelectedRowIndex(0);
+    setQuoteFormDirty(false);
+    setQuoteSaveError('');
+  }, [quoteSyncKey]);
+
+  useEffect(() => {
+    return () => {
+      if (piezaMatrixDebounceRef.current) clearTimeout(piezaMatrixDebounceRef.current);
+    };
+  }, []);
+
+  const applyMatrixToRow = useCallback((rowId, piezaVal, severidadVal) => {
+    const suggested = calculateEstimate(piezaVal, severidadVal);
+    if (suggested <= 0) return;
+    setQuoteRows((prev) =>
+      prev.map((r) =>
+        r.id === rowId
+          ? { ...r, precioInput: String(Math.round(suggested)) }
+          : r,
+      ),
+    );
+  }, []);
+
+  const granTotalPanel = useMemo(
+    () =>
+      quoteRows.reduce((acc, r) => {
+        const n = parsePrecioInput(r.precioInput);
+        return acc + (Number.isFinite(n) ? n : 0);
+      }, 0),
+    [quoteRows],
+  );
+
+  const persistDraftQuotePatch = useCallback(async () => {
+    if (!apiBaseUrl || !activeDraftRow?.id) {
+      const msg =
+        'Aún no se puede guardar: espera a cargar el borrador o recarga la conversación.';
+      setQuoteSaveError(msg);
+      throw new Error(msg);
+    }
+    const linesPayload = quoteRows.map((r) => ({
+      pieza: r.pieza.trim(),
+      severidad: r.severidad,
+      precioMx: parsePrecioInput(r.precioInput),
+      urls_asociadas: r.urls_asociadas,
+    }));
+    for (let i = 0; i < linesPayload.length; i++) {
+      const L = linesPayload[i];
+      if (!L.pieza) {
+        setQuoteSaveError(`La pieza no puede estar vacía (fila ${i + 1}).`);
+        throw new Error('bad pieza');
+      }
+      if (!Number.isFinite(L.precioMx) || L.precioMx < 0) {
+        setQuoteSaveError(`Precio inválido en fila ${i + 1} (número ≥ 0).`);
+        throw new Error('bad price');
+      }
+    }
+    setQuoteSaveError('');
+    const res = await fetch(`${apiBaseUrl}/quote/${activeDraftRow.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inventoryLines: linesPayload }),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error(t || `HTTP ${res.status}`);
+    }
+    const entity = await res.json();
+    onDraftQuotePatched?.({
+      messageId: entity.messageId,
+      draftQuote: entity.quotePayload,
+      damageAnalysis: entity.damageAnalysis,
+    });
+    setQuoteFormDirty(false);
+    return entity;
+  }, [apiBaseUrl, activeDraftRow?.id, quoteRows, onDraftQuotePatched]);
+
+  const handleGuardarCambios = async () => {
+    setIsSavingQuote(true);
+    setQuoteSaveError('');
+    try {
+      await persistDraftQuotePatch();
+    } catch (e) {
+      if (e.message !== 'bad price' && e.message !== 'bad pieza') {
+        setQuoteSaveError(e.message || 'Error al guardar');
+      }
+    } finally {
+      setIsSavingQuote(false);
+    }
+  };
+
+  const handleEnviarCotizacionFinal = async () => {
+    setIsSendingFinalQuote(true);
+    setQuoteSaveError('');
+    try {
+      const entity = await persistDraftQuotePatch();
+      await onSendQuoteText?.(entity.quotePayload.formalNarrative);
+    } catch (e) {
+      if (e.message !== 'bad price' && e.message !== 'bad pieza') {
+        setQuoteSaveError(e.message || 'Error al enviar la cotización');
+      }
+    } finally {
+      setIsSendingFinalQuote(false);
+    }
+  };
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => { scrollToBottom(); }, [messages]);
@@ -383,7 +634,219 @@ function ChatView({
                 {latestDraftQuote.quote.reference ? (
                   <span className="text-[10px] text-gray-500">{latestDraftQuote.quote.reference}</span>
                 ) : null}
+                {quoteFormDirty ? (
+                  <span className="text-[10px] font-medium text-amber-700">Cambios sin guardar</span>
+                ) : null}
               </div>
+
+              <div className="mb-3 flex max-h-[min(72vh,520px)] shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  Piezas y precios (cada pieza tiene severidad y precio propios)
+                </p>
+                <div className="min-h-0 max-h-[220px] space-y-2 overflow-y-auto pr-0.5">
+                  {quoteRows.map((row, idx) => {
+                    const selected = idx === selectedRowIndex;
+                    return (
+                      <div
+                        key={row.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedRowIndex(idx)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedRowIndex(idx);
+                          }
+                        }}
+                        className={`rounded-lg border p-2.5 text-left transition ${
+                          selected
+                            ? 'border-indigo-500 bg-indigo-50/80 ring-1 ring-indigo-400'
+                            : 'border-gray-200 bg-white hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-bold text-gray-600">
+                            Pieza {idx + 1}
+                            {quoteRows.length > 1 ? ` · ${row.pieza || '…'}` : ''}
+                          </span>
+                          {quoteRows.length > 1 ? (
+                            <span className="text-[9px] text-indigo-600">
+                              {selected ? 'Seleccionada' : 'Toca para fotos'}
+                            </span>
+                          ) : null}
+                        </div>
+                        <label className="block text-[10px] font-medium text-gray-600">
+                          Pieza
+                          <input
+                            list="cotizacion-piezas-datalist"
+                            value={row.pieza}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setQuoteRows((prev) =>
+                                prev.map((r) =>
+                                  r.id === row.id ? { ...r, pieza: v } : r,
+                                ),
+                              );
+                              setQuoteFormDirty(true);
+                              if (piezaMatrixDebounceRef.current) {
+                                clearTimeout(piezaMatrixDebounceRef.current);
+                              }
+                              piezaMatrixDebounceRef.current = setTimeout(() => {
+                                setQuoteRows((prev) => {
+                                  const cur = prev.find((r) => r.id === row.id);
+                                  if (!cur) return prev;
+                                  const n = calculateEstimate(
+                                    cur.pieza,
+                                    cur.severidad,
+                                  );
+                                  if (n <= 0) return prev;
+                                  return prev.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          precioInput: String(Math.round(n)),
+                                        }
+                                      : r,
+                                  );
+                                });
+                              }, 450);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            placeholder="Ej. Fascia, Puerta…"
+                          />
+                        </label>
+                        <label className="mt-2 block text-[10px] font-medium text-gray-600">
+                          Severidad
+                          <select
+                            value={row.severidad}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (piezaMatrixDebounceRef.current) {
+                                clearTimeout(piezaMatrixDebounceRef.current);
+                                piezaMatrixDebounceRef.current = null;
+                              }
+                              setQuoteRows((prev) =>
+                                prev.map((r) =>
+                                  r.id === row.id ? { ...r, severidad: v } : r,
+                                ),
+                              );
+                              setQuoteFormDirty(true);
+                              applyMatrixToRow(row.id, row.pieza, v);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          >
+                            {DAMAGE_LEVEL_KEYS.map((k) => (
+                              <option key={k} value={k}>
+                                {SEVERIDAD_LABELS[k] ?? k}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="mt-2 block text-[10px] font-medium text-gray-600">
+                          Precio (MXN)
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.precioInput}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setQuoteRows((prev) =>
+                                prev.map((r) =>
+                                  r.id === row.id ? { ...r, precioInput: v } : r,
+                                ),
+                              );
+                              setQuoteFormDirty(true);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-0.5 w-full rounded border border-gray-200 px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            placeholder="0"
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+                <datalist id="cotizacion-piezas-datalist">
+                  {PIEZA_DANO_PRICE_MATRIX.map((pr) => (
+                    <option key={pr.pieza} value={pr.pieza} />
+                  ))}
+                </datalist>
+
+                {(() => {
+                  const i = Math.min(
+                    selectedRowIndex,
+                    Math.max(0, quoteRows.length - 1),
+                  );
+                  const sel = quoteRows[i];
+                  const thumbs = sel?.urls_asociadas ?? [];
+                  return (
+                    <div className="shrink-0 rounded-md border border-dashed border-gray-200 bg-slate-50/90 p-2">
+                      <p className="mb-1.5 text-[10px] font-semibold text-gray-600">
+                        Fotos de la pieza seleccionada
+                        {sel?.pieza ? (
+                          <span className="font-normal text-gray-500">
+                            {' '}
+                            — {sel.pieza}
+                          </span>
+                        ) : null}
+                      </p>
+                      {thumbs.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {thumbs.map((url) => (
+                            <button
+                              key={url}
+                              type="button"
+                              title="Abrir imagen"
+                              onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                              className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
+                            >
+                              <img
+                                src={url}
+                                alt=""
+                                className="h-14 w-14 object-cover sm:h-16 sm:w-16"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] italic text-gray-400">
+                          No hay URLs vinculadas a esta pieza en el inventario. Si
+                          solo hay una imagen en el chat, suele asociarse a la
+                          primera pieza.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-right">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-800">
+                    Gran total (panel)
+                  </p>
+                  <p className="text-lg font-bold tabular-nums text-emerald-900">
+                    {granTotalPanel.toLocaleString('es-MX', {
+                      style: 'currency',
+                      currency: 'MXN',
+                      maximumFractionDigits: 0,
+                    })}
+                  </p>
+                  <p className="text-[9px] text-emerald-700/90">
+                    Suma de todas las piezas · se envía al guardar
+                  </p>
+                </div>
+
+                {!activeDraftRow?.id ? (
+                  <p className="text-[10px] text-amber-800">
+                    Obteniendo enlace del borrador en el servidor…
+                  </p>
+                ) : null}
+                {quoteSaveError ? (
+                  <p className="text-[10px] text-red-600">{quoteSaveError}</p>
+                ) : null}
+              </div>
+
               {Array.isArray(latestDraftQuote.quote.lines) && latestDraftQuote.quote.lines.length > 0 ? (
                 <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
                   <table className="w-full text-left">
@@ -422,22 +885,42 @@ function ChatView({
               <div className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gray-200 pt-3">
                 <button
                   type="button"
-                  disabled={isSending}
-                  onClick={() => onSendQuoteText?.(latestDraftQuote.quote.formalNarrative)}
-                  className="rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white shadow transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    isSending ||
+                    isSavingQuote ||
+                    isSendingFinalQuote ||
+                    !activeDraftRow?.id
+                  }
+                  onClick={handleGuardarCambios}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Autorizar y Enviar
+                  {isSavingQuote ? 'Guardando…' : 'Guardar Cambios'}
                 </button>
                 <button
                   type="button"
-                  disabled={isSending}
+                  disabled={
+                    isSending ||
+                    isSavingQuote ||
+                    isSendingFinalQuote ||
+                    !activeDraftRow?.id
+                  }
+                  onClick={handleEnviarCotizacionFinal}
+                  className="w-full rounded-xl bg-emerald-600 px-4 py-4 text-base font-bold text-white shadow-lg transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSendingFinalQuote || isSending
+                    ? 'Enviando…'
+                    : 'Enviar Cotización Final'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSending || isSavingQuote || isSendingFinalQuote}
                   onClick={() => {
                     setReply(latestDraftQuote.quote.formalNarrative);
                     document.getElementById('chat-reply-input')?.focus?.();
                   }}
-                  className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Corregir
+                  Copiar texto al cuadro de respuesta
                 </button>
               </div>
             </>

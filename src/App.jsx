@@ -226,6 +226,21 @@ function App() {
     [aiSuggestion],
   );
 
+  const handleDraftQuotePatched = ({ messageId, draftQuote, damageAnalysis }) => {
+    if (!messageId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? {
+              ...m,
+              ...(draftQuote !== undefined ? { draftQuote } : {}),
+              ...(damageAnalysis !== undefined ? { damageAnalysis } : {}),
+            }
+          : m,
+      ),
+    );
+  };
+
   return (
     <ChatView 
       contacts={contacts}
@@ -246,6 +261,8 @@ function App() {
       onFileSelect={handleFileSelect}
       onClearFile={handleClearFile}
       isSending={isSending}
+      apiBaseUrl={API_BASE_URL}
+      onDraftQuotePatched={handleDraftQuotePatched}
     />
   );
 }
