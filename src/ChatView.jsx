@@ -2,11 +2,13 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import QuickReplies from './QuickReplies';
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
+// Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
 const classifyPlatform = (raw) => {
   if (!raw) return 'unknown';
   const s = String(raw).toLowerCase().trim();
   if (s.includes('whatsapp')) return 'whatsapp';
   if (s.includes('instagram')) return 'instagram';
+  if (s.includes('facebook') || s.includes('meta')) return 'facebook';
   return 'other';
 };
 
@@ -16,15 +18,22 @@ const PlatformBadge = ({
   className = '',
 }) => {
   const kind = classifyPlatform(platform);
+  // Configuramos dimensiones fijas para asegurar círculo perfecto y no deformable
   const dim =
     size === 'sm'
-      ? 'h-[18px] min-w-[18px] px-0 text-[9px] leading-none'
-      : 'h-6 w-6 min-w-[24px] text-[10px]';
+      ? 'w-[18px] h-[18px] text-[11px]'
+      : 'w-[24px] h-[24px] text-[13px]';
+
+  // Las siguientes reglas aseguran círculo perfecto, centrado y sin deformaciones:
+  // w-[] h-[] rounded-full flex items-center justify-center shrink-0
+  const baseBadge =
+    `flex items-center justify-center rounded-full font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`;
+
   if (kind === 'whatsapp') {
     return (
       <span
         title="WhatsApp"
-        className={`inline-flex items-center justify-center rounded-full bg-green-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+        className={`bg-green-500 ${baseBadge}`}
         aria-hidden
       >
         W
@@ -35,17 +44,29 @@ const PlatformBadge = ({
     return (
       <span
         title="Instagram"
-        className={`inline-flex items-center justify-center rounded-full bg-pink-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+        className={`bg-pink-500 ${baseBadge}`}
         aria-hidden
       >
         I
       </span>
     );
   }
+  if (kind === 'facebook') {
+    return (
+      <span
+        title="Facebook"
+        className={`bg-blue-600 ${baseBadge}`}
+        aria-hidden
+      >
+        {/* Usa la letra F como icono representativo */}
+        F
+      </span>
+    );
+  }
   return (
     <span
       title="Canal desconocido"
-      className={`inline-flex items-center justify-center rounded-full bg-gray-500 font-bold text-white shrink-0 box-border shadow-sm ${dim} ${className}`}
+      className={`bg-gray-500 ${baseBadge}`}
       aria-hidden
     >
       ?
