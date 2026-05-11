@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import QuickReplies from './QuickReplies';
 import {
   AUTO_FIX_BASE_PRICES,
@@ -308,6 +309,37 @@ function ChatView({
   );
 
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
+
+  const [autoPilotToggleBusy, setAutoPilotToggleBusy] = useState(false);
+
+  const handleAutoPilotToggle = useCallback(async () => {
+    if (!apiBaseUrl || !selectedConvId || autoPilotToggleBusy) return;
+    const currentOn = selectedContact?.isAutoPilotActive !== false;
+    const next = !currentOn;
+    setAutoPilotToggleBusy(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/conversations/${selectedConvId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isAutoPilotActive: next }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+      onRefresh?.();
+    } catch (e) {
+      console.error('Autopilot PATCH:', e);
+    } finally {
+      setAutoPilotToggleBusy(false);
+    }
+  }, [
+    apiBaseUrl,
+    selectedConvId,
+    selectedContact?.isAutoPilotActive,
+    autoPilotToggleBusy,
+    onRefresh,
+  ]);
 
   const latestDraftQuote = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
@@ -690,7 +722,15 @@ function ChatView({
           ) : null}
           <div className={`p-4 pb-3 font-bold text-xl flex justify-between items-center ${pendingPorCotizarCount === 0 ? 'pt-3' : 'pt-2'}`}>
             <span>Bandeja</span>
-            <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/calendar"
+                className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium transition border border-indigo-100"
+              >
+                📅 Citas
+              </Link>
+              <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
+            </div>
           </div>
           <div className="px-4 pb-3 flex gap-1.5 flex-wrap items-center font-normal">
             {[
@@ -766,8 +806,8 @@ function ChatView({
         {selectedConvId ? (
           <>
             {/* Header Chat */}
-            <div className="p-4 border-b shadow-sm font-semibold bg-white flex justify-between items-center z-10">
-              <div className="flex items-center space-x-3">
+            <div className="z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-white p-4 shadow-sm font-semibold">
+              <div className="flex min-w-0 items-center space-x-3">
                 <div className="relative h-9 w-9 shrink-0">
                   <div className="flex h-full w-full items-center justify-center rounded-full border border-blue-200 bg-blue-100 text-sm font-bold text-blue-600">
                     {selectedUserName?.charAt(0).toUpperCase()}
@@ -776,12 +816,53 @@ function ChatView({
                     <PlatformBadge platform={selectedContact?.platform} size="sm" />
                   </div>
                 </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-sm truncate">{selectedUserName}</span>
-                  <span className="text-[10px] text-gray-400 font-normal truncate">ID: {selectedConvId}</span>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm">{selectedUserName}</span>
+                  <span className="truncate text-[10px] font-normal text-gray-400">ID: {selectedConvId}</span>
                 </div>
               </div>
-              <span className={`text-xs font-normal flex items-center ${isConnected ? 'text-green-500' : 'text-red-500'}`}><span className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>{isConnected ? 'Online' : 'Desconectado'}</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 shadow-sm">
+                  <span
+                    className="text-[11px] font-medium text-slate-700"
+                    id="autopilot-label"
+                  >
+                    Autopilot
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-labelledby="autopilot-label"
+                    aria-checked={
+                      selectedContact?.isAutoPilotActive !== false
+                    }
+                    disabled={!apiBaseUrl || autoPilotToggleBusy}
+                    title={
+                      (selectedContact?.isAutoPilotActive !== false)
+                        ? 'Respuestas IA automáticas activadas'
+                        : 'Solo sugerencias en panel; sin respuesta automática'
+                    }
+                    onClick={handleAutoPilotToggle}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 disabled:opacity-50 ${
+                      selectedContact?.isAutoPilotActive !== false
+                        ? 'bg-indigo-600'
+                        : 'bg-gray-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        selectedContact?.isAutoPilotActive !== false
+                          ? 'translate-x-5'
+                          : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <span className={`flex shrink-0 items-center text-xs font-normal ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
+                  <span className={`mr-2 h-2 w-2 rounded-full ${isConnected ? 'animate-pulse bg-green-500' : 'bg-red-500'}`} />
+                  {isConnected ? 'Online' : 'Desconectado'}
+                </span>
+              </div>
             </div>
             
             {/* Mensajes Chat */}

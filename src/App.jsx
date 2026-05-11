@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
-
-const API_BASE_URL = 'https://omnichannel-backend-production.up.railway.app/webhook';
+import { API_BASE_URL } from './apiConfig.js';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
@@ -21,6 +21,8 @@ const socket = io('https://omnichannel-backend-production.up.railway.app', {
 });
 
 function App() {
+  const [searchParams] = useSearchParams();
+
   // --- ESTADOS ---
   const [contacts, setContacts] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -85,6 +87,18 @@ function App() {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
     });
     const mergeQuoteIntoMessages = (payload) => {
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.id === payload.conversationId
+            ? {
+                ...c,
+                ...(payload.isAutoPilotActive !== undefined
+                  ? { isAutoPilotActive: payload.isAutoPilotActive }
+                  : {}),
+              }
+            : c,
+        ),
+      );
       if (payload.conversationId !== selectedConvId) {
         fetchConversations();
         return;
@@ -113,6 +127,13 @@ function App() {
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
     };
   }, [selectedConvId]);
+
+  useEffect(() => {
+    const cid = searchParams.get('conversation');
+    if (cid && cid.trim()) {
+      setSelectedConvId(cid.trim());
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (selectedConvId) { 
