@@ -60,14 +60,22 @@ export default function CalendarPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between border-b bg-white px-6 py-4 shadow-sm">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-6 py-4 shadow-sm">
         <h1 className="text-xl font-bold text-gray-900">Calendario de citas</h1>
-        <Link
-          to="/"
-          className="text-sm font-medium text-blue-600 transition hover:text-blue-800"
-        >
-          ← Volver al chat
-        </Link>
+        <nav className="flex flex-wrap items-center gap-3">
+          <Link
+            to="/admin/ai-settings"
+            className="text-sm font-medium text-gray-600 transition hover:text-gray-900"
+          >
+            Config IA
+          </Link>
+          <Link
+            to="/"
+            className="text-sm font-medium text-blue-600 transition hover:text-blue-800"
+          >
+            ← Volver al chat
+          </Link>
+        </nav>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-8">

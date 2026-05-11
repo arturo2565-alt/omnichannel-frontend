@@ -743,6 +743,12 @@ function ChatView({
             <span>Bandeja</span>
             <div className="flex items-center gap-2">
               <Link
+                to="/admin/ai-settings"
+                className="text-[10px] bg-white hover:bg-gray-50 text-gray-700 px-2 py-1 rounded font-medium transition border border-gray-200"
+              >
+                ⚙️ IA
+              </Link>
+              <Link
                 to="/calendar"
                 className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium transition border border-indigo-100"
               >

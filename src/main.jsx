@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import CalendarPage from './CalendarPage.jsx'
+import AiSettingsPage from './AiSettingsPage.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
