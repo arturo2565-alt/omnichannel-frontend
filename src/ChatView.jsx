@@ -909,7 +909,7 @@ function ChatView({
       </div>
 
       {/* 4. Panel de Cotización */}
-      <aside className="flex w-[min(100%,360px)] shrink-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner">
+      <aside className="flex min-h-0 w-[min(100%,360px)] shrink-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner">
         <div className="border-b border-gray-200 bg-white px-4 py-3">
           <h2 className="text-sm font-bold tracking-tight text-gray-900">Panel de Cotización</h2>
           <p className="mt-0.5 text-[10px] text-gray-500">Borrador generado por IA · requiere tu validación</p>
@@ -935,17 +935,17 @@ function ChatView({
                 ) : null}
               </div>
 
-              <div className="mb-3 flex max-h-[min(78vh,640px)] min-h-0 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex max-h-[70vh] min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                 <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
                   Daños detectados ({quoteRows.length}) — editable por pieza
                 </p>
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5">
                   {quoteRows.map((row, idx) => {
                     const thumbs = row.urls_origen ?? [];
                     return (
                       <div
                         key={row.id}
-                        className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm"
                       >
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
                           <div className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -1155,7 +1155,7 @@ function ChatView({
               </div>
 
               {Array.isArray(latestDraftQuote.quote.lines) && latestDraftQuote.quote.lines.length > 0 ? (
-                <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
+                <div className="mb-3 min-h-[100px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
                   <table className="w-full text-left">
                     <thead className="sticky top-0 bg-gray-100 text-[9px] uppercase text-gray-600">
                       <tr>
@@ -1186,12 +1186,6 @@ function ChatView({
                   </div>
                 </div>
               ) : null}
-              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Borrador formal (IA)
-                </p>
-                <pre className="whitespace-pre-wrap font-sans">{latestDraftQuote.quote.formalNarrative}</pre>
-              </div>
               <div className="mt-2 min-h-0 max-h-56 overflow-y-auto rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
                   Mensaje al cliente (envío / copiar)
