@@ -116,8 +116,35 @@ function App() {
       );
       fetchConversations();
     };
+    const onConversationLeadUpdated = (payload) => {
+      setContacts((prev) => {
+        const idx = prev.findIndex((c) => c.id === payload.conversationId);
+        if (idx === -1) {
+          fetchConversations();
+          return prev;
+        }
+        return prev.map((c) =>
+          c.id === payload.conversationId
+            ? {
+                ...c,
+                status: payload.status ?? c.status,
+                ...(payload.lastMessageAt != null
+                  ? { lastMessageAt: payload.lastMessageAt }
+                  : {}),
+                ...(payload.lastMessage != null
+                  ? { lastMessage: payload.lastMessage }
+                  : {}),
+                ...(payload.isAutoPilotActive !== undefined
+                  ? { isAutoPilotActive: payload.isAutoPilotActive }
+                  : {}),
+              }
+            : c,
+        );
+      });
+    };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
+    socket.on('conversationLeadUpdated', onConversationLeadUpdated);
     return () => { 
       socket.off('connect'); 
       socket.off('disconnect'); 
@@ -125,6 +152,7 @@ function App() {
       socket.off('aiSuggestion');
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
+      socket.off('conversationLeadUpdated', onConversationLeadUpdated);
     };
   }, [selectedConvId]);
 
