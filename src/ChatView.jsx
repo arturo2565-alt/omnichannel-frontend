@@ -637,7 +637,26 @@ function ChatView({
     setIsSendingFinalQuote(true);
     setQuoteSaveError('');
     try {
-      const entity = await persistDraftQuotePatch();
+      await persistDraftQuotePatch();
+      if (!apiBaseUrl || !selectedConvId) {
+        throw new Error('Sin conversación activa para activar autopilot');
+      }
+      const autopilotRes = await fetch(
+        `${apiBaseUrl}/conversations/${selectedConvId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isAutoPilotActive: true }),
+        },
+      );
+      if (!autopilotRes.ok) {
+        const t = await autopilotRes.text().catch(() => '');
+        throw new Error(
+          t ||
+            `No se pudo activar el autopilot (HTTP ${autopilotRes.status}). La IA no podrá responder solicitudes de cita.`,
+        );
+      }
+      onRefresh?.();
       const mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
       await onSendQuoteText?.(mensajeCliente, {
         conversationLeadStatus: 'cotizado',
