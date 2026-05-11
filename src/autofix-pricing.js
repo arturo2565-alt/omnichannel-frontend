@@ -15,7 +15,7 @@ export const PIEZA_DANO_PRICE_MATRIX = [
     DF: 5700,
     DMFuerte: 8000,
   },
-  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 4500, DF: 5450, DMFuerte: 7650 },
+  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 5500, DF: 6700, DMFuerte: 7650 },
   {
     pieza: 'Tapa Cajuela',
     DL: 3500,

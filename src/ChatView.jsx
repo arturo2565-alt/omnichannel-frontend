@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import QuickReplies from './QuickReplies';
+import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
   AUTO_FIX_BASE_PRICES,
   DAMAGE_LEVEL_KEYS,
@@ -701,26 +701,40 @@ function ChatView({
   return (
     <div className="flex h-screen bg-gray-100 text-gray-900 overflow-hidden font-sans">
       
-      {/* 1. SIDEBAR CANALES */}
-      <div className="w-20 bg-gray-900 flex flex-col items-center py-4 space-y-4 shadow-xl z-10">
-        {[
-          { id: 'whatsapp', letter: 'W', className: 'bg-green-500' },
-          { id: 'instagram', letter: 'I', className: 'bg-pink-500' },
-          { id: 'facebook', letter: 'F', className: 'bg-blue-600' },
-        ].map(({ id, letter, className }) => (
-          <button
-            key={id}
-            type="button"
-            title={id === 'whatsapp' ? 'WhatsApp' : id === 'instagram' ? 'Instagram' : 'Facebook'}
-            onClick={() => setPlatformFilter((prev) => (prev === id ? 'all' : id))}
-            className={`flex h-12 w-12 items-center justify-center rounded-full font-bold text-white shadow-lg transition hover:scale-105 ${className} ${
-              platformFilter === id ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-105' : ''
-            }`}
-          >
-            {letter}
-          </button>
-        ))}
-      </div>
+      {/* 1. Rail: canales + navegación */}
+      <OmnichannelLeftRail
+        platformSlot={
+          <>
+            {[
+              { id: 'whatsapp', letter: 'W', className: 'bg-green-500' },
+              { id: 'instagram', letter: 'I', className: 'bg-pink-500' },
+              { id: 'facebook', letter: 'F', className: 'bg-blue-600' },
+            ].map(({ id, letter, className }) => (
+              <button
+                key={id}
+                type="button"
+                title={
+                  id === 'whatsapp'
+                    ? 'WhatsApp'
+                    : id === 'instagram'
+                      ? 'Instagram'
+                      : 'Facebook'
+                }
+                onClick={() =>
+                  setPlatformFilter((prev) => (prev === id ? 'all' : id))
+                }
+                className={`flex h-12 w-12 items-center justify-center rounded-full font-bold text-white shadow-lg transition hover:scale-105 ${className} ${
+                  platformFilter === id
+                    ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-105'
+                    : ''
+                }`}
+              >
+                {letter}
+              </button>
+            ))}
+          </>
+        }
+      />
 
       {/* 2–4. Bandeja + chat + panel cotización */}
       <div className="flex min-w-0 flex-1 flex-row">
@@ -739,25 +753,17 @@ function ChatView({
               </p>
             </div>
           ) : null}
-          <div className={`p-4 pb-3 font-bold text-xl flex justify-between items-center ${pendingPorCotizarCount === 0 ? 'pt-3' : 'pt-2'}`}>
-            <span>Bandeja</span>
-            <div className="flex items-center gap-2">
-              <Link
-                to="/admin/ai-settings"
-                className="text-[10px] bg-white hover:bg-gray-50 text-gray-700 px-2 py-1 rounded font-medium transition border border-gray-200"
-              >
-                ⚙️ IA
-              </Link>
-              <Link
-                to="/calendar"
-                className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-medium transition border border-indigo-100"
-              >
-                📅 Citas
-              </Link>
-              <button onClick={onRefresh} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-medium transition">🔄 Actualizar</button>
-            </div>
+          <div
+            className={`border-b border-gray-100/80 px-4 ${pendingPorCotizarCount === 0 ? 'pt-4 pb-3' : 'pt-2 pb-3'}`}
+          >
+            <h2 className="text-lg font-bold tracking-tight text-gray-900">
+              Bandeja
+            </h2>
+            <p className="mt-1 text-[11px] font-medium text-gray-500">
+              Filtra conversaciones por canal
+            </p>
           </div>
-          <div className="px-4 pb-3 flex gap-1.5 flex-wrap items-center font-normal">
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
             {[
               { id: 'all', label: 'Todos' },
               { id: 'whatsapp', label: 'WhatsApp' },

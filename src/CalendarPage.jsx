@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE_URL } from './apiConfig.js';
+import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 
 const STATUS_LABEL = {
   pendiente: 'Pendiente',
@@ -59,26 +60,17 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-6 py-4 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Calendario de citas</h1>
-        <nav className="flex flex-wrap items-center gap-3">
-          <Link
-            to="/admin/ai-settings"
-            className="text-sm font-medium text-gray-600 transition hover:text-gray-900"
-          >
-            Config IA
-          </Link>
-          <Link
-            to="/"
-            className="text-sm font-medium text-blue-600 transition hover:text-blue-800"
-          >
-            ← Volver al chat
-          </Link>
-        </nav>
-      </header>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <OmnichannelLeftRail />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="shrink-0 border-b bg-white px-6 py-4 shadow-sm">
+          <h1 className="text-xl font-bold text-gray-900">Calendario de citas</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Citas registradas por la IA y el equipo.
+          </p>
+        </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-4 py-8">
         {loading ? (
           <p className="text-center text-gray-500">Cargando citas…</p>
         ) : error ? (
@@ -189,6 +181,7 @@ export default function CalendarPage() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
