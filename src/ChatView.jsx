@@ -805,9 +805,17 @@ function ChatView({
               }`}
             >
               <div className="relative h-12 w-12 shrink-0">
+                {contact.avatarUrl ? (
+                  <img
+                    src={contact.avatarUrl}
+                    alt=""
+                    className="h-full w-full rounded-full object-cover shadow-md"
+                  />
+                ) : (
                 <div className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-lg font-bold text-white shadow-md">
                   {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
                 </div>
+                )}
                 <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white">
                   <PlatformBadge platform={contact.platform} size="sm" />
                 </div>
