@@ -26,6 +26,28 @@ function fileToDataUrl(file) {
   });
 }
 
+/**
+ * Solo data URL para OpenAI (`data:image/...;base64,...`). Rechaza blob: y rutas locales.
+ * Debe llamarse justo antes de enviar el cuerpo a `/ai-playground/test`.
+ */
+function assertPlaygroundVisionDataUrl(dataUrl, label = 'imagen') {
+  const s = String(dataUrl ?? '').trim();
+  if (!s) {
+    throw new Error(`La ${label} está vacía; no se puede enviar a visión.`);
+  }
+  if (/^blob:/i.test(s)) {
+    throw new Error(
+      `La ${label} no puede enviarse como blob URL. Convierte el archivo a base64 (data:image/...;base64,...) antes de llamar al API.`,
+    );
+  }
+  if (!/^data:image\/[a-zA-Z0-9+.+-]+;base64,/i.test(s)) {
+    throw new Error(
+      `Formato inválido para visión (${label}): se esperaba data:image/<tipo>;base64,... y se recibió: ${s.slice(0, 80)}…`,
+    );
+  }
+  return s;
+}
+
 function formatPlaygroundMoney(amount) {
   return new Intl.NumberFormat('es-MX', {
     style: 'currency',
@@ -316,7 +338,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     let imageBase64;
     if (lastImageFile) {
       try {
-        imageBase64 = await fileToDataUrl(lastImageFile);
+        imageBase64 = assertPlaygroundVisionDataUrl(await fileToDataUrl(lastImageFile));
       } catch (e) {
         setPlaygroundPhase('idle');
         setThinkingMode(null);
@@ -932,6 +954,9 @@ export default function AiSettingsPage() {
       };
       if (!body.userText && !body.imageBase64) {
         throw new Error('Falta mensaje o imagen');
+      }
+      if (body.imageBase64) {
+        body.imageBase64 = assertPlaygroundVisionDataUrl(body.imageBase64, 'imageBase64');
       }
       const r = await fetch(`${API_BASE_URL}/ai-playground/test`, {
         method: 'POST',
