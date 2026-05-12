@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import {
+  AUTO_FIX_BASE_PRICES,
+  DAMAGE_LEVEL_KEYS,
+  calculateEstimate,
+  coerceDamageLevelCode,
+  matchPiezaFromAnalysis,
+} from './autofix-pricing.js';
 
 const emptyForm = {
   visionPrompt: '',
@@ -37,6 +44,17 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+const MATRIX_PIEZA_KEYS = new Set(AUTO_FIX_BASE_PRICES.map((r) => r.pieza));
+
+function normalizePiezaForPlayground(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
+  if (MATRIX_PIEZA_KEYS.has(t)) return t;
+  const canon = matchPiezaFromAnalysis(t);
+  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
+  return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
+}
+
 const PLAYGROUND_DEBOUNCE_MS = 20000;
 const PLAYGROUND_HISTORY_MAX = 50;
 
@@ -57,7 +75,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
   const [messages, setMessages] = useState(initialPlaygroundMessages);
   const [conversationHistory, setConversationHistory] = useState([]);
   const [draft, setDraft] = useState('');
-  const [mockDraftQuote, setMockDraftQuote] = useState(null);
+  const [mockDraft, setMockDraft] = useState(null);
   const [phoneScreen, setPhoneScreen] = useState('chat');
   const [quoteLineEdits, setQuoteLineEdits] = useState([]);
   /** idle | debounce (esperando más mensajes) | thinking (llamada en curso) */
@@ -68,6 +86,19 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
   const pendingRef = useRef([]);
   const debounceTimerRef = useRef(null);
   const conversationHistoryRef = useRef([]);
+  const playgroundLockedRef = useRef(false);
+
+  const playgroundLocked = useMemo(
+    () =>
+      !!mockDraft &&
+      Array.isArray(mockDraft.lines) &&
+      mockDraft.lines.length > 0,
+    [mockDraft],
+  );
+
+  useEffect(() => {
+    playgroundLockedRef.current = playgroundLocked;
+  }, [playgroundLocked]);
 
   useEffect(() => {
     conversationHistoryRef.current = conversationHistory;
@@ -84,42 +115,110 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, playgroundPhase, mockDraftQuote, phoneScreen]);
+  }, [messages, playgroundPhase, mockDraft, phoneScreen]);
 
   useEffect(() => {
-    if (!mockDraftQuote) {
+    if (!mockDraft) {
       setQuoteLineEdits([]);
       setPhoneScreen('chat');
       return;
     }
-    const lines = mockDraftQuote.lines;
-    if (!Array.isArray(lines) || lines.length === 0) {
-      setQuoteLineEdits([]);
+    const lines = mockDraft.lines ?? [];
+    const inv = mockDraft.analysisBasis?.inventory;
+    if (Array.isArray(inv) && inv.length > 0) {
+      setQuoteLineEdits(
+        inv.map((it, idx) => {
+          const rawSev = String(it.severidad ?? 'DM');
+          const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
+            ? rawSev
+            : coerceDamageLevelCode(rawSev);
+          const pieza = normalizePiezaForPlayground(it.pieza ?? '');
+          let precio = calculateEstimate(pieza, code);
+          const lineAt = lines[idx];
+          if (
+            lineAt &&
+            Number.isFinite(Number(lineAt.subtotal)) &&
+            inv.length === lines.length
+          ) {
+            precio = Number(lineAt.subtotal);
+          }
+          return {
+            id: `ql-${idx}-${String(it.pieza ?? '').slice(0, 20)}`,
+            pieza,
+            severidad: code,
+            precioInput: String(Math.round(precio)),
+          };
+        }),
+      );
       return;
     }
-    setQuoteLineEdits(
-      lines.map((line, idx) => ({
-        id: `ql-${idx}-${String(line.priceItemId ?? idx)}`,
-        priceItemId: line.priceItemId,
-        description: line.description,
-        quantity: Number(line.quantity) > 0 ? Number(line.quantity) : 1,
-        unitPriceInput: String(Math.round(Number(line.unitPrice) || 0)),
-      })),
-    );
-  }, [mockDraftQuote]);
+    if (lines.length > 0) {
+      setQuoteLineEdits(
+        lines.map((line, idx) => {
+          const m = /^matrix:([^:]+):(.+)$/.exec(String(line.priceItemId ?? ''));
+          let pieza = m ? m[1] : matchPiezaFromAnalysis(line.description) || 'Cofre';
+          let severidad = m ? m[2] : coerceDamageLevelCode(line.description);
+          if (!DAMAGE_LEVEL_KEYS.includes(String(severidad))) {
+            severidad = coerceDamageLevelCode(String(severidad));
+          }
+          pieza = normalizePiezaForPlayground(pieza);
+          const precio = Number.isFinite(Number(line.subtotal))
+            ? Number(line.subtotal)
+            : calculateEstimate(pieza, severidad);
+          return {
+            id: `ql-${idx}-${String(line.priceItemId ?? idx)}`,
+            pieza,
+            severidad,
+            precioInput: String(Math.round(precio)),
+          };
+        }),
+      );
+      return;
+    }
+    setQuoteLineEdits([]);
+  }, [mockDraft]);
 
   const playgroundQuoteTotal = useMemo(
     () =>
       quoteLineEdits.reduce((acc, row) => {
-        const u = parsePrecioInput(row.unitPriceInput);
-        const q = row.quantity;
-        return acc + (Number.isFinite(u) ? u * q : 0);
+        const p = parsePrecioInput(row.precioInput);
+        return acc + (Number.isFinite(p) ? p : 0);
       }, 0),
     [quoteLineEdits],
   );
 
+  const handleAuthorizeMockDraft = useCallback(() => {
+    if (!mockDraft) return;
+    const lines = quoteLineEdits
+      .map((r, i) => {
+        const p = parsePrecioInput(r.precioInput);
+        const amt = Number.isFinite(p) ? p : 0;
+        return `${i + 1}. ${r.pieza} (${r.severidad}) — ${formatPlaygroundMoney(amt)}`;
+      })
+      .join('\n');
+    const body = `Cotización autorizada y enviada al cliente (simulación).\n\n${mockDraft.reference}\n${lines}\n\nTotal: ${formatPlaygroundMoney(playgroundQuoteTotal)}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: `auth-${Date.now()}`, role: 'assistant', text: body, isError: false },
+    ]);
+    setConversationHistory((prev) =>
+      capConversationHistory([...prev, { role: 'assistant', text: body }]),
+    );
+    setMockDraft(null);
+    setPhoneScreen('chat');
+  }, [mockDraft, quoteLineEdits, playgroundQuoteTotal]);
+
   const flushPlaygroundPending = useCallback(async () => {
     if (disabled) return;
+    if (playgroundLockedRef.current) {
+      pendingRef.current = [];
+      if (debounceTimerRef.current != null) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      setPlaygroundPhase('idle');
+      return;
+    }
     const queue = pendingRef.current;
     pendingRef.current = [];
     debounceTimerRef.current = null;
@@ -129,7 +228,6 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     }
 
     setPlaygroundPhase('thinking');
-    setMockDraftQuote(null);
 
     const parts = [];
     let lastImageFile = null;
@@ -178,7 +276,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         imageBase64: typeof imageBase64 === 'string' ? imageBase64 : undefined,
         history: historyPayload,
       });
-      setMockDraftQuote(data.mockDraftQuote ?? null);
+      setMockDraft(data.mockDraftQuote ?? null);
       const assistantText = data.assistantMessage ?? '(Sin respuesta)';
       setMessages((prev) => [
         ...prev,
@@ -197,7 +295,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         ]),
       );
     } catch (err) {
-      setMockDraftQuote(null);
+      setMockDraft(null);
       setMessages((prev) => [
         ...prev,
         {
@@ -213,6 +311,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
   }, [disabled, testAiResponse]);
 
   const schedulePlaygroundDebounce = useCallback(() => {
+    if (playgroundLockedRef.current) return;
     if (debounceTimerRef.current != null) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -227,7 +326,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file?.type?.startsWith('image/')) return;
-    if (disabled || playgroundPhase === 'thinking') return;
+    if (disabled || playgroundPhase === 'thinking' || playgroundLocked) return;
     const url = URL.createObjectURL(file);
     blobUrlsRef.current.push(url);
     setMessages((prev) => [
@@ -245,14 +344,14 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
 
   const sendDraft = () => {
     const text = draft.trim();
-    if (!text || disabled || playgroundPhase === 'thinking') return;
+    if (!text || disabled || playgroundPhase === 'thinking' || playgroundLocked) return;
     setDraft('');
     setMessages((prev) => [...prev, { id: `txt-${Date.now()}`, role: 'user', text }]);
     pendingRef.current = [...pendingRef.current, { kind: 'text', text }];
     schedulePlaygroundDebounce();
   };
 
-  const busy = disabled || playgroundPhase === 'thinking';
+  const busy = disabled || playgroundPhase === 'thinking' || playgroundLocked;
 
   return (
     <aside className="flex w-[min(100%,440px)] shrink-0 flex-col border-l border-gray-200 bg-gradient-to-b from-gray-50 to-white">
@@ -288,7 +387,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-zinc-900 to-zinc-950">
-              {phoneScreen === 'quote' && mockDraftQuote ? (
+              {phoneScreen === 'quote' && mockDraft ? (
                 <>
                   <div className="shrink-0 border-b border-white/10 bg-zinc-900/95 px-3 py-2.5">
                     <button
@@ -308,8 +407,10 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                       </svg>
                       Volver al chat
                     </button>
-                    <p className="text-[13px] font-bold text-white">Panel de Cotización</p>
-                    <p className="text-[9px] text-white/50">Borrador de prueba · misma lógica que el panel admin</p>
+                    <p className="text-[13px] font-bold text-white">Edición de cotización</p>
+                    <p className="text-[9px] text-white/50">
+                      Matriz de precios real · borrador local (no BD)
+                    </p>
                   </div>
 
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100 p-2">
@@ -318,55 +419,102 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                         Pendiente de aprobación
                       </span>
                       <span className="max-w-[200px] truncate text-[9px] font-medium text-slate-600">
-                        {mockDraftQuote.reference}
+                        {mockDraft.reference}
                       </span>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-                      <table className="w-full table-fixed border-collapse text-left">
-                        <thead className="sticky top-0 z-[1] border-b border-slate-200 bg-slate-100 text-[8px] font-semibold uppercase text-slate-600">
-                          <tr>
-                            <th className="px-1.5 py-1.5">Concepto</th>
-                            <th className="w-[72px] px-1 py-1.5 text-right">P. unit.</th>
-                            <th className="w-[64px] px-1 py-1.5 text-right">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {quoteLineEdits.map((row) => {
-                            const unit = parsePrecioInput(row.unitPriceInput);
-                            const lineTotal = (Number.isFinite(unit) ? unit : 0) * row.quantity;
-                            return (
-                              <tr key={row.id} className="border-t border-slate-100 align-top">
-                                <td className="px-1.5 py-1.5 text-[9px] leading-snug text-slate-800">
-                                  <span className="line-clamp-3" title={row.description}>
-                                    {row.description}
-                                  </span>
-                                </td>
-                                <td className="px-1 py-1">
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={row.unitPriceInput}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setQuoteLineEdits((prev) =>
-                                        prev.map((r) =>
-                                          r.id === row.id ? { ...r, unitPriceInput: v } : r,
-                                        ),
-                                      );
-                                    }}
-                                    className="w-full rounded border border-slate-200 bg-white px-1 py-0.5 text-right text-[9px] text-slate-900 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-300"
-                                  />
-                                </td>
-                                <td className="whitespace-nowrap px-1 py-1.5 text-right text-[9px] font-semibold text-slate-800">
-                                  {formatPlaygroundMoney(lineTotal)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+                      {quoteLineEdits.map((row) => (
+                        <div
+                          key={row.id}
+                          className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+                        >
+                          <div className="mb-1 grid grid-cols-1 gap-1.5">
+                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
+                              Pieza
+                              <select
+                                value={row.pieza}
+                                onChange={(e) => {
+                                  const pieza = normalizePiezaForPlayground(e.target.value);
+                                  setQuoteLineEdits((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? {
+                                            ...r,
+                                            pieza,
+                                            precioInput: String(
+                                              Math.round(calculateEstimate(pieza, r.severidad)),
+                                            ),
+                                          }
+                                        : r,
+                                    ),
+                                  );
+                                }}
+                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900 outline-none focus:border-indigo-400"
+                              >
+                                {AUTO_FIX_BASE_PRICES.map((pr) => (
+                                  <option key={pr.pieza} value={pr.pieza}>
+                                    {pr.pieza}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
+                              Severidad
+                              <select
+                                value={row.severidad}
+                                onChange={(e) => {
+                                  const severidad = e.target.value;
+                                  setQuoteLineEdits((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id
+                                        ? {
+                                            ...r,
+                                            severidad,
+                                            precioInput: String(
+                                              Math.round(calculateEstimate(r.pieza, severidad)),
+                                            ),
+                                          }
+                                        : r,
+                                    ),
+                                  );
+                                }}
+                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900 outline-none focus:border-indigo-400"
+                              >
+                                {DAMAGE_LEVEL_KEYS.map((k) => (
+                                  <option key={k} value={k}>
+                                    {k}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
+                              Importe (MXN)
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={row.precioInput}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setQuoteLineEdits((prev) =>
+                                    prev.map((r) => (r.id === row.id ? { ...r, precioInput: v } : r)),
+                                  );
+                                }}
+                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-right text-[11px] font-semibold text-slate-900 outline-none focus:border-indigo-400"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ))}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleAuthorizeMockDraft()}
+                      className="mt-2 shrink-0 rounded-xl bg-emerald-600 px-3 py-2.5 text-center text-[12px] font-bold text-white shadow-md transition hover:bg-emerald-500"
+                    >
+                      Autorizar y Enviar
+                    </button>
 
                     <div className="mt-1.5 shrink-0 rounded-lg border-2 border-emerald-400/70 bg-emerald-50 px-2 py-2 text-right shadow-sm">
                       <p className="text-[8px] font-bold uppercase tracking-wide text-emerald-900">
@@ -375,7 +523,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                       <p className="text-lg font-bold tabular-nums text-emerald-950">
                         {formatPlaygroundMoney(playgroundQuoteTotal)}
                       </p>
-                      <p className="text-[8px] text-emerald-800/90">Suma de precios unitarios × cantidad</p>
+                      <p className="text-[8px] text-emerald-800/90">Suma de importes por línea</p>
                     </div>
                   </div>
                 </>
@@ -383,7 +531,14 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                 <>
                   <div className="shrink-0 border-b border-white/5 bg-zinc-900/80 px-4 py-2.5 text-center backdrop-blur">
                     <p className="text-[13px] font-semibold text-white">Asistente IA</p>
-                    <p className="text-[10px] text-white/45">Prueba · sin persistir en BD</p>
+                    <div className="mt-0.5 flex flex-wrap items-center justify-center gap-1.5">
+                      <p className="text-[10px] text-white/45">Prueba · sin persistir en BD</p>
+                      {playgroundLocked ? (
+                        <span className="rounded-full bg-rose-500/25 px-2 py-0.5 text-[9px] font-semibold text-rose-100 ring-1 ring-rose-400/40">
+                          Autopiloto OFF
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
@@ -437,28 +592,32 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                     <div ref={listEndRef} />
                   </div>
 
-                  {mockDraftQuote ? (
-                    <div className="shrink-0 border-t border-amber-500/40 bg-gradient-to-r from-amber-950/80 to-amber-900/60 px-3 py-2">
+                  {playgroundLocked ? (
+                    <button
+                      type="button"
+                      onClick={() => setPhoneScreen('quote')}
+                      className="shrink-0 border-t border-amber-500/40 bg-gradient-to-r from-amber-950/80 to-amber-900/60 px-3 py-2.5 text-left transition hover:from-amber-900/90 hover:to-amber-800/70"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                           <span className="relative flex h-2.5 w-2.5 shrink-0">
                             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-60" />
                             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
                           </span>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-semibold text-amber-100">Presupuesto generado</p>
-                            <p className="truncate text-[9px] text-amber-200/80">{mockDraftQuote.reference}</p>
+                          <div className="min-w-0 text-left">
+                            <p className="text-[11px] font-semibold leading-tight text-amber-50">
+                              📍 Borrador de Cotización detectado — Revisar
+                            </p>
+                            <p className="truncate text-[9px] text-amber-200/85">
+                              Autopiloto OFF hasta autorizar · {mockDraft.reference}
+                            </p>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setPhoneScreen('quote')}
-                          className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 shadow transition hover:bg-amber-300"
-                        >
-                          Ver Presupuesto
-                        </button>
+                        <span className="shrink-0 rounded-lg bg-amber-400 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide text-amber-950 shadow">
+                          Abrir
+                        </span>
                       </div>
-                    </div>
+                    </button>
                   ) : null}
 
                   <div className="shrink-0 border-t border-white/10 bg-zinc-900/95 p-2.5 backdrop-blur">
@@ -506,7 +665,13 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                         }}
                         rows={1}
                         disabled={busy}
-                        placeholder={disabled ? 'Cargando…' : 'Mensaje…'}
+                        placeholder={
+                          disabled
+                            ? 'Cargando…'
+                            : playgroundLocked
+                              ? 'Autopiloto OFF: autoriza el borrador para continuar…'
+                              : 'Mensaje…'
+                        }
                         className="max-h-24 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-[13px] text-white placeholder:text-white/35 outline-none disabled:opacity-40"
                       />
                       <button
