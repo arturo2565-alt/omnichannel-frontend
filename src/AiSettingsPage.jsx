@@ -37,11 +37,27 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+/** Hasta 14 turnos previos para el API (el mensaje actual va en `userText`). */
+function buildPlaygroundApiHistory(messages) {
+  const rows = [];
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    if (m.isError) continue;
+    if (m.id === 'welcome') continue;
+    let text = '';
+    if (m.text && String(m.text).trim()) text = String(m.text).trim();
+    else if (m.imageUrl) text = '[El cliente envió una imagen en el simulador]';
+    else continue;
+    rows.push({ role: m.role, text });
+  }
+  return rows.slice(-14);
+}
+
 const initialPlaygroundMessages = [
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Simulador conectado a la IA del backend. Usa los prompts del formulario (aunque no los hayas guardado). Nada de esto se guarda en conversaciones reales.',
+    text: 'Simulador conectado a la IA del backend. Usa los prompts del formulario (aunque no los hayas guardado). El hilo del chat se envía como historial: puedes probar diálogos largos. Nada se guarda en conversaciones reales.',
   },
 ];
 
@@ -135,6 +151,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     e.target.value = '';
     if (!file?.type?.startsWith('image/')) return;
     if (disabled) return;
+    const historyForApi = buildPlaygroundApiHistory(messages);
     const url = URL.createObjectURL(file);
     blobUrlsRef.current.push(url);
     setMessages((prev) => [
@@ -148,7 +165,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     ]);
     try {
       const imageBase64 = await fileToDataUrl(file);
-      await runPlayground({ imageBase64 });
+      await runPlayground({ imageBase64, history: historyForApi });
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -166,9 +183,10 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     const text = draft.trim();
     if (!text) return;
     if (disabled) return;
+    const historyForApi = buildPlaygroundApiHistory(messages);
     setDraft('');
     setMessages((prev) => [...prev, { id: `txt-${Date.now()}`, role: 'user', text }]);
-    await runPlayground({ userText: text });
+    await runPlayground({ userText: text, history: historyForApi });
   };
 
   const busy = disabled || playgroundBusy;
@@ -182,7 +200,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         <h2 className="text-lg font-bold tracking-tight text-gray-900">AI Playground</h2>
         <p className="mt-1 text-xs text-gray-500">
           Llama a <code className="rounded bg-gray-100 px-1">/ai-playground/test</code> con los prompts del
-          formulario. Cotizaciones de prueba solo en estado local.
+          formulario y hasta 15 turnos de contexto. Cotizaciones de prueba solo en estado local.
         </p>
       </div>
 
@@ -504,7 +522,7 @@ export default function AiSettingsPage() {
   };
 
   const testAiResponse = useCallback(
-    async ({ userText, imageBase64 }) => {
+    async ({ userText, imageBase64, history }) => {
       const body = {
         visionPrompt: form.visionPrompt,
         chatAppointmentPrompt: form.chatAppointmentPrompt,
@@ -514,6 +532,7 @@ export default function AiSettingsPage() {
           imageBase64 != null && String(imageBase64).trim() !== ''
             ? String(imageBase64).trim()
             : undefined,
+        ...(Array.isArray(history) && history.length > 0 ? { history } : {}),
       };
       if (!body.userText && !body.imageBase64) {
         throw new Error('Falta mensaje o imagen');
