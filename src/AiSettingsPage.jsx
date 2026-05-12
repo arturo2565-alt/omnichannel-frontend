@@ -37,50 +37,54 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** Hasta 14 turnos previos para el API (el mensaje actual va en `userText`). */
-function buildPlaygroundApiHistory(messages) {
-  const rows = [];
-  for (const m of messages) {
-    if (m.role !== 'user' && m.role !== 'assistant') continue;
-    if (m.isError) continue;
-    if (m.id === 'welcome') continue;
-    let text = '';
-    if (m.text && String(m.text).trim()) text = String(m.text).trim();
-    else if (m.imageUrl) text = '[El cliente envió una imagen en el simulador]';
-    else continue;
-    rows.push({ role: m.role, text });
-  }
-  return rows.slice(-14);
+const PLAYGROUND_DEBOUNCE_MS = 20000;
+const PLAYGROUND_HISTORY_MAX = 50;
+
+function capConversationHistory(rows) {
+  if (!Array.isArray(rows) || rows.length <= PLAYGROUND_HISTORY_MAX) return rows || [];
+  return rows.slice(-PLAYGROUND_HISTORY_MAX);
 }
 
 const initialPlaygroundMessages = [
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Simulador conectado a la IA del backend. Usa los prompts del formulario (aunque no los hayas guardado). El hilo del chat se envía como historial: puedes probar diálogos largos. Nada se guarda en conversaciones reales.',
+    text: 'Simulador conectado a la IA del backend. Los mensajes se agrupan y se envían a los 20 s de inactividad (puedes seguir escribiendo). El historial de la sesión se mantiene en memoria para diálogos largos. Nada se guarda en la base de datos real.',
   },
 ];
 
 function AiPlaygroundSidebar({ testAiResponse, disabled }) {
   const [messages, setMessages] = useState(initialPlaygroundMessages);
+  const [conversationHistory, setConversationHistory] = useState([]);
   const [draft, setDraft] = useState('');
   const [mockDraftQuote, setMockDraftQuote] = useState(null);
   const [phoneScreen, setPhoneScreen] = useState('chat');
   const [quoteLineEdits, setQuoteLineEdits] = useState([]);
-  const [playgroundBusy, setPlaygroundBusy] = useState(false);
+  /** idle | debounce (esperando más mensajes) | thinking (llamada en curso) */
+  const [playgroundPhase, setPlaygroundPhase] = useState('idle');
   const fileInputRef = useRef(null);
   const blobUrlsRef = useRef([]);
   const listEndRef = useRef(null);
+  const pendingRef = useRef([]);
+  const debounceTimerRef = useRef(null);
+  const conversationHistoryRef = useRef([]);
+
+  useEffect(() => {
+    conversationHistoryRef.current = conversationHistory;
+  }, [conversationHistory]);
 
   useEffect(() => {
     return () => {
       blobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      if (debounceTimerRef.current != null) {
+        clearTimeout(debounceTimerRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, playgroundBusy, mockDraftQuote, phoneScreen]);
+  }, [messages, playgroundPhase, mockDraftQuote, phoneScreen]);
 
   useEffect(() => {
     if (!mockDraftQuote) {
@@ -114,22 +118,84 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     [quoteLineEdits],
   );
 
-  const runPlayground = async (payload) => {
+  const flushPlaygroundPending = useCallback(async () => {
     if (disabled) return;
-    setPlaygroundBusy(true);
+    const queue = pendingRef.current;
+    pendingRef.current = [];
+    debounceTimerRef.current = null;
+    if (queue.length === 0) {
+      setPlaygroundPhase('idle');
+      return;
+    }
+
+    setPlaygroundPhase('thinking');
     setMockDraftQuote(null);
+
+    const parts = [];
+    let lastImageFile = null;
+    let n = 0;
+    for (const item of queue) {
+      if (item.kind === 'text') {
+        n += 1;
+        parts.push(`(${n}) ${item.text}`);
+      } else if (item.kind === 'image') {
+        n += 1;
+        parts.push(`(${n}) [Imagen: ${item.name}]`);
+        lastImageFile = item.file;
+      }
+    }
+    const consolidatedText = parts.join('\n\n');
+
+    let imageBase64;
+    if (lastImageFile) {
+      try {
+        imageBase64 = await fileToDataUrl(lastImageFile);
+      } catch (e) {
+        setPlaygroundPhase('idle');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            text: e?.message ?? 'No se pudo leer la imagen',
+            isError: true,
+          },
+        ]);
+        return;
+      }
+    }
+
+    const historyPayload = capConversationHistory(conversationHistoryRef.current);
+
+    if (!consolidatedText.trim() && !imageBase64) {
+      setPlaygroundPhase('idle');
+      return;
+    }
+
     try {
-      const data = await testAiResponse(payload);
+      const data = await testAiResponse({
+        userText: consolidatedText.trim() || undefined,
+        imageBase64: typeof imageBase64 === 'string' ? imageBase64 : undefined,
+        history: historyPayload,
+      });
       setMockDraftQuote(data.mockDraftQuote ?? null);
+      const assistantText = data.assistantMessage ?? '(Sin respuesta)';
       setMessages((prev) => [
         ...prev,
         {
           id: `asst-${Date.now()}`,
           role: 'assistant',
-          text: data.assistantMessage ?? '(Sin respuesta)',
+          text: assistantText,
           isError: false,
         },
       ]);
+      setConversationHistory((prev) =>
+        capConversationHistory([
+          ...prev,
+          { role: 'user', text: consolidatedText.trim() || '[Imagen(es)]' },
+          { role: 'assistant', text: assistantText },
+        ]),
+      );
     } catch (err) {
       setMockDraftQuote(null);
       setMessages((prev) => [
@@ -142,16 +208,26 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         },
       ]);
     } finally {
-      setPlaygroundBusy(false);
+      setPlaygroundPhase('idle');
     }
-  };
+  }, [disabled, testAiResponse]);
 
-  const handlePickImage = async (e) => {
+  const schedulePlaygroundDebounce = useCallback(() => {
+    if (debounceTimerRef.current != null) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    setPlaygroundPhase('debounce');
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      void flushPlaygroundPending();
+    }, PLAYGROUND_DEBOUNCE_MS);
+  }, [flushPlaygroundPending]);
+
+  const handlePickImage = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file?.type?.startsWith('image/')) return;
-    if (disabled) return;
-    const historyForApi = buildPlaygroundApiHistory(messages);
+    if (disabled || playgroundPhase === 'thinking') return;
     const url = URL.createObjectURL(file);
     blobUrlsRef.current.push(url);
     setMessages((prev) => [
@@ -163,33 +239,20 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         imageName: file.name,
       },
     ]);
-    try {
-      const imageBase64 = await fileToDataUrl(file);
-      await runPlayground({ imageBase64, history: historyForApi });
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          text: err?.message ?? 'Error al procesar la imagen',
-          isError: true,
-        },
-      ]);
-    }
+    pendingRef.current = [...pendingRef.current, { kind: 'image', file, name: file.name }];
+    schedulePlaygroundDebounce();
   };
 
-  const sendDraft = async () => {
+  const sendDraft = () => {
     const text = draft.trim();
-    if (!text) return;
-    if (disabled) return;
-    const historyForApi = buildPlaygroundApiHistory(messages);
+    if (!text || disabled || playgroundPhase === 'thinking') return;
     setDraft('');
     setMessages((prev) => [...prev, { id: `txt-${Date.now()}`, role: 'user', text }]);
-    await runPlayground({ userText: text, history: historyForApi });
+    pendingRef.current = [...pendingRef.current, { kind: 'text', text }];
+    schedulePlaygroundDebounce();
   };
 
-  const busy = disabled || playgroundBusy;
+  const busy = disabled || playgroundPhase === 'thinking';
 
   return (
     <aside className="flex w-[min(100%,440px)] shrink-0 flex-col border-l border-gray-200 bg-gradient-to-b from-gray-50 to-white">
@@ -200,7 +263,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         <h2 className="text-lg font-bold tracking-tight text-gray-900">AI Playground</h2>
         <p className="mt-1 text-xs text-gray-500">
           Llama a <code className="rounded bg-gray-100 px-1">/ai-playground/test</code> con los prompts del
-          formulario y hasta 15 turnos de contexto. Cotizaciones de prueba solo en estado local.
+          formulario y hasta {PLAYGROUND_HISTORY_MAX} turnos en memoria (`conversationHistory`). Debounce 20 s. Cotizaciones de prueba solo en estado local.
         </p>
       </div>
 
@@ -357,10 +420,17 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                         </div>
                       </div>
                     ))}
-                    {playgroundBusy ? (
+                    {playgroundPhase === 'debounce' ? (
                       <div className="flex justify-start">
-                        <div className="rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-white/60">
-                          Consultando IA…
+                        <div className="rounded-2xl rounded-bl-md border border-cyan-500/30 bg-cyan-950/40 px-3 py-2 text-[11px] leading-snug text-cyan-100/95">
+                          IA esperando más mensajes… (agrupa envíos durante ~20 s)
+                        </div>
+                      </div>
+                    ) : null}
+                    {playgroundPhase === 'thinking' ? (
+                      <div className="flex justify-start">
+                        <div className="rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-white/70">
+                          IA pensando…
                         </div>
                       </div>
                     ) : null}
