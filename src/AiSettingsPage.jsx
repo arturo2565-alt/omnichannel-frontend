@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
@@ -71,15 +71,18 @@ const initialPlaygroundMessages = [
   },
 ];
 
-function AiPlaygroundSidebar({ testAiResponse, disabled }) {
+function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled }) {
   const [messages, setMessages] = useState(initialPlaygroundMessages);
   const [conversationHistory, setConversationHistory] = useState([]);
   const [draft, setDraft] = useState('');
   const [mockDraft, setMockDraft] = useState(null);
+  const [isDraftPending, setIsDraftPending] = useState(false);
   const [phoneScreen, setPhoneScreen] = useState('chat');
   const [quoteLineEdits, setQuoteLineEdits] = useState([]);
+  const [editingQuoteRowId, setEditingQuoteRowId] = useState(null);
   /** idle | debounce (esperando más mensajes) | thinking (llamada en curso) */
   const [playgroundPhase, setPlaygroundPhase] = useState('idle');
+  const [thinkingMode, setThinkingMode] = useState(null);
   const fileInputRef = useRef(null);
   const blobUrlsRef = useRef([]);
   const listEndRef = useRef(null);
@@ -88,12 +91,15 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
   const conversationHistoryRef = useRef([]);
   const playgroundLockedRef = useRef(false);
 
+  const pendingResumeContextRef = useRef(null);
+
   const playgroundLocked = useMemo(
     () =>
-      !!mockDraft &&
-      Array.isArray(mockDraft.lines) &&
-      mockDraft.lines.length > 0,
-    [mockDraft],
+      isDraftPending ||
+      (!!mockDraft &&
+        Array.isArray(mockDraft.lines) &&
+        mockDraft.lines.length > 0),
+    [mockDraft, isDraftPending],
   );
 
   useEffect(() => {
@@ -115,12 +121,15 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, playgroundPhase, mockDraft, phoneScreen]);
+  }, [messages, playgroundPhase, mockDraft, phoneScreen, isDraftPending]);
 
   useEffect(() => {
     if (!mockDraft) {
       setQuoteLineEdits([]);
       setPhoneScreen('chat');
+      setIsDraftPending(false);
+      setEditingQuoteRowId(null);
+      pendingResumeContextRef.current = null;
       return;
     }
     const lines = mockDraft.lines ?? [];
@@ -187,8 +196,10 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     [quoteLineEdits],
   );
 
-  const handleAuthorizeMockDraft = useCallback(() => {
+  const handleAuthorizeMockDraft = useCallback(async () => {
     if (!mockDraft) return;
+    if (quoteLineEdits.length === 0) return;
+
     const lines = quoteLineEdits
       .map((r, i) => {
         const p = parsePrecioInput(r.precioInput);
@@ -196,17 +207,73 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         return `${i + 1}. ${r.pieza} (${r.severidad}) — ${formatPlaygroundMoney(amt)}`;
       })
       .join('\n');
-    const body = `Cotización autorizada y enviada al cliente (simulación).\n\n${mockDraft.reference}\n${lines}\n\nTotal: ${formatPlaygroundMoney(playgroundQuoteTotal)}`;
-    setMessages((prev) => [
-      ...prev,
-      { id: `auth-${Date.now()}`, role: 'assistant', text: body, isError: false },
-    ]);
-    setConversationHistory((prev) =>
-      capConversationHistory([...prev, { role: 'assistant', text: body }]),
-    );
-    setMockDraft(null);
-    setPhoneScreen('chat');
-  }, [mockDraft, quoteLineEdits, playgroundQuoteTotal]);
+    const summaryBody = `Cotización autorizada y enviada al cliente (simulación).\n\n${mockDraft.reference}\n${lines}\n\nTotal: ${formatPlaygroundMoney(playgroundQuoteTotal)}`;
+
+    const resumeCtx = pendingResumeContextRef.current;
+    const historySnapshot = capConversationHistory(conversationHistoryRef.current);
+
+    setPlaygroundPhase('thinking');
+    try {
+      if (isDraftPending && resumeCtx && typeof testAiResumeAfterDraft === 'function') {
+        const resumeData = await testAiResumeAfterDraft({
+          userBatchText: resumeCtx.consolidatedText,
+          authorizedQuoteSummary: summaryBody,
+          visionItems: resumeCtx.visionItems,
+          history: historySnapshot,
+        });
+        const followUp = resumeData?.assistantMessage?.trim() || '(La IA no devolvió texto.)';
+        setMessages((prev) => [
+          ...prev,
+          { id: `auth-${Date.now()}`, role: 'assistant', text: summaryBody, isError: false },
+          { id: `resume-${Date.now()}`, role: 'assistant', text: followUp, isError: false },
+        ]);
+        setConversationHistory((prev) =>
+          capConversationHistory([
+            ...prev,
+            { role: 'assistant', text: summaryBody },
+            { role: 'assistant', text: followUp },
+          ]),
+        );
+        setMockDraft(null);
+        setIsDraftPending(false);
+        setPhoneScreen('chat');
+        setEditingQuoteRowId(null);
+        pendingResumeContextRef.current = null;
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { id: `auth-${Date.now()}`, role: 'assistant', text: summaryBody, isError: false },
+        ]);
+        setConversationHistory((prev) =>
+          capConversationHistory([...prev, { role: 'assistant', text: summaryBody }]),
+        );
+        setMockDraft(null);
+        setIsDraftPending(false);
+        setPhoneScreen('chat');
+        setEditingQuoteRowId(null);
+        pendingResumeContextRef.current = null;
+      }
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err-resume-${Date.now()}`,
+          role: 'assistant',
+          text: e?.message ?? 'Error al generar la respuesta del asistente tras autorizar',
+          isError: true,
+        },
+      ]);
+    } finally {
+      setPlaygroundPhase('idle');
+      setThinkingMode(null);
+    }
+  }, [
+    mockDraft,
+    quoteLineEdits,
+    playgroundQuoteTotal,
+    isDraftPending,
+    testAiResumeAfterDraft,
+  ]);
 
   const flushPlaygroundPending = useCallback(async () => {
     if (disabled) return;
@@ -217,6 +284,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         debounceTimerRef.current = null;
       }
       setPlaygroundPhase('idle');
+      setThinkingMode(null);
       return;
     }
     const queue = pendingRef.current;
@@ -224,6 +292,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
     debounceTimerRef.current = null;
     if (queue.length === 0) {
       setPlaygroundPhase('idle');
+      setThinkingMode(null);
       return;
     }
 
@@ -250,6 +319,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         imageBase64 = await fileToDataUrl(lastImageFile);
       } catch (e) {
         setPlaygroundPhase('idle');
+        setThinkingMode(null);
         setMessages((prev) => [
           ...prev,
           {
@@ -267,8 +337,11 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
 
     if (!consolidatedText.trim() && !imageBase64) {
       setPlaygroundPhase('idle');
+      setThinkingMode(null);
       return;
     }
+
+    setThinkingMode(typeof imageBase64 === 'string' ? 'vision' : 'chat');
 
     try {
       const data = await testAiResponse({
@@ -276,26 +349,45 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         imageBase64: typeof imageBase64 === 'string' ? imageBase64 : undefined,
         history: historyPayload,
       });
-      setMockDraft(data.mockDraftQuote ?? null);
-      const assistantText = data.assistantMessage ?? '(Sin respuesta)';
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `asst-${Date.now()}`,
-          role: 'assistant',
-          text: assistantText,
-          isError: false,
-        },
-      ]);
-      setConversationHistory((prev) =>
-        capConversationHistory([
+
+      if (data.isDraftPending && data.mockDraftQuote) {
+        setIsDraftPending(true);
+        setMockDraft(data.mockDraftQuote);
+        setPhoneScreen('quote');
+        pendingResumeContextRef.current = {
+          consolidatedText: consolidatedText.trim() || '[Imagen(es)]',
+          visionItems: Array.isArray(data.visionItems) ? data.visionItems : [],
+        };
+        setConversationHistory((prev) =>
+          capConversationHistory([
+            ...prev,
+            { role: 'user', text: consolidatedText.trim() || '[Imagen(es)]' },
+          ]),
+        );
+      } else {
+        setIsDraftPending(false);
+        setMockDraft(data.mockDraftQuote ?? null);
+        const assistantText = data.assistantMessage ?? '(Sin respuesta)';
+        setMessages((prev) => [
           ...prev,
-          { role: 'user', text: consolidatedText.trim() || '[Imagen(es)]' },
-          { role: 'assistant', text: assistantText },
-        ]),
-      );
+          {
+            id: `asst-${Date.now()}`,
+            role: 'assistant',
+            text: assistantText,
+            isError: false,
+          },
+        ]);
+        setConversationHistory((prev) =>
+          capConversationHistory([
+            ...prev,
+            { role: 'user', text: consolidatedText.trim() || '[Imagen(es)]' },
+            { role: 'assistant', text: assistantText },
+          ]),
+        );
+      }
     } catch (err) {
       setMockDraft(null);
+      setIsDraftPending(false);
       setMessages((prev) => [
         ...prev,
         {
@@ -306,6 +398,7 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         },
       ]);
     } finally {
+      setThinkingMode(null);
       setPlaygroundPhase('idle');
     }
   }, [disabled, testAiResponse]);
@@ -353,6 +446,8 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
 
   const busy = disabled || playgroundPhase === 'thinking' || playgroundLocked;
 
+  const showQuoteModal = !!(mockDraft && (isDraftPending || phoneScreen === 'quote'));
+
   return (
     <aside className="flex w-[min(100%,440px)] shrink-0 flex-col border-l border-gray-200 bg-gradient-to-b from-gray-50 to-white">
       <div className="shrink-0 border-b border-gray-200/80 bg-white/90 px-5 py-4 backdrop-blur">
@@ -361,8 +456,9 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
         </p>
         <h2 className="text-lg font-bold tracking-tight text-gray-900">AI Playground</h2>
         <p className="mt-1 text-xs text-gray-500">
-          Llama a <code className="rounded bg-gray-100 px-1">/ai-playground/test</code> con los prompts del
-          formulario y hasta {PLAYGROUND_HISTORY_MAX} turnos en memoria (`conversationHistory`). Debounce 20 s. Cotizaciones de prueba solo en estado local.
+          Llama a <code className="rounded bg-gray-100 px-1">/ai-playground/test</code> (visión primero si hay
+          imagen) y a <code className="rounded bg-gray-100 px-1">/ai-playground/resume-after-draft</code> tras
+          autorizar. Hasta {PLAYGROUND_HISTORY_MAX} turnos en memoria. Debounce 20 s.
         </p>
       </div>
 
@@ -386,34 +482,205 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-zinc-900 to-zinc-950">
-              {phoneScreen === 'quote' && mockDraft ? (
-                <>
-                  <div className="shrink-0 border-b border-white/10 bg-zinc-900/95 px-3 py-2.5">
+            <div className="relative flex min-h-0 flex-1 flex-col bg-gradient-to-b from-zinc-900 to-zinc-950">
+              <>
+                <div className="shrink-0 border-b border-white/5 bg-zinc-900/80 px-4 py-2.5 text-center backdrop-blur">
+                  <p className="text-[13px] font-semibold text-white">Asistente IA</p>
+                  <div className="mt-0.5 flex flex-wrap items-center justify-center gap-1.5">
+                    <p className="text-[10px] text-white/45">Prueba · sin persistir en BD</p>
+                    {playgroundLocked ? (
+                      <span className="rounded-full bg-rose-500/25 px-2 py-0.5 text-[9px] font-semibold text-rose-100 ring-1 ring-rose-400/40">
+                        Autopiloto OFF
+                      </span>
+                    ) : null}
+                    {isDraftPending ? (
+                      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[9px] font-semibold text-amber-100 ring-1 ring-amber-400/35">
+                        Borrador pendiente
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
+                  {messages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-snug shadow-sm ${
+                          m.role === 'user'
+                            ? 'rounded-br-md bg-indigo-600 text-white'
+                            : m.isError
+                              ? 'rounded-bl-md border border-red-400/40 bg-red-950/50 text-red-100'
+                              : 'rounded-bl-md border border-white/10 bg-white/10 text-white/95'
+                        }`}
+                      >
+                        {m.imageUrl ? (
+                          <div className="space-y-1.5">
+                            <img
+                              src={m.imageUrl}
+                              alt={m.imageName || 'Imagen'}
+                              className="max-h-[200px] w-full max-w-[240px] rounded-xl object-cover"
+                            />
+                            {m.imageName ? (
+                              <p className="truncate text-[10px] font-medium text-white/75">
+                                {m.imageName}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {playgroundPhase === 'debounce' ? (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl rounded-bl-md border border-cyan-500/30 bg-cyan-950/40 px-3 py-2 text-[11px] leading-snug text-cyan-100/95">
+                        IA esperando más mensajes… (agrupa envíos durante ~20 s)
+                      </div>
+                    </div>
+                  ) : null}
+                  {playgroundPhase === 'thinking' ? (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-white/70">
+                        {thinkingMode === 'vision'
+                          ? 'Analizando imagen y generando borrador…'
+                          : 'IA pensando…'}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div ref={listEndRef} />
+                </div>
+
+                {playgroundLocked && mockDraft && !isDraftPending ? (
+                  <button
+                    type="button"
+                    onClick={() => setPhoneScreen('quote')}
+                    className="shrink-0 border-t border-amber-500/40 bg-gradient-to-r from-amber-950/80 to-amber-900/60 px-3 py-2.5 text-left transition hover:from-amber-900/90 hover:to-amber-800/70"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="relative flex h-2.5 w-2.5 shrink-0">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-60" />
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+                        </span>
+                        <div className="min-w-0 text-left">
+                          <p className="text-[11px] font-semibold leading-tight text-amber-50">
+                            📍 Borrador de Cotización detectado — Revisar
+                          </p>
+                          <p className="truncate text-[9px] text-amber-200/85">
+                            Autopiloto OFF hasta autorizar · {mockDraft.reference}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-lg bg-amber-400 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide text-amber-950 shadow">
+                        Abrir
+                      </span>
+                    </div>
+                  </button>
+                ) : null}
+
+                <div className="shrink-0 border-t border-white/10 bg-zinc-900/95 p-2.5 backdrop-blur">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handlePickImage}
+                    disabled={busy}
+                  />
+                  <div className="mb-2 flex justify-center">
                     <button
                       type="button"
-                      onClick={() => setPhoneScreen('chat')}
-                      className="mb-1 flex items-center gap-0.5 text-[11px] font-medium text-indigo-300 transition hover:text-white"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={busy}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-40"
                     >
                       <svg
-                        className="h-4 w-4 shrink-0"
+                        className="h-4 w-4 opacity-90"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                         strokeWidth={2}
                         aria-hidden
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                        />
                       </svg>
-                      Volver al chat
+                      Subir Imagen
                     </button>
-                    <p className="text-[13px] font-bold text-white">Edición de cotización</p>
+                  </div>
+                  <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-zinc-800/80 px-2 py-1.5">
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendDraft();
+                        }
+                      }}
+                      rows={1}
+                      disabled={busy}
+                      placeholder={
+                        disabled
+                          ? 'Cargando…'
+                          : playgroundLocked
+                            ? 'Autopiloto OFF: autoriza el borrador para continuar…'
+                            : 'Mensaje…'
+                      }
+                      className="max-h-24 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-[13px] text-white placeholder:text-white/35 outline-none disabled:opacity-40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void sendDraft()}
+                      disabled={busy}
+                      className="mb-0.5 shrink-0 rounded-xl bg-indigo-500 px-3 py-2 text-[12px] font-bold text-white shadow-md transition hover:bg-indigo-400 disabled:opacity-40"
+                    >
+                      Enviar
+                    </button>
+                  </div>
+                </div>
+              </>
+
+              {showQuoteModal ? (
+                <div className="absolute inset-0 z-[35] flex min-h-0 flex-col border-t border-white/10 bg-slate-100 shadow-[0_-12px_48px_rgba(0,0,0,0.45)]">
+                  <div className="shrink-0 border-b border-slate-200 bg-zinc-900 px-3 py-2.5 text-white">
+                    {!isDraftPending ? (
+                      <button
+                        type="button"
+                        onClick={() => setPhoneScreen('chat')}
+                        className="mb-1 flex items-center gap-0.5 text-[11px] font-medium text-indigo-300 transition hover:text-white"
+                      >
+                        <svg
+                          className="h-4 w-4 shrink-0"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          aria-hidden
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Volver al chat
+                      </button>
+                    ) : (
+                      <p className="mb-1 text-[10px] font-medium text-amber-200/95">
+                        Revisa el borrador y autoriza para ver la respuesta del asistente.
+                      </p>
+                    )}
+                    <p className="text-[13px] font-bold">Revisión de cotización</p>
                     <p className="text-[9px] text-white/50">
-                      Matriz de precios real · borrador local (no BD)
+                      Matriz de precios · simulador (no BD)
                     </p>
                   </div>
 
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100 p-2">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
                     <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                       <span className="rounded-full bg-amber-200 px-1.5 py-0.5 text-[8px] font-bold uppercase text-amber-900">
                         Pendiente de aprobación
@@ -423,97 +690,149 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                       </span>
                     </div>
 
-                    <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
-                      {quoteLineEdits.map((row) => (
-                        <div
-                          key={row.id}
-                          className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
-                        >
-                          <div className="mb-1 grid grid-cols-1 gap-1.5">
-                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
-                              Pieza
-                              <select
-                                value={row.pieza}
-                                onChange={(e) => {
-                                  const pieza = normalizePiezaForPlayground(e.target.value);
-                                  setQuoteLineEdits((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id
-                                        ? {
-                                            ...r,
-                                            pieza,
-                                            precioInput: String(
-                                              Math.round(calculateEstimate(pieza, r.severidad)),
-                                            ),
-                                          }
-                                        : r,
-                                    ),
-                                  );
-                                }}
-                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900 outline-none focus:border-indigo-400"
-                              >
-                                {AUTO_FIX_BASE_PRICES.map((pr) => (
-                                  <option key={pr.pieza} value={pr.pieza}>
-                                    {pr.pieza}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
-                              Severidad
-                              <select
-                                value={row.severidad}
-                                onChange={(e) => {
-                                  const severidad = e.target.value;
-                                  setQuoteLineEdits((prev) =>
-                                    prev.map((r) =>
-                                      r.id === row.id
-                                        ? {
-                                            ...r,
-                                            severidad,
-                                            precioInput: String(
-                                              Math.round(calculateEstimate(r.pieza, severidad)),
-                                            ),
-                                          }
-                                        : r,
-                                    ),
-                                  );
-                                }}
-                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900 outline-none focus:border-indigo-400"
-                              >
-                                {DAMAGE_LEVEL_KEYS.map((k) => (
-                                  <option key={k} value={k}>
-                                    {k}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="block text-[8px] font-semibold uppercase text-slate-500">
-                              Importe (MXN)
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={row.precioInput}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setQuoteLineEdits((prev) =>
-                                    prev.map((r) => (r.id === row.id ? { ...r, precioInput: v } : r)),
-                                  );
-                                }}
-                                className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-right text-[11px] font-semibold text-slate-900 outline-none focus:border-indigo-400"
-                              />
-                            </label>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                      <table className="w-full table-fixed border-collapse text-left text-[10px]">
+                        <thead className="sticky top-0 z-[1] border-b border-slate-200 bg-slate-100 font-semibold uppercase text-slate-600">
+                          <tr>
+                            <th className="px-1.5 py-1.5">Pieza</th>
+                            <th className="w-[52px] px-1 py-1.5">Sev.</th>
+                            <th className="w-[72px] px-1 py-1.5 text-right">Precio</th>
+                            <th className="w-[88px] px-1 py-1.5 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quoteLineEdits.map((row) => {
+                            const amt = parsePrecioInput(row.precioInput);
+                            const show = Number.isFinite(amt) ? amt : 0;
+                            return (
+                              <Fragment key={row.id}>
+                                <tr className="border-t border-slate-100 align-middle">
+                                  <td className="px-1.5 py-1 font-medium text-slate-800">{row.pieza}</td>
+                                  <td className="px-1 py-1 text-slate-700">{row.severidad}</td>
+                                  <td className="px-1 py-1 text-right font-semibold tabular-nums text-slate-900">
+                                    {formatPlaygroundMoney(show)}
+                                  </td>
+                                  <td className="px-1 py-1 text-right">
+                                    <div className="flex flex-wrap justify-end gap-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setEditingQuoteRowId((id) => (id === row.id ? null : row.id))
+                                        }
+                                        className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[9px] font-semibold text-indigo-700 hover:bg-slate-50"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setQuoteLineEdits((prev) => prev.filter((r) => r.id !== row.id));
+                                          setEditingQuoteRowId((id) => (id === row.id ? null : id));
+                                        }}
+                                        className="rounded border border-red-200 bg-white px-1 py-0.5 text-[9px] font-semibold text-red-700 hover:bg-red-50"
+                                      >
+                                        Eliminar
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {editingQuoteRowId === row.id ? (
+                                  <tr className="border-t border-indigo-100 bg-indigo-50/50">
+                                    <td colSpan={4} className="px-2 py-2">
+                                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+                                        <label className="block text-[8px] font-semibold uppercase text-slate-600">
+                                          Pieza
+                                          <select
+                                            value={row.pieza}
+                                            onChange={(e) => {
+                                              const pieza = normalizePiezaForPlayground(e.target.value);
+                                              setQuoteLineEdits((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === row.id
+                                                    ? {
+                                                        ...r,
+                                                        pieza,
+                                                        precioInput: String(
+                                                          Math.round(calculateEstimate(pieza, r.severidad)),
+                                                        ),
+                                                      }
+                                                    : r,
+                                                ),
+                                              );
+                                            }}
+                                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900"
+                                          >
+                                            {AUTO_FIX_BASE_PRICES.map((pr) => (
+                                              <option key={pr.pieza} value={pr.pieza}>
+                                                {pr.pieza}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                        <label className="block text-[8px] font-semibold uppercase text-slate-600">
+                                          Severidad
+                                          <select
+                                            value={row.severidad}
+                                            onChange={(e) => {
+                                              const severidad = e.target.value;
+                                              setQuoteLineEdits((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === row.id
+                                                    ? {
+                                                        ...r,
+                                                        severidad,
+                                                        precioInput: String(
+                                                          Math.round(calculateEstimate(r.pieza, severidad)),
+                                                        ),
+                                                      }
+                                                    : r,
+                                                ),
+                                              );
+                                            }}
+                                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-medium text-slate-900"
+                                          >
+                                            {DAMAGE_LEVEL_KEYS.map((k) => (
+                                              <option key={k} value={k}>
+                                                {k}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                        <label className="block text-[8px] font-semibold uppercase text-slate-600">
+                                          Importe (MXN)
+                                          <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={row.precioInput}
+                                            onChange={(e) => {
+                                              const v = e.target.value;
+                                              setQuoteLineEdits((prev) =>
+                                                prev.map((r) =>
+                                                  r.id === row.id ? { ...r, precioInput: v } : r,
+                                                ),
+                                              );
+                                            }}
+                                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-right text-[11px] font-semibold text-slate-900"
+                                          />
+                                        </label>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => handleAuthorizeMockDraft()}
-                      className="mt-2 shrink-0 rounded-xl bg-emerald-600 px-3 py-2.5 text-center text-[12px] font-bold text-white shadow-md transition hover:bg-emerald-500"
+                      onClick={() => void handleAuthorizeMockDraft()}
+                      disabled={busy || quoteLineEdits.length === 0}
+                      className="mt-2 shrink-0 rounded-xl bg-emerald-600 px-3 py-3 text-center text-[13px] font-bold text-white shadow-md transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      Autorizar y Enviar
+                      ✅ Autorizar y Enviar
                     </button>
 
                     <div className="mt-1.5 shrink-0 rounded-lg border-2 border-emerald-400/70 bg-emerald-50 px-2 py-2 text-right shadow-sm">
@@ -526,166 +845,8 @@ function AiPlaygroundSidebar({ testAiResponse, disabled }) {
                       <p className="text-[8px] text-emerald-800/90">Suma de importes por línea</p>
                     </div>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="shrink-0 border-b border-white/5 bg-zinc-900/80 px-4 py-2.5 text-center backdrop-blur">
-                    <p className="text-[13px] font-semibold text-white">Asistente IA</p>
-                    <div className="mt-0.5 flex flex-wrap items-center justify-center gap-1.5">
-                      <p className="text-[10px] text-white/45">Prueba · sin persistir en BD</p>
-                      {playgroundLocked ? (
-                        <span className="rounded-full bg-rose-500/25 px-2 py-0.5 text-[9px] font-semibold text-rose-100 ring-1 ring-rose-400/40">
-                          Autopiloto OFF
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
-                    {messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-snug shadow-sm ${
-                            m.role === 'user'
-                              ? 'rounded-br-md bg-indigo-600 text-white'
-                              : m.isError
-                                ? 'rounded-bl-md border border-red-400/40 bg-red-950/50 text-red-100'
-                                : 'rounded-bl-md border border-white/10 bg-white/10 text-white/95'
-                          }`}
-                        >
-                          {m.imageUrl ? (
-                            <div className="space-y-1.5">
-                              <img
-                                src={m.imageUrl}
-                                alt={m.imageName || 'Imagen'}
-                                className="max-h-[200px] w-full max-w-[240px] rounded-xl object-cover"
-                              />
-                              {m.imageName ? (
-                                <p className="truncate text-[10px] font-medium text-white/75">
-                                  {m.imageName}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {playgroundPhase === 'debounce' ? (
-                      <div className="flex justify-start">
-                        <div className="rounded-2xl rounded-bl-md border border-cyan-500/30 bg-cyan-950/40 px-3 py-2 text-[11px] leading-snug text-cyan-100/95">
-                          IA esperando más mensajes… (agrupa envíos durante ~20 s)
-                        </div>
-                      </div>
-                    ) : null}
-                    {playgroundPhase === 'thinking' ? (
-                      <div className="flex justify-start">
-                        <div className="rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-white/70">
-                          IA pensando…
-                        </div>
-                      </div>
-                    ) : null}
-                    <div ref={listEndRef} />
-                  </div>
-
-                  {playgroundLocked ? (
-                    <button
-                      type="button"
-                      onClick={() => setPhoneScreen('quote')}
-                      className="shrink-0 border-t border-amber-500/40 bg-gradient-to-r from-amber-950/80 to-amber-900/60 px-3 py-2.5 text-left transition hover:from-amber-900/90 hover:to-amber-800/70"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <span className="relative flex h-2.5 w-2.5 shrink-0">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-60" />
-                            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
-                          </span>
-                          <div className="min-w-0 text-left">
-                            <p className="text-[11px] font-semibold leading-tight text-amber-50">
-                              📍 Borrador de Cotización detectado — Revisar
-                            </p>
-                            <p className="truncate text-[9px] text-amber-200/85">
-                              Autopiloto OFF hasta autorizar · {mockDraft.reference}
-                            </p>
-                          </div>
-                        </div>
-                        <span className="shrink-0 rounded-lg bg-amber-400 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide text-amber-950 shadow">
-                          Abrir
-                        </span>
-                      </div>
-                    </button>
-                  ) : null}
-
-                  <div className="shrink-0 border-t border-white/10 bg-zinc-900/95 p-2.5 backdrop-blur">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handlePickImage}
-                      disabled={busy}
-                    />
-                    <div className="mb-2 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={busy}
-                        className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-40"
-                      >
-                        <svg
-                          className="h-4 w-4 opacity-90"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          aria-hidden
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                          />
-                        </svg>
-                        Subir Imagen
-                      </button>
-                    </div>
-                    <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-zinc-800/80 px-2 py-1.5">
-                      <textarea
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            void sendDraft();
-                          }
-                        }}
-                        rows={1}
-                        disabled={busy}
-                        placeholder={
-                          disabled
-                            ? 'Cargando…'
-                            : playgroundLocked
-                              ? 'Autopiloto OFF: autoriza el borrador para continuar…'
-                              : 'Mensaje…'
-                        }
-                        className="max-h-24 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-[13px] text-white placeholder:text-white/35 outline-none disabled:opacity-40"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void sendDraft()}
-                        disabled={busy}
-                        className="mb-0.5 shrink-0 rounded-xl bg-indigo-500 px-3 py-2 text-[12px] font-bold text-white shadow-md transition hover:bg-indigo-400 disabled:opacity-40"
-                      >
-                        Enviar
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -794,6 +955,43 @@ export default function AiSettingsPage() {
       return r.json();
     },
     [form.visionPrompt, form.chatAppointmentPrompt],
+  );
+
+  const testAiResumeAfterDraft = useCallback(
+    async ({ userBatchText, authorizedQuoteSummary, visionItems, history }) => {
+      const body = {
+        chatAppointmentPrompt: form.chatAppointmentPrompt,
+        userBatchText:
+          userBatchText != null && String(userBatchText).trim() !== ''
+            ? String(userBatchText).trim()
+            : undefined,
+        authorizedQuoteSummary:
+          authorizedQuoteSummary != null ? String(authorizedQuoteSummary) : '',
+        ...(Array.isArray(history) && history.length > 0 ? { history } : {}),
+        ...(Array.isArray(visionItems) && visionItems.length > 0 ? { visionItems } : {}),
+      };
+      const r = await fetch(`${API_BASE_URL}/ai-playground/resume-after-draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const raw = await r.text().catch(() => '');
+        let msg = raw?.trim() || `Error ${r.status}`;
+        try {
+          const j = JSON.parse(raw);
+          if (j?.message != null) {
+            msg = Array.isArray(j.message) ? j.message.join(', ') : String(j.message);
+          }
+        } catch {
+          /* texto plano */
+        }
+        if (msg.length > 320) msg = `${msg.slice(0, 320)}…`;
+        throw new Error(msg);
+      }
+      return r.json();
+    },
+    [form.chatAppointmentPrompt],
   );
 
   return (
@@ -949,7 +1147,11 @@ export default function AiSettingsPage() {
         )}
           </main>
         </div>
-        <AiPlaygroundSidebar testAiResponse={testAiResponse} disabled={loading} />
+        <AiPlaygroundSidebar
+          testAiResponse={testAiResponse}
+          testAiResumeAfterDraft={testAiResumeAfterDraft}
+          disabled={loading}
+        />
       </div>
     </div>
   );
