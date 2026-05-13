@@ -1178,8 +1178,7 @@ export default function AiSettingsPage() {
                 describes aquí cómo hablar con el cliente, incluye que, cuando el sistema envíe una
                 autorización de cotización (mensaje interno que comienza por{' '}
                 <code className="rounded bg-gray-100 px-1 text-xs">SISTEMA:</code>), la respuesta al
-                cliente debe ser clara pero conversacional y, cuando encaje, mencionar la garantía
-                por escrito y el repintado en cabina.
+                cliente debe ser clara pero conversacional.
               </p>
               <label className="mt-4 block">
                 <span className="sr-only">Prompt de chat</span>
