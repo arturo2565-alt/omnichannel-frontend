@@ -255,6 +255,9 @@ export default function CatalogAdminPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
                       Días entrega
                     </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
+                      InstantQuote
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -294,6 +297,9 @@ export default function CatalogAdminPage() {
                             value={row.diasEntrega}
                             onChange={(ev) => updateCell(row.id, 'diasEntrega', ev.target.value)}
                           />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2 text-gray-600">
+                          {row.isInstantService ? 'Sí' : 'No'}
                         </td>
                       </tr>
                     );
