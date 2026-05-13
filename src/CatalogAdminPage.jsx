@@ -36,9 +36,12 @@ export default function CatalogAdminPage() {
     severidad: 'DM',
     precio: '0',
     diasEntrega: '4',
+    isInstantService: false,
   });
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [importLegacySubmitting, setImportLegacySubmitting] = useState(false);
+  const [instantSeedSubmitting, setInstantSeedSubmitting] = useState(false);
+  const [seedMessage, setSeedMessage] = useState(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -52,7 +55,11 @@ export default function CatalogAdminPage() {
       setRows(list);
       const m = new Map();
       for (const row of list) {
-        m.set(row.id, { precio: row.precio, diasEntrega: row.diasEntrega });
+        m.set(row.id, {
+          precio: row.precio,
+          diasEntrega: row.diasEntrega,
+          isInstantService: !!row.isInstantService,
+        });
       }
       setBaseline(m);
     } catch (e) {
@@ -73,8 +80,17 @@ export default function CatalogAdminPage() {
     for (const r of rows) {
       const b = baseline.get(r.id);
       if (!b) continue;
-      if (b.precio !== r.precio || b.diasEntrega !== r.diasEntrega) {
-        out.push({ id: r.id, precio: r.precio, diasEntrega: r.diasEntrega });
+      if (
+        b.precio !== r.precio ||
+        b.diasEntrega !== r.diasEntrega ||
+        !!b.isInstantService !== !!r.isInstantService
+      ) {
+        out.push({
+          id: r.id,
+          precio: r.precio,
+          diasEntrega: r.diasEntrega,
+          isInstantService: !!r.isInstantService,
+        });
       }
     }
     return out;
@@ -91,6 +107,12 @@ export default function CatalogAdminPage() {
       );
       return;
     }
+    if (field === 'isInstantService') {
+      const v = Boolean(rawValue);
+      setRows((prev) =>
+        prev.map((row) => (row.id === id ? { ...row, isInstantService: v } : row)),
+      );
+    }
   }, []);
 
   const handleSave = async () => {
@@ -98,6 +120,7 @@ export default function CatalogAdminPage() {
     setSaving(true);
     setError(null);
     setSaveOk(false);
+    setSeedMessage(null);
     try {
       const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`, {
         method: 'PATCH',
@@ -110,7 +133,11 @@ export default function CatalogAdminPage() {
       setRows(list);
       const m = new Map();
       for (const row of list) {
-        m.set(row.id, { precio: row.precio, diasEntrega: row.diasEntrega });
+        m.set(row.id, {
+          precio: row.precio,
+          diasEntrega: row.diasEntrega,
+          isInstantService: !!row.isInstantService,
+        });
       }
       setBaseline(m);
       setSaveOk(true);
@@ -137,15 +164,28 @@ export default function CatalogAdminPage() {
     }
     setAddSubmitting(true);
     setError(null);
+    setSeedMessage(null);
     try {
       const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servicio, severidad, precio, diasEntrega }),
+        body: JSON.stringify({
+          servicio,
+          severidad,
+          precio,
+          diasEntrega,
+          isInstantService: addForm.isInstantService,
+        }),
       });
       if (!r.ok) throw new Error(await parseJsonError(r));
       setAddOpen(false);
-      setAddForm({ servicio: '', severidad: 'DM', precio: '0', diasEntrega: '4' });
+      setAddForm({
+        servicio: '',
+        severidad: 'DM',
+        precio: '0',
+        diasEntrega: '4',
+        isInstantService: false,
+      });
       await load();
     } catch (err) {
       setError(err?.message ?? 'No se pudo crear la fila');
@@ -158,6 +198,7 @@ export default function CatalogAdminPage() {
     setImportLegacySubmitting(true);
     setError(null);
     setSaveOk(false);
+    setSeedMessage(null);
     try {
       const r = await fetch(`${API_ORIGIN_URL}/catalog/import-legacy-js`, {
         method: 'POST',
@@ -173,6 +214,31 @@ export default function CatalogAdminPage() {
     }
   };
 
+  const handleImportInstantQuote = async () => {
+    setInstantSeedSubmitting(true);
+    setError(null);
+    setSaveOk(false);
+    setSeedMessage(null);
+    try {
+      const r = await fetch(`${API_ORIGIN_URL}/catalog/seed-instant-quote-matrix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!r.ok) throw new Error(await parseJsonError(r));
+      const data = await r.json();
+      const n = data?.upserted ?? 0;
+      const total = data?.totalInDb ?? '';
+      setSeedMessage(
+        `InstantQuote: ${n} fila(s) actualizadas o insertadas. Total en catálogo: ${total}.`,
+      );
+      await load();
+    } catch (err) {
+      setError(err?.message ?? 'No se pudo cargar InstantQuote');
+    } finally {
+      setInstantSeedSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <OmnichannelLeftRail />
@@ -184,9 +250,9 @@ export default function CatalogAdminPage() {
             </p>
             <h1 className="text-xl font-bold text-gray-900">Catálogo · matriz de precios</h1>
             <p className="mt-0.5 text-sm text-gray-500">
-              Servicios y niveles de severidad. Edita precio y días de entrega en línea y guarda los
-              cambios. Si la tabla está vacía, usa «Importar desde archivo JS» (réplica de la matriz
-              del panel; upsert sin duplicar servicio+severidad).
+              Servicios y niveles de severidad. Edita precio, días e InstantQuote en línea. «Cargar
+              InstantQuote» inserta baños de pintura por tamaño y Estética Automotriz, y sincroniza
+              banderas (Cerámico, baños, estética = sí; hojalatería = no).
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -196,6 +262,14 @@ export default function CatalogAdminPage() {
                 className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100 disabled:opacity-50"
               >
                 {importLegacySubmitting ? 'Importando…' : 'Importar desde archivo JS'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleImportInstantQuote()}
+                disabled={instantSeedSubmitting}
+                className="rounded-lg border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-950 shadow-sm transition hover:bg-sky-100 disabled:opacity-50"
+              >
+                {instantSeedSubmitting ? 'Cargando…' : 'Cargar InstantQuote (baños + estética)'}
               </button>
               <button
                 type="button"
@@ -220,6 +294,11 @@ export default function CatalogAdminPage() {
               {saveOk ? (
                 <span className="text-xs font-medium text-emerald-700" role="status">
                   Cambios guardados.
+                </span>
+              ) : null}
+              {seedMessage ? (
+                <span className="text-xs font-medium text-sky-800" role="status">
+                  {seedMessage}
                 </span>
               ) : null}
             </div>
@@ -264,7 +343,10 @@ export default function CatalogAdminPage() {
                   {rows.map((row) => {
                     const b = baseline.get(row.id);
                     const rowDirty =
-                      b && (b.precio !== row.precio || b.diasEntrega !== row.diasEntrega);
+                      b &&
+                      (b.precio !== row.precio ||
+                        b.diasEntrega !== row.diasEntrega ||
+                        !!b.isInstantService !== !!row.isInstantService);
                     return (
                       <tr
                         key={row.id}
@@ -299,7 +381,17 @@ export default function CatalogAdminPage() {
                           />
                         </td>
                         <td className="whitespace-nowrap px-4 py-2 text-gray-600">
-                          {row.isInstantService ? 'Sí' : 'No'}
+                          <label className="inline-flex cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                              checked={!!row.isInstantService}
+                              onChange={(ev) =>
+                                updateCell(row.id, 'isInstantService', ev.target.checked)
+                              }
+                            />
+                            <span>{row.isInstantService ? 'Sí' : 'No'}</span>
+                          </label>
                         </td>
                       </tr>
                     );
@@ -346,18 +438,41 @@ export default function CatalogAdminPage() {
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-gray-700">Severidad</span>
-                <select
+                <span className="text-sm font-semibold text-gray-700">
+                  Severidad o tamaño (texto libre)
+                </span>
+                <input
+                  type="text"
+                  list="catalog-severidad-hints"
                   value={addForm.severidad}
                   onChange={(e) => setAddForm((f) => ({ ...f, severidad: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 shadow-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25"
-                >
+                  placeholder="DM, N/A, Chico, Mediano Premium…"
+                />
+                <datalist id="catalog-severidad-hints">
                   {DAMAGE_LEVEL_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
+                    <option key={k} value={k} />
                   ))}
-                </select>
+                  <option value="Chico" />
+                  <option value="Chico Premium" />
+                  <option value="Mediano" />
+                  <option value="Mediano Premium" />
+                  <option value="Grande" />
+                  <option value="Grande Premium" />
+                  <option value="XL" />
+                  <option value="XL Premium" />
+                </datalist>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                  checked={addForm.isInstantService}
+                  onChange={(e) =>
+                    setAddForm((f) => ({ ...f, isInstantService: e.target.checked }))
+                  }
+                />
+                <span className="text-sm font-semibold text-gray-700">InstantQuote</span>
               </label>
               <label className="block">
                 <span className="text-sm font-semibold text-gray-700">Precio (MXN)</span>
