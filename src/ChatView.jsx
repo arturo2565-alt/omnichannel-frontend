@@ -6,9 +6,13 @@ import {
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
-  loadPriceMatrixFromApi,
   matchPiezaFromAnalysis,
 } from './autofix-pricing';
+
+/** Nombres canónicos de pieza en la matriz (coinciden con `value` del select). */
+const MATRIX_PIEZA_KEYS = new Set(
+  AUTO_FIX_BASE_PRICES.map((row) => row.pieza),
+);
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
 // Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
@@ -158,18 +162,13 @@ function isPlaceholderPieza(pieza) {
     .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
 }
 
-function matrixPiezaKeySet() {
-  return new Set(AUTO_FIX_BASE_PRICES.map((row) => row.pieza));
-}
-
 /** Alinea el texto IA / backend con una fila de la matriz cuando hay match seguro; si no, conserva texto (se muestra como opción extra en el select). */
 function normalizePiezaForPanel(raw) {
   const t = String(raw ?? '').trim();
   if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
-  const keys = matrixPiezaKeySet();
-  if (keys.has(t)) return t;
+  if (MATRIX_PIEZA_KEYS.has(t)) return t;
   const canon = matchPiezaFromAnalysis(t);
-  if (canon && keys.has(canon)) return canon;
+  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
   return t;
 }
 
@@ -182,7 +181,7 @@ function recalcRowPriceFromMatrix(row) {
 function piezaSelectShowsUnmappedFallback(pieza) {
   const t = String(pieza ?? '').trim();
   if (!t || isPlaceholderPieza(t)) return false;
-  return !matrixPiezaKeySet().has(t);
+  return !MATRIX_PIEZA_KEYS.has(t);
 }
 
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
@@ -275,19 +274,6 @@ function ChatView({
   apiBaseUrl,
   onDraftQuotePatched,
 }) {
-
-  const [, bumpCatalogMatrix] = useState(0);
-  useEffect(() => {
-    if (!apiBaseUrl) return undefined;
-    let cancelled = false;
-    (async () => {
-      const ok = await loadPriceMatrixFromApi(apiBaseUrl);
-      if (!cancelled && ok) bumpCatalogMatrix((v) => v + 1);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [apiBaseUrl]);
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
