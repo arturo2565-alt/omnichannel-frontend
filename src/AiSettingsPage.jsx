@@ -66,37 +66,37 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** Formato $ del mensaje al cliente (playground). */
-function formatPlaygroundDollarZero(amount) {
-  const n = Math.round(Number(amount) || 0);
-  return `$${n.toLocaleString('en-US')}`;
+/** Lista pieza + precio (MXN) para el aviso interno SISTEMA: al autorizar en el playground. */
+function buildPlaygroundAuthorizedQuoteLinesForSystem(quoteLineEdits) {
+  return quoteLineEdits
+    .map((r) => {
+      const p = parsePrecioInput(r.precioInput);
+      const amt = Number.isFinite(p) ? p : 0;
+      return `- ${r.pieza}: ${formatPlaygroundMoney(amt)}`;
+    })
+    .join('\n');
 }
 
-/** Texto fijo del simulador al autorizar cotización. */
-function buildPlaygroundAuthorizeOutboundText(quoteLineEdits) {
+/**
+ * Mensaje solo para el modelo (no se muestra en el chat del simulador): datos exactos del peritaje
+ * y la petición de redacción natural al cliente.
+ */
+function buildPlaygroundSystemAuthorizationMessage(quoteLineEdits, draftReference) {
+  const lines = buildPlaygroundAuthorizedQuoteLinesForSystem(quoteLineEdits);
   const total = quoteLineEdits.reduce((acc, r) => {
     const p = parsePrecioInput(r.precioInput);
     return acc + (Number.isFinite(p) ? p : 0);
   }, 0);
-  const lines = quoteLineEdits
-    .map((r) => {
-      const p = parsePrecioInput(r.precioInput);
-      const amt = Number.isFinite(p) ? p : 0;
-      return `${r.pieza}: ${formatPlaygroundDollarZero(amt)}`;
-    })
-    .join('\n');
-  const t = formatPlaygroundDollarZero(total);
+  const refLine = draftReference
+    ? `Referencia interna del borrador: ${draftReference}`
+    : 'Referencia interna del borrador: (sin código)';
   return [
+    'SISTEMA: El agente ha autorizado la siguiente cotización:',
     lines,
-    `Total: ${t} 💰`,
+    `Total: ${formatPlaygroundMoney(total)}`,
+    refLine,
     '',
-    'Tiempo de entrega: 3 a 4 días hábiles 🛠️',
-    '',
-    '✔️ Tono de color garantizado',
-    '✔️ Repintado en cabina',
-    '✔️ Garantía por escrito',
-    '',
-    '¿Te gustaría agendar tu reparación? 🚗✨',
+    'Por favor, preséntala al cliente de forma natural y amigable; menciona su vehículo si lo conoces por el contexto de la conversación.',
   ].join('\n');
 }
 
@@ -150,6 +150,8 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
   const playgroundLockedRef = useRef(false);
 
   const pendingResumeContextRef = useRef(null);
+  /** Última cotización autorizada en el simulador (solo memoria local; no se muestra en UI). */
+  const lastAuthorizedQuoteRef = useRef(null);
 
   const playgroundLocked = useMemo(
     () =>
@@ -259,37 +261,44 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     if (!mockDraft) return;
     if (quoteLineEdits.length === 0) return;
 
-    const outboundClientText = buildPlaygroundAuthorizeOutboundText(quoteLineEdits);
-    const summaryForResume = [
-      `Referencia borrador simulador: ${mockDraft.reference}`,
-      '',
-      outboundClientText,
-    ].join('\n');
+    const systemAuthorizationSummary = buildPlaygroundSystemAuthorizationMessage(
+      quoteLineEdits,
+      mockDraft.reference,
+    );
+    lastAuthorizedQuoteRef.current = {
+      reference: mockDraft.reference,
+      authorizedAt: new Date().toISOString(),
+      lines: quoteLineEdits.map((r) => ({
+        pieza: r.pieza,
+        severidad: r.severidad,
+        precio: parsePrecioInput(r.precioInput),
+        precioInput: r.precioInput,
+      })),
+      total: quoteLineEdits.reduce((acc, r) => {
+        const p = parsePrecioInput(r.precioInput);
+        return acc + (Number.isFinite(p) ? p : 0);
+      }, 0),
+    };
 
     const resumeCtx = pendingResumeContextRef.current;
     const historySnapshot = capConversationHistory(conversationHistoryRef.current);
 
     setPlaygroundPhase('thinking');
     try {
-      if (isDraftPending && resumeCtx && typeof testAiResumeAfterDraft === 'function') {
+      if (typeof testAiResumeAfterDraft === 'function') {
         const resumeData = await testAiResumeAfterDraft({
-          userBatchText: resumeCtx.consolidatedText,
-          authorizedQuoteSummary: summaryForResume,
-          visionItems: resumeCtx.visionItems,
+          userBatchText: resumeCtx?.consolidatedText ?? '',
+          authorizedQuoteSummary: systemAuthorizationSummary,
+          visionItems: resumeCtx?.visionItems,
           history: historySnapshot,
         });
         const followUp = resumeData?.assistantMessage?.trim() || '(La IA no devolvió texto.)';
         setMessages((prev) => [
           ...prev,
-          { id: `auth-${Date.now()}`, role: 'assistant', text: outboundClientText, isError: false },
           { id: `resume-${Date.now()}`, role: 'assistant', text: followUp, isError: false },
         ]);
         setConversationHistory((prev) =>
-          capConversationHistory([
-            ...prev,
-            { role: 'assistant', text: outboundClientText },
-            { role: 'assistant', text: followUp },
-          ]),
+          capConversationHistory([...prev, { role: 'assistant', text: followUp }]),
         );
         setMockDraft(null);
         setIsDraftPending(false);
@@ -300,11 +309,13 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       } else {
         setMessages((prev) => [
           ...prev,
-          { id: `auth-${Date.now()}`, role: 'assistant', text: outboundClientText, isError: false },
+          {
+            id: `auth-err-${Date.now()}`,
+            role: 'assistant',
+            text: 'No hay función de resume conectada; no se pudo generar la respuesta de la IA.',
+            isError: true,
+          },
         ]);
-        setConversationHistory((prev) =>
-          capConversationHistory([...prev, { role: 'assistant', text: outboundClientText }]),
-        );
         setMockDraft(null);
         setIsDraftPending(false);
         setPhoneTab('chat');
@@ -326,12 +337,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       setPlaygroundPhase('idle');
       setThinkingMode(null);
     }
-  }, [
-    mockDraft,
-    quoteLineEdits,
-    isDraftPending,
-    testAiResumeAfterDraft,
-  ]);
+  }, [mockDraft, quoteLineEdits, testAiResumeAfterDraft]);
 
   const flushPlaygroundPending = useCallback(async () => {
     if (disabled) return;
@@ -1168,7 +1174,12 @@ export default function AiSettingsPage() {
               </h2>
               <p className="mt-1 text-sm text-gray-500">
                 Tono, reglas de agendamiento y uso de la herramienta{' '}
-                <code className="rounded bg-gray-100 px-1 text-xs">createAppointment</code>.
+                <code className="rounded bg-gray-100 px-1 text-xs">createAppointment</code>. Si
+                describes aquí cómo hablar con el cliente, incluye que, cuando el sistema envíe una
+                autorización de cotización (mensaje interno que comienza por{' '}
+                <code className="rounded bg-gray-100 px-1 text-xs">SISTEMA:</code>), la respuesta al
+                cliente debe ser clara pero conversacional y, cuando encaje, mencionar la garantía
+                por escrito y el repintado en cabina.
               </p>
               <label className="mt-4 block">
                 <span className="sr-only">Prompt de chat</span>
