@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, Settings2, MessageCircle } from 'lucide-react';
+import { Calendar, Settings2, MessageCircle, Table2 } from 'lucide-react';
 
 const railBtn =
   'flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105 border focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70';
@@ -58,6 +58,19 @@ export function OmnichannelLeftRail({ platformSlot }) {
           }
         >
           <Settings2 className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </NavLink>
+        <NavLink
+          to="/admin/catalog"
+          title="Catálogo y precios"
+          className={({ isActive }) =>
+            `${railBtn} ${
+              isActive
+                ? 'scale-105 bg-emerald-600 text-white ring-2 ring-white ring-offset-2 ring-offset-gray-900 border-emerald-400'
+                : 'border-gray-600 bg-gray-800/90 text-gray-200 hover:bg-gray-700'
+            }`
+          }
+        >
+          <Table2 className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
       </nav>
     </div>
