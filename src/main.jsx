@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.jsx'
 import CalendarPage from './CalendarPage.jsx'
 import AiSettingsPage from './AiSettingsPage.jsx'
+import CatalogAdminPage from './CatalogAdminPage.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -13,6 +14,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/" element={<App />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/admin/ai-settings" element={<AiSettingsPage />} />
+        <Route path="/admin/catalog" element={<CatalogAdminPage />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

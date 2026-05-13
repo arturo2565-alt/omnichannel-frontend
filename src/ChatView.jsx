@@ -6,13 +6,13 @@ import {
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
+  loadPriceMatrixFromBackend,
   matchPiezaFromAnalysis,
-} from './autofix-pricing';
+} from './autofix-pricing.js';
 
-/** Nombres canónicos de pieza en la matriz (coinciden con `value` del select). */
-const MATRIX_PIEZA_KEYS = new Set(
-  AUTO_FIX_BASE_PRICES.map((row) => row.pieza),
-);
+function getMatrixPiezaKeys() {
+  return new Set(AUTO_FIX_BASE_PRICES.map((row) => row.pieza));
+}
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
 // Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
@@ -165,10 +165,11 @@ function isPlaceholderPieza(pieza) {
 /** Alinea el texto IA / backend con una fila de la matriz cuando hay match seguro; si no, conserva texto (se muestra como opción extra en el select). */
 function normalizePiezaForPanel(raw) {
   const t = String(raw ?? '').trim();
+  const keys = getMatrixPiezaKeys();
   if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
-  if (MATRIX_PIEZA_KEYS.has(t)) return t;
+  if (keys.has(t)) return t;
   const canon = matchPiezaFromAnalysis(t);
-  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
+  if (canon && keys.has(canon)) return canon;
   return t;
 }
 
@@ -181,7 +182,7 @@ function recalcRowPriceFromMatrix(row) {
 function piezaSelectShowsUnmappedFallback(pieza) {
   const t = String(pieza ?? '').trim();
   if (!t || isPlaceholderPieza(t)) return false;
-  return !MATRIX_PIEZA_KEYS.has(t);
+  return !getMatrixPiezaKeys().has(t);
 }
 
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
@@ -274,6 +275,10 @@ function ChatView({
   apiBaseUrl,
   onDraftQuotePatched,
 }) {
+
+  useEffect(() => {
+    void loadPriceMatrixFromBackend();
+  }, []);
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
