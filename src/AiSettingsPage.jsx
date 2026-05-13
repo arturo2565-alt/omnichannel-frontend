@@ -6,7 +6,6 @@ import {
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
-  loadPriceMatrixFromBackend,
   matchPiezaFromAnalysis,
 } from './autofix-pricing.js';
 
@@ -101,13 +100,10 @@ function buildPlaygroundSystemAuthorizationMessage(quoteLineEdits, draftReferenc
   ].join('\n');
 }
 
-function getMatrixPiezaKeys() {
-  return new Set(AUTO_FIX_BASE_PRICES.map((r) => r.pieza));
-}
+const MATRIX_PIEZA_KEYS = new Set(AUTO_FIX_BASE_PRICES.map((r) => r.pieza));
 
 function normalizePiezaForPlayground(raw) {
   const t = String(raw ?? '').trim();
-  const MATRIX_PIEZA_KEYS = getMatrixPiezaKeys();
   if (!t) return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
   if (MATRIX_PIEZA_KEYS.has(t)) return t;
   const canon = matchPiezaFromAnalysis(t);
@@ -999,10 +995,6 @@ export default function AiSettingsPage() {
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    void loadPriceMatrixFromBackend();
-  }, []);
 
   const update = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));

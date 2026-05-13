@@ -1,11 +1,8 @@
 /**
- * Matriz pieza × severidad para el panel. Por defecto coincide con el seed del backend;
- * al cargar la app se intenta reemplazar por `GET …/price-matrix` (catálogo en BD).
+ * Matriz de precios (pieza × severidad). Debe coincidir con `omnichannel-backend/src/chat/autofix-config.ts`.
+ * Alias solicitado por producto para búsqueda de precios en el panel.
  */
-import { API_BASE_URL } from './apiConfig.js';
-
-/** Copia local del seed (alineada con `LEGACY_SEED_PIEZA_DANO_PRICE_MATRIX` en el backend). */
-const LEGACY_SEED_ROWS = [
+export const PIEZA_DANO_PRICE_MATRIX = [
   { pieza: 'Fascia', DL: 2900, DML: 3300, DM: 3600, DMF: 3500, DF: 3500, DMFuerte: 4900 },
   { pieza: 'Salpicadera', DL: 2900, DML: 2900, DM: 3350, DMF: 3900, DF: 4400, DMFuerte: 6150 },
   { pieza: 'Puerta', DL: 3100, DML: 2800, DM: 3250, DMF: 4200, DF: 5150, DMFuerte: 7200 },
@@ -18,7 +15,7 @@ const LEGACY_SEED_ROWS = [
     DF: 5700,
     DMFuerte: 8000,
   },
-  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 4500, DF: 5450, DMFuerte: 7650 },
+  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 5500, DF: 6700, DMFuerte: 7650 },
   {
     pieza: 'Tapa Cajuela',
     DL: 3500,
@@ -42,11 +39,8 @@ const LEGACY_SEED_ROWS = [
   },
 ];
 
-/** Referencia mutable a las filas activas (misma referencia que `AUTO_FIX_BASE_PRICES`). */
-const ACTIVE_ROWS = LEGACY_SEED_ROWS.map((r) => ({ ...r }));
-
-/** Expuesto al panel; se vacía y rellena al aplicar catálogo remoto. */
-export const AUTO_FIX_BASE_PRICES = ACTIVE_ROWS;
+/** Misma tabla bajo el nombre que usa el negocio en el panel. */
+export const AUTO_FIX_BASE_PRICES = PIEZA_DANO_PRICE_MATRIX;
 
 export const DAMAGE_LEVEL_KEYS = [
   'DL',
@@ -57,8 +51,6 @@ export const DAMAGE_LEVEL_KEYS = [
   'DMFuerte',
 ];
 
-const GENERIC_FALLBACK_PRICE_MXN = 3500;
-
 function normalizeText(s) {
   return String(s ?? '')
     .normalize('NFD')
@@ -68,61 +60,14 @@ function normalizeText(s) {
     .trim();
 }
 
-let rowByPiezaNorm = new Map();
-let rowsByPiezaLengthDesc = [];
-
-function rebuildMaps() {
-  rowByPiezaNorm = new Map();
-  for (const row of ACTIVE_ROWS) {
-    rowByPiezaNorm.set(normalizeText(row.pieza), row);
-  }
-  rowsByPiezaLengthDesc = [...ACTIVE_ROWS].sort((a, b) => b.pieza.length - a.pieza.length);
+const rowByPiezaNorm = new Map();
+for (const row of PIEZA_DANO_PRICE_MATRIX) {
+  rowByPiezaNorm.set(normalizeText(row.pieza), row);
 }
 
-rebuildMaps();
-
-/**
- * Convierte filas planas del API `{ pieza, severidad, precio }` en filas tipo matriz.
- */
-function aggregateFlatToPiezaRows(flat) {
-  const byPieza = new Map();
-  for (const cell of flat) {
-    const pieza = String(cell.pieza ?? '').trim();
-    const sev = String(cell.severidad ?? '').trim();
-    if (!pieza || !sev) continue;
-    const precio = Math.round(Number(cell.precio));
-    if (!Number.isFinite(precio) || precio < 0) continue;
-    if (!byPieza.has(pieza)) {
-      const row = { pieza };
-      for (const k of DAMAGE_LEVEL_KEYS) row[k] = 0;
-      byPieza.set(pieza, row);
-    }
-    if (DAMAGE_LEVEL_KEYS.includes(sev)) {
-      byPieza.get(pieza)[sev] = precio;
-    }
-  }
-  return [...byPieza.values()].filter((r) => DAMAGE_LEVEL_KEYS.some((k) => r[k] > 0));
-}
-
-/**
- * Carga el catálogo desde el backend. Si falla o viene vacío, se mantiene el seed local.
- */
-export async function loadPriceMatrixFromBackend() {
-  try {
-    const r = await fetch(`${API_BASE_URL}/price-matrix`);
-    if (!r.ok) return false;
-    const data = await r.json();
-    const flat = Array.isArray(data?.rows) ? data.rows : [];
-    const rows = aggregateFlatToPiezaRows(flat);
-    if (rows.length === 0) return false;
-    ACTIVE_ROWS.length = 0;
-    ACTIVE_ROWS.push(...rows);
-    rebuildMaps();
-    return true;
-  } catch {
-    return false;
-  }
-}
+const rowsByPiezaLengthDesc = [...PIEZA_DANO_PRICE_MATRIX].sort(
+  (a, b) => b.pieza.length - a.pieza.length,
+);
 
 export function matchPiezaFromAnalysis(parteLibre) {
   const n = normalizeText(parteLibre);
@@ -193,60 +138,68 @@ function damageLevelRank(level) {
 }
 
 function matrixAmountForPair(pieza, severidad, options = {}) {
+  const onMissing = options.onMissing ?? 'zero';
   const row = findPiezaRow(pieza);
-  const level =
-    resolveDamageLevelFromText(severidad, options.descripcionTecnica) ??
-    coerceDamageLevelCode(severidad);
+  const level = resolveDamageLevelFromText(
+    severidad,
+    options.descripcionTecnica,
+  );
 
-  if (row && level) {
-    const amount = row[level];
-    if (typeof amount === 'number' && !Number.isNaN(amount) && amount > 0) {
-      return { amount, level, row };
+  if (!row || !level) {
+    if (onMissing === 'throw') {
+      throw new Error(
+        !row
+          ? `Pieza no reconocida: "${pieza}"`
+          : `Severidad no reconocida: "${severidad}"`,
+      );
     }
+    return { amount: 0, level, row };
   }
 
-  if (level) {
-    return { amount: GENERIC_FALLBACK_PRICE_MXN, level, row: null };
+  const amount = row[level];
+  if (typeof amount !== 'number' || Number.isNaN(amount)) {
+    if (onMissing === 'throw') throw new Error('Precio inválido en matriz');
+    return { amount: 0, level, row };
   }
-  return { amount: 0, level: null, row: null };
+  return { amount, level, row };
 }
 
 /**
- * Líneas por pieza: precio máximo por pieza distinta (criterio preventivo), alineado con el backend.
+ * Líneas por pieza canónica: una por pieza distinta, precio = máximo entre filas (criterio preventivo).
+ * Debe coincidir con `matrixInventoryMaxLines` del backend.
  */
 export function matrixInventoryMaxLines(items, options = {}) {
-  const byKey = new Map();
+  const byCanonical = new Map();
 
   for (const it of items) {
-    const opt = {
-      ...options,
-      descripcionTecnica: it.descripcionTecnica ?? options.descripcionTecnica,
-    };
-    const { amount, level, row } = matrixAmountForPair(it.pieza, it.severidad, opt);
-    if (amount <= 0 || !level) continue;
+    const { amount, level, row } = matrixAmountForPair(
+      it.pieza,
+      it.severidad,
+      options,
+    );
+    if (!row || !level || amount <= 0) continue;
 
-    const mapKey = row ? `cat:${normalizeText(row.pieza)}` : `raw:${normalizeText(it.pieza)}`;
-    const display = row ? row.pieza : String(it.pieza ?? '').trim() || 'Pieza';
-
-    const cur = byKey.get(mapKey);
+    const canonical = row.pieza;
+    const cur = byCanonical.get(canonical);
     if (!cur || amount > cur.price) {
-      byKey.set(mapKey, { price: amount, level, display });
+      byCanonical.set(canonical, { price: amount, level });
     } else if (amount === cur.price) {
       if (damageLevelRank(level) > damageLevelRank(cur.level)) {
-        byKey.set(mapKey, { price: amount, level, display });
+        byCanonical.set(canonical, { price: amount, level });
       }
     }
   }
 
-  return [...byKey.values()].map((b) => ({
-    canonical: b.display,
+  return [...byCanonical.entries()].map(([canonical, b]) => ({
+    canonical,
     unitPrice: b.price,
     damageLevel: b.level,
   }));
 }
 
 /**
- * Una pieza + severidad, o array de pares (IA multi-pieza).
+ * Una pieza + severidad, o array de pares (IA multi-pieza):
+ * piezas distintas → suma; misma pieza varias veces → el mayor importe de matriz.
  */
 export function calculateEstimate(piezaOrItems, severidadOrOptions, maybeOptions) {
   if (Array.isArray(piezaOrItems)) {
