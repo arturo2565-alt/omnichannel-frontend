@@ -42,7 +42,7 @@ export const PIEZA_DANO_PRICE_MATRIX = [
 /** Misma tabla bajo el nombre que usa el negocio en el panel. */
 export const AUTO_FIX_BASE_PRICES = PIEZA_DANO_PRICE_MATRIX;
 
-export const DAMAGE_LEVEL_KEYS = [
+export const DAMAGE_LEVEL_KEYS_STANDARD = [
   'DL',
   'DML',
   'DM',
@@ -50,6 +50,9 @@ export const DAMAGE_LEVEL_KEYS = [
   'DF',
   'DMFuerte',
 ];
+
+/** Incluye N/A (servicios sin grado de daño). Orden: N/A = menor rango en desempates. */
+export const DAMAGE_LEVEL_KEYS = ['N/A', ...DAMAGE_LEVEL_KEYS_STANDARD];
 
 function normalizeText(s) {
   return String(s ?? '')
@@ -94,6 +97,7 @@ export function findPiezaRow(pieza) {
 export function coerceDamageLevelCode(raw) {
   const t = String(raw ?? '').trim();
   if (!t) return 'DM';
+  if (/\bn\s*\/\s*a\b|^n\/a$/i.test(t)) return 'N/A';
   const order = ['DMFuerte', 'DF', 'DMF', 'DM', 'DML', 'DL'];
   for (const level of order) {
     const escaped = level.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -106,7 +110,12 @@ export function resolveDamageLevelFromText(severidad, descripcionTecnica = '') {
   const blob = normalizeText(`${severidad} ${descripcionTecnica}`);
   if (!blob) return null;
 
+  if (/\bn\s*\/\s*a\b|^n\/a$|no aplica|sin severidad|servicio sin dan/i.test(blob)) {
+    return 'N/A';
+  }
+
   for (const level of DAMAGE_LEVEL_KEYS) {
+    if (level === 'N/A') continue;
     if (level === 'DMFuerte') {
       if (/\bdmfuerte\b|\bdmf\s*fuerte\b/i.test(blob)) return 'DMFuerte';
       continue;
@@ -156,7 +165,7 @@ function matrixAmountForPair(pieza, severidad, options = {}) {
     return { amount: 0, level, row };
   }
 
-  const amount = row[level];
+  const amount = level === 'N/A' ? row['N/A'] : row[level];
   if (typeof amount !== 'number' || Number.isNaN(amount)) {
     if (onMissing === 'throw') throw new Error('Precio inválido en matriz');
     return { amount: 0, level, row };
