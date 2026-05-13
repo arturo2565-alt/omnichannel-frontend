@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import { API_BASE_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
@@ -6,6 +7,7 @@ import {
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
+  loadPriceMatrixFromApi,
   matchPiezaFromAnalysis,
 } from './autofix-pricing.js';
 
@@ -100,14 +102,17 @@ function buildPlaygroundSystemAuthorizationMessage(quoteLineEdits, draftReferenc
   ].join('\n');
 }
 
-const MATRIX_PIEZA_KEYS = new Set(AUTO_FIX_BASE_PRICES.map((r) => r.pieza));
+function matrixPiezaKeySet() {
+  return new Set(AUTO_FIX_BASE_PRICES.map((r) => r.pieza));
+}
 
 function normalizePiezaForPlayground(raw) {
   const t = String(raw ?? '').trim();
   if (!t) return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
-  if (MATRIX_PIEZA_KEYS.has(t)) return t;
+  const keys = matrixPiezaKeySet();
+  if (keys.has(t)) return t;
   const canon = matchPiezaFromAnalysis(t);
-  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
+  if (canon && keys.has(canon)) return canon;
   return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
 }
 
@@ -996,6 +1001,18 @@ export default function AiSettingsPage() {
     load();
   }, [load]);
 
+  const [catalogMatrixTick, bumpCatalogMatrix] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await loadPriceMatrixFromApi(API_BASE_URL);
+      if (!cancelled && ok) bumpCatalogMatrix((v) => v + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const update = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setSavedOk(false);
@@ -1120,6 +1137,14 @@ export default function AiSettingsPage() {
                 </h1>
                 <p className="mt-0.5 text-sm text-gray-500">
                   Prompts del modelo y datos que usa el taller en cotizaciones y citas.
+                </p>
+                <p className="mt-2 text-sm">
+                  <NavLink
+                    to="/admin/catalog"
+                    className="font-medium text-emerald-700 underline decoration-emerald-300 hover:text-emerald-900"
+                  >
+                    Catálogo de precios y tiempos
+                  </NavLink>
                 </p>
               </div>
             </div>
@@ -1263,6 +1288,7 @@ export default function AiSettingsPage() {
           </main>
         </div>
         <AiPlaygroundSidebar
+          key={`play-${catalogMatrixTick}`}
           testAiResponse={testAiResponse}
           testAiResumeAfterDraft={testAiResumeAfterDraft}
           disabled={loading}

@@ -1,8 +1,19 @@
 /**
- * Matriz de precios (pieza × severidad). Debe coincidir con `omnichannel-backend/src/chat/autofix-config.ts`.
- * Alias solicitado por producto para búsqueda de precios en el panel.
+ * Matriz pieza × severidad para el panel. Origen de verdad: GET `/price-matrix` (BD).
+ * Hasta cargar el API, se usa la misma data sembrada que el script `db:seed:price-matrix`.
  */
-export const PIEZA_DANO_PRICE_MATRIX = [
+
+export const DAMAGE_LEVEL_KEYS = [
+  'DL',
+  'DML',
+  'DM',
+  'DMF',
+  'DF',
+  'DMFuerte',
+];
+
+/** Misma matriz que `price-matrix.seed-data` en backend (respaldo offline). */
+const EMBEDDED_MATRIX_ROWS = [
   { pieza: 'Fascia', DL: 2900, DML: 3300, DM: 3600, DMF: 3500, DF: 3500, DMFuerte: 4900 },
   { pieza: 'Salpicadera', DL: 2900, DML: 2900, DM: 3350, DMF: 3900, DF: 4400, DMFuerte: 6150 },
   { pieza: 'Puerta', DL: 3100, DML: 2800, DM: 3250, DMF: 4200, DF: 5150, DMFuerte: 7200 },
@@ -15,7 +26,7 @@ export const PIEZA_DANO_PRICE_MATRIX = [
     DF: 5700,
     DMFuerte: 8000,
   },
-  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 5500, DF: 6700, DMFuerte: 7650 },
+  { pieza: 'Cofre', DL: 4000, DML: 4500, DM: 5000, DMF: 4500, DF: 5450, DMFuerte: 7650 },
   {
     pieza: 'Tapa Cajuela',
     DL: 3500,
@@ -39,17 +50,13 @@ export const PIEZA_DANO_PRICE_MATRIX = [
   },
 ];
 
-/** Misma tabla bajo el nombre que usa el negocio en el panel. */
-export const AUTO_FIX_BASE_PRICES = PIEZA_DANO_PRICE_MATRIX;
+/** Referencia mutable a la matriz activa (se reemplaza al cargar el catálogo). */
+export const AUTO_FIX_BASE_PRICES = [...EMBEDDED_MATRIX_ROWS];
 
-export const DAMAGE_LEVEL_KEYS = [
-  'DL',
-  'DML',
-  'DM',
-  'DMF',
-  'DF',
-  'DMFuerte',
-];
+export const PIEZA_DANO_PRICE_MATRIX = AUTO_FIX_BASE_PRICES;
+
+let rowByPiezaNorm = new Map();
+let rowsByPiezaLengthDesc = [];
 
 function normalizeText(s) {
   return String(s ?? '')
@@ -60,14 +67,64 @@ function normalizeText(s) {
     .trim();
 }
 
-const rowByPiezaNorm = new Map();
-for (const row of PIEZA_DANO_PRICE_MATRIX) {
-  rowByPiezaNorm.set(normalizeText(row.pieza), row);
+function rebuildIndexes(matrix) {
+  rowByPiezaNorm = new Map();
+  for (const row of matrix) {
+    rowByPiezaNorm.set(normalizeText(row.pieza), row);
+  }
+  rowsByPiezaLengthDesc = [...matrix].sort((a, b) => b.pieza.length - a.pieza.length);
 }
 
-const rowsByPiezaLengthDesc = [...PIEZA_DANO_PRICE_MATRIX].sort(
-  (a, b) => b.pieza.length - a.pieza.length,
-);
+function buildPiezaRowsFromFlat(flat) {
+  const byPieza = new Map();
+  for (const e of flat) {
+    const pieza = String(e.pieza ?? '').trim();
+    if (!pieza) continue;
+    const sev = coerceDamageLevelCode(String(e.severidad ?? ''));
+    const precio = Number(e.precio);
+    if (!Number.isFinite(precio) || precio < 0) continue;
+    if (!byPieza.has(pieza)) {
+      const row = { pieza };
+      for (const k of DAMAGE_LEVEL_KEYS) row[k] = 0;
+      byPieza.set(pieza, row);
+    }
+    byPieza.get(pieza)[sev] = precio;
+  }
+  return [...byPieza.values()];
+}
+
+/**
+ * Sincroniza la matriz en memoria desde el API (filas planas de `price_matrix`).
+ * @returns {boolean} true si hubo datos válidos
+ */
+export function applyPriceMatrixFlatRows(flat) {
+  if (!Array.isArray(flat) || flat.length === 0) return false;
+  const rows = buildPiezaRowsFromFlat(flat);
+  if (!rows.length) return false;
+  AUTO_FIX_BASE_PRICES.length = 0;
+  AUTO_FIX_BASE_PRICES.push(...rows);
+  rebuildIndexes(AUTO_FIX_BASE_PRICES);
+  return true;
+}
+
+/**
+ * @param {string} apiBaseUrl
+ * @returns {Promise<boolean>}
+ */
+export async function loadPriceMatrixFromApi(apiBaseUrl) {
+  const base = String(apiBaseUrl ?? '').replace(/\/$/, '');
+  if (!base) return false;
+  try {
+    const r = await fetch(`${base}/price-matrix`);
+    if (!r.ok) return false;
+    const flat = await r.json();
+    return applyPriceMatrixFlatRows(flat);
+  } catch {
+    return false;
+  }
+}
+
+rebuildIndexes(AUTO_FIX_BASE_PRICES);
 
 export function matchPiezaFromAnalysis(parteLibre) {
   const n = normalizeText(parteLibre);
@@ -164,10 +221,6 @@ function matrixAmountForPair(pieza, severidad, options = {}) {
   return { amount, level, row };
 }
 
-/**
- * Líneas por pieza canónica: una por pieza distinta, precio = máximo entre filas (criterio preventivo).
- * Debe coincidir con `matrixInventoryMaxLines` del backend.
- */
 export function matrixInventoryMaxLines(items, options = {}) {
   const byCanonical = new Map();
 
@@ -197,10 +250,6 @@ export function matrixInventoryMaxLines(items, options = {}) {
   }));
 }
 
-/**
- * Una pieza + severidad, o array de pares (IA multi-pieza):
- * piezas distintas → suma; misma pieza varias veces → el mayor importe de matriz.
- */
 export function calculateEstimate(piezaOrItems, severidadOrOptions, maybeOptions) {
   if (Array.isArray(piezaOrItems)) {
     const opts =
