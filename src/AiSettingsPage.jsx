@@ -108,7 +108,7 @@ function normalizePiezaForPlayground(raw) {
   if (MATRIX_PIEZA_KEYS.has(t)) return t;
   const canon = matchPiezaFromAnalysis(t);
   if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
-  return AUTO_FIX_BASE_PRICES[0]?.pieza ?? 'Cofre';
+  return t;
 }
 
 const PLAYGROUND_DEBOUNCE_MS = 20000;
@@ -774,7 +774,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                           <table className="w-full table-fixed border-collapse text-left text-[10px]">
                             <thead className="sticky top-0 z-[1] border-b border-slate-200 bg-slate-100 font-semibold uppercase text-slate-600">
                               <tr>
-                                <th className="px-1.5 py-1.5">Pieza</th>
+                                <th className="px-1.5 py-1.5">Servicio</th>
                                 <th className="w-[52px] px-1 py-1.5">Sev.</th>
                                 <th className="w-[72px] px-1 py-1.5 text-right">Precio</th>
                                 <th className="w-[88px] px-1 py-1.5 text-right">Acciones</th>
@@ -821,7 +821,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                                         <td colSpan={4} className="px-2 py-2">
                                           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
                                             <label className="block text-[8px] font-semibold uppercase text-slate-600">
-                                              Pieza
+                                              Servicio
                                               <select
                                                 value={row.pieza}
                                                 onChange={(e) => {

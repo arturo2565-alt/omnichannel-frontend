@@ -32,7 +32,7 @@ export default function CatalogAdminPage() {
   const [saveOk, setSaveOk] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({
-    pieza: '',
+    servicio: '',
     severidad: 'DM',
     precio: '0',
     diasEntrega: '4',
@@ -123,12 +123,12 @@ export default function CatalogAdminPage() {
 
   const handleAdd = async (e) => {
     e.preventDefault();
-    const pieza = addForm.pieza.trim();
+    const servicio = addForm.servicio.trim();
     const severidad = addForm.severidad.trim();
     const precio = parsePositiveInt(addForm.precio);
     const diasEntrega = parsePositiveInt(addForm.diasEntrega);
-    if (!pieza) {
-      setError('Indica el nombre de la pieza.');
+    if (!servicio) {
+      setError('Indica el nombre del servicio.');
       return;
     }
     if (Number.isNaN(precio) || Number.isNaN(diasEntrega)) {
@@ -141,11 +141,11 @@ export default function CatalogAdminPage() {
       const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pieza, severidad, precio, diasEntrega }),
+        body: JSON.stringify({ servicio, severidad, precio, diasEntrega }),
       });
       if (!r.ok) throw new Error(await parseJsonError(r));
       setAddOpen(false);
-      setAddForm({ pieza: '', severidad: 'DM', precio: '0', diasEntrega: '4' });
+      setAddForm({ servicio: '', severidad: 'DM', precio: '0', diasEntrega: '4' });
       await load();
     } catch (err) {
       setError(err?.message ?? 'No se pudo crear la fila');
@@ -184,9 +184,9 @@ export default function CatalogAdminPage() {
             </p>
             <h1 className="text-xl font-bold text-gray-900">Catálogo · matriz de precios</h1>
             <p className="mt-0.5 text-sm text-gray-500">
-              Piezas y niveles de severidad. Edita precio y días de entrega en línea y guarda los
+              Servicios y niveles de severidad. Edita precio y días de entrega en línea y guarda los
               cambios. Si la tabla está vacía, usa «Importar desde archivo JS» (réplica de la matriz
-              del panel; upsert sin duplicar pieza+severidad).
+              del panel; upsert sin duplicar servicio+severidad).
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -244,7 +244,7 @@ export default function CatalogAdminPage() {
                 <thead className="sticky top-0 z-10 bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
-                      Pieza
+                      Servicio
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
                       Severidad
@@ -268,7 +268,7 @@ export default function CatalogAdminPage() {
                         className={rowDirty ? 'bg-amber-50/60' : 'hover:bg-gray-50/80'}
                       >
                         <td className="whitespace-nowrap px-4 py-2 font-medium text-gray-900">
-                          {row.pieza}
+                          {row.servicio ?? row.pieza}
                         </td>
                         <td className="whitespace-nowrap px-4 py-2 text-gray-700">
                           {row.severidad}
@@ -324,16 +324,16 @@ export default function CatalogAdminPage() {
               Agregar servicio
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Una fila = pieza + severidad + precio. Si la combinación ya existe, el servidor
+              Una fila = servicio + severidad + precio. Si la combinación ya existe, el servidor
               rechazará el duplicado.
             </p>
             <form className="mt-4 space-y-4" onSubmit={handleAdd}>
               <label className="block">
-                <span className="text-sm font-semibold text-gray-700">Pieza</span>
+                <span className="text-sm font-semibold text-gray-700">Servicio</span>
                 <input
                   type="text"
-                  value={addForm.pieza}
-                  onChange={(e) => setAddForm((f) => ({ ...f, pieza: e.target.value }))}
+                  value={addForm.servicio}
+                  onChange={(e) => setAddForm((f) => ({ ...f, servicio: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 shadow-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/25"
                   placeholder="Ej. Guardafango delantero"
                   required

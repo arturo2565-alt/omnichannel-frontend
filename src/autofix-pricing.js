@@ -181,8 +181,9 @@ export function matrixInventoryMaxLines(items, options = {}) {
   const byCanonical = new Map();
 
   for (const it of items) {
+    const label = it.servicio ?? it.pieza;
     const { amount, level, row } = matrixAmountForPair(
-      it.pieza,
+      label,
       it.severidad,
       options,
     );

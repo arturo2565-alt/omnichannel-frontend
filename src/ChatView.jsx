@@ -221,7 +221,7 @@ function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_
   const sorted = [...(rows ?? [])];
   const list = sorted
     .map((r) => {
-      const piezaNombre = String(r.pieza ?? '').trim() || 'Pieza';
+      const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
       const n = parsePrecioInput(r.precioInput);
       const price = Number.isFinite(n) ? Math.max(0, n) : 0;
       return `• ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
@@ -565,7 +565,7 @@ function ChatView({
       throw new Error(msg);
     }
     if (quoteRows.length === 0) {
-      setQuoteSaveError('Añade al menos una pieza a la cotización.');
+      setQuoteSaveError('Añade al menos un servicio a la cotización.');
       throw new Error('bad pieza');
     }
     const linesPayload = quoteRows.map((r) => ({
@@ -577,12 +577,12 @@ function ChatView({
     for (let i = 0; i < linesPayload.length; i++) {
       const L = linesPayload[i];
       if (!L.pieza) {
-        setQuoteSaveError(`La pieza no puede estar vacía (fila ${i + 1}).`);
+        setQuoteSaveError(`El servicio no puede estar vacío (fila ${i + 1}).`);
         throw new Error('bad pieza');
       }
       if (isPlaceholderPieza(L.pieza)) {
         setQuoteSaveError(
-          `Elige una pieza de la lista en la fila ${i + 1} (sustituir "${MANUAL_ROW_PLACEHOLDER_PIEZA}").`,
+          `Elige un servicio de la lista en la fila ${i + 1} (sustituir "${MANUAL_ROW_PLACEHOLDER_PIEZA}").`,
         );
         throw new Error('bad pieza');
       }
@@ -1057,7 +1057,7 @@ function ChatView({
 
               <div className="mb-3 flex max-h-[70vh] min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                 <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Daños detectados ({quoteRows.length}) — editable por pieza
+                  Daños detectados ({quoteRows.length}) — editable por servicio
                 </p>
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5">
                   {quoteRows.map((row, idx) => {
@@ -1087,11 +1087,11 @@ function ChatView({
                             onClick={() => handleRemoveQuoteRow(row.id)}
                             title={
                               quoteRows.length <= 1
-                                ? 'Debe quedar al menos una pieza en el borrador'
-                                : 'Quitar esta pieza de la cotización'
+                                ? 'Debe quedar al menos un servicio en el borrador'
+                                : 'Quitar este servicio de la cotización'
                             }
                             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                            aria-label="Eliminar pieza de la cotización"
+                            aria-label="Eliminar servicio de la cotización"
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
@@ -1114,7 +1114,7 @@ function ChatView({
                           </button>
                         </div>
                         <label className="block text-[10px] font-medium text-gray-700">
-                          Pieza
+                          Servicio
                           <select
                             value={row.pieza}
                             onChange={(e) => {
@@ -1134,11 +1134,11 @@ function ChatView({
                             className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           >
                             <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
-                              Seleccionar pieza…
+                              Seleccionar servicio…
                             </option>
                             {piezaSelectShowsUnmappedFallback(row.pieza) ? (
                               <option value={row.pieza}>
-                                {row.pieza} (texto IA — elige pieza de la lista)
+                                {row.pieza} (texto IA — elige servicio de la lista)
                               </option>
                             ) : null}
                             {AUTO_FIX_BASE_PRICES.map((pr) => (
@@ -1245,7 +1245,7 @@ function ChatView({
                     }
                     className="w-full rounded-lg border border-dashed border-indigo-300 bg-white py-2.5 text-[11px] font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-45"
                   >
-                    + Añadir Pieza Manualmente
+                    + Añadir servicio manualmente
                   </button>
                 </div>
                 <div className="shrink-0 rounded-lg border-2 border-emerald-300 bg-emerald-50 px-3 py-2.5 text-right">
