@@ -1,5 +1,5 @@
 /**
- * Matriz de precios (pieza × severidad). Debe coincidir con `omnichannel-backend/src/chat/autofix-config.ts`.
+ * Matriz de precios (pieza × severidad). Réplica en backend: `omnichannel-backend/src/catalog/legacy-pieza-dano-from-frontend.ts`.
  * Alias solicitado por producto para búsqueda de precios en el panel.
  */
 export const PIEZA_DANO_PRICE_MATRIX = [

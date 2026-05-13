@@ -38,6 +38,7 @@ export default function CatalogAdminPage() {
     diasEntrega: '4',
   });
   const [addSubmitting, setAddSubmitting] = useState(false);
+  const [importLegacySubmitting, setImportLegacySubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -153,6 +154,25 @@ export default function CatalogAdminPage() {
     }
   };
 
+  const handleImportLegacyJs = async () => {
+    setImportLegacySubmitting(true);
+    setError(null);
+    setSaveOk(false);
+    try {
+      const r = await fetch(`${API_ORIGIN_URL}/catalog/import-legacy-js`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diasEntrega: 3 }),
+      });
+      if (!r.ok) throw new Error(await parseJsonError(r));
+      await load();
+    } catch (err) {
+      setError(err?.message ?? 'No se pudo importar la matriz');
+    } finally {
+      setImportLegacySubmitting(false);
+    }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <OmnichannelLeftRail />
@@ -165,9 +185,18 @@ export default function CatalogAdminPage() {
             <h1 className="text-xl font-bold text-gray-900">Catálogo · matriz de precios</h1>
             <p className="mt-0.5 text-sm text-gray-500">
               Piezas y niveles de severidad. Edita precio y días de entrega en línea y guarda los
-              cambios.
+              cambios. Si la tabla está vacía, usa «Importar desde archivo JS» (réplica de la matriz
+              del panel; upsert sin duplicar pieza+severidad).
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleImportLegacyJs()}
+                disabled={importLegacySubmitting}
+                className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100 disabled:opacity-50"
+              >
+                {importLegacySubmitting ? 'Importando…' : 'Importar desde archivo JS'}
+              </button>
               <button
                 type="button"
                 onClick={() => setAddOpen(true)}
