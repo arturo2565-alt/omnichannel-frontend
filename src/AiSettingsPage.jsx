@@ -28,8 +28,23 @@ function fileToDataUrl(file) {
 
 /**
  * Solo data URL para OpenAI (`data:image/...;base64,...`). Rechaza blob: y rutas locales.
- * Debe llamarse justo antes de enviar el cuerpo a `/ai-playground/test`.
+ * Debe llamarse justo antes de enviar cada entrada en `imagesBase64` a `/ai-playground/test`.
  */
+/** URLs en `mockDraftQuote.imageUrl` (una data URL o JSON array serializado). */
+function parsePlaygroundDraftImageUrls(imageUrl) {
+  const s = String(imageUrl ?? '').trim();
+  if (!s) return [];
+  if (s.startsWith('[')) {
+    try {
+      const j = JSON.parse(s);
+      return Array.isArray(j) ? j.map(String).filter(Boolean) : [s];
+    } catch {
+      return [s];
+    }
+  }
+  return [s];
+}
+
 function assertPlaygroundVisionDataUrl(dataUrl, label = 'imagen') {
   const s = String(dataUrl ?? '').trim();
   if (!s) {
@@ -134,12 +149,14 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
   const [mockDraft, setMockDraft] = useState(null);
   const [isDraftPending, setIsDraftPending] = useState(false);
   const [phoneTab, setPhoneTab] = useState('chat');
-  const [quotePreviewDataUrl, setQuotePreviewDataUrl] = useState(null);
+  const [lightboxImageUrl, setLightboxImageUrl] = useState(null);
   const [imageLightboxOpen, setImageLightboxOpen] = useState(false);
   const [quoteLineEdits, setQuoteLineEdits] = useState([]);
   const [editingQuoteRowId, setEditingQuoteRowId] = useState(null);
   /** idle | debounce (esperando más mensajes) | thinking (llamada en curso) */
   const [playgroundPhase, setPlaygroundPhase] = useState('idle');
+  /** Resumen visible de la cola acumulada antes del flush (debounce). */
+  const [pendingBurstHint, setPendingBurstHint] = useState({ texts: 0, images: 0 });
   const [thinkingMode, setThinkingMode] = useState(null);
   const fileInputRef = useRef(null);
   const blobUrlsRef = useRef([]);
@@ -161,6 +178,36 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
         mockDraft.lines.length > 0),
     [mockDraft, isDraftPending],
   );
+
+  const quotePreviewUrls = useMemo(() => {
+    if (!mockDraft?.imageUrl) return [];
+    return parsePlaygroundDraftImageUrls(mockDraft.imageUrl);
+  }, [mockDraft?.imageUrl]);
+
+  const lightboxIndex = useMemo(() => {
+    if (!lightboxImageUrl || quotePreviewUrls.length === 0) return -1;
+    return quotePreviewUrls.indexOf(lightboxImageUrl);
+  }, [lightboxImageUrl, quotePreviewUrls]);
+
+  const openQuoteLightbox = useCallback((url) => {
+    const u = String(url ?? '').trim();
+    if (!u) return;
+    setLightboxImageUrl(u);
+    setImageLightboxOpen(true);
+  }, []);
+
+  const closeQuoteLightbox = useCallback(() => {
+    setImageLightboxOpen(false);
+    setLightboxImageUrl(null);
+  }, []);
+
+  const syncPendingBurstHint = useCallback(() => {
+    const q = pendingRef.current;
+    setPendingBurstHint({
+      texts: q.filter((i) => i.kind === 'text').length,
+      images: q.filter((i) => i.kind === 'image').length,
+    });
+  }, []);
 
   useEffect(() => {
     playgroundLockedRef.current = playgroundLocked;
@@ -189,7 +236,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       setPhoneTab('chat');
       setIsDraftPending(false);
       setEditingQuoteRowId(null);
-      setQuotePreviewDataUrl(null);
+      closeQuoteLightbox();
       pendingResumeContextRef.current = null;
       return;
     }
@@ -246,7 +293,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       return;
     }
     setQuoteLineEdits([]);
-  }, [mockDraft]);
+  }, [mockDraft, closeQuoteLightbox]);
 
   const playgroundQuoteTotal = useMemo(
     () =>
@@ -304,7 +351,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
         setIsDraftPending(false);
         setPhoneTab('chat');
         setEditingQuoteRowId(null);
-        setImageLightboxOpen(false);
+        closeQuoteLightbox();
         pendingResumeContextRef.current = null;
       } else {
         setMessages((prev) => [
@@ -320,7 +367,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
         setIsDraftPending(false);
         setPhoneTab('chat');
         setEditingQuoteRowId(null);
-        setImageLightboxOpen(false);
+        closeQuoteLightbox();
         pendingResumeContextRef.current = null;
       }
     } catch (e) {
@@ -343,6 +390,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     if (disabled) return;
     if (playgroundLockedRef.current) {
       pendingRef.current = [];
+      syncPendingBurstHint();
       if (debounceTimerRef.current != null) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
@@ -353,6 +401,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     }
     const queue = pendingRef.current;
     pendingRef.current = [];
+    syncPendingBurstHint();
     debounceTimerRef.current = null;
     if (queue.length === 0) {
       setPlaygroundPhase('idle');
@@ -363,7 +412,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     setPlaygroundPhase('thinking');
 
     const parts = [];
-    let lastImageFile = null;
+    const imageFiles = [];
     let n = 0;
     for (const item of queue) {
       if (item.kind === 'text') {
@@ -372,15 +421,20 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       } else if (item.kind === 'image') {
         n += 1;
         parts.push(`(${n}) [Imagen: ${item.name}]`);
-        lastImageFile = item.file;
+        imageFiles.push(item.file);
       }
     }
     const consolidatedText = parts.join('\n\n');
 
-    let imageBase64;
-    if (lastImageFile) {
+    let imagesBase64 = [];
+    if (imageFiles.length > 0) {
       try {
-        imageBase64 = assertPlaygroundVisionDataUrl(await fileToDataUrl(lastImageFile));
+        for (let i = 0; i < imageFiles.length; i += 1) {
+          const dataUrl = await fileToDataUrl(imageFiles[i]);
+          imagesBase64.push(
+            assertPlaygroundVisionDataUrl(dataUrl, `imagen ${i + 1}`),
+          );
+        }
       } catch (e) {
         setPlaygroundPhase('idle');
         setThinkingMode(null);
@@ -399,18 +453,18 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
 
     const historyPayload = capConversationHistory(conversationHistoryRef.current);
 
-    if (!consolidatedText.trim() && !imageBase64) {
+    if (!consolidatedText.trim() && imagesBase64.length === 0) {
       setPlaygroundPhase('idle');
       setThinkingMode(null);
       return;
     }
 
-    setThinkingMode(typeof imageBase64 === 'string' ? 'vision' : 'chat');
+    setThinkingMode(imagesBase64.length > 0 ? 'vision' : 'chat');
 
     try {
       const data = await testAiResponse({
         userText: consolidatedText.trim() || undefined,
-        imageBase64: typeof imageBase64 === 'string' ? imageBase64 : undefined,
+        imagesBase64: imagesBase64.length > 0 ? imagesBase64 : undefined,
         history: historyPayload,
       });
 
@@ -418,13 +472,11 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
         setIsDraftPending(true);
         setMockDraft(data.mockDraftQuote);
         setPhoneTab('quote');
-        if (typeof imageBase64 === 'string') {
-          setQuotePreviewDataUrl(imageBase64);
-        }
+        closeQuoteLightbox();
         pendingResumeContextRef.current = {
           consolidatedText: consolidatedText.trim() || '[Imagen(es)]',
           visionItems: Array.isArray(data.visionItems) ? data.visionItems : [],
-          imageDataUrl: typeof imageBase64 === 'string' ? imageBase64 : null,
+          imageDataUrls: imagesBase64.length > 0 ? imagesBase64 : null,
         };
         setConversationHistory((prev) =>
           capConversationHistory([
@@ -435,10 +487,8 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       } else {
         setIsDraftPending(false);
         setMockDraft(data.mockDraftQuote ?? null);
-        if (typeof imageBase64 === 'string') {
-          setQuotePreviewDataUrl(imageBase64);
-        } else if (!data.mockDraftQuote) {
-          setQuotePreviewDataUrl(null);
+        if (!data.mockDraftQuote) {
+          closeQuoteLightbox();
         }
         const assistantText = data.assistantMessage ?? '(Sin respuesta)';
         setMessages((prev) => [
@@ -474,37 +524,47 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
       setThinkingMode(null);
       setPlaygroundPhase('idle');
     }
-  }, [disabled, testAiResponse]);
+  }, [disabled, testAiResponse, closeQuoteLightbox, syncPendingBurstHint]);
 
   const schedulePlaygroundDebounce = useCallback(() => {
     if (playgroundLockedRef.current) return;
     if (debounceTimerRef.current != null) {
       clearTimeout(debounceTimerRef.current);
     }
+    syncPendingBurstHint();
     setPlaygroundPhase('debounce');
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null;
       void flushPlaygroundPending();
     }, PLAYGROUND_DEBOUNCE_MS);
-  }, [flushPlaygroundPending]);
+  }, [flushPlaygroundPending, syncPendingBurstHint]);
 
   const handlePickImage = (e) => {
-    const file = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []).filter((f) =>
+      f?.type?.startsWith('image/'),
+    );
     e.target.value = '';
-    if (!file?.type?.startsWith('image/')) return;
+    if (!picked.length) return;
     if (disabled || playgroundPhase === 'thinking' || playgroundLocked) return;
-    const url = URL.createObjectURL(file);
-    blobUrlsRef.current.push(url);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `img-${Date.now()}`,
+
+    const newMessages = [];
+    const newPending = [];
+    for (const file of picked) {
+      const url = URL.createObjectURL(file);
+      blobUrlsRef.current.push(url);
+      const id = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      newMessages.push({
+        id,
         role: 'user',
         imageUrl: url,
         imageName: file.name,
-      },
-    ]);
-    pendingRef.current = [...pendingRef.current, { kind: 'image', file, name: file.name }];
+      });
+      newPending.push({ kind: 'image', file, name: file.name });
+    }
+
+    setMessages((prev) => [...prev, ...newMessages]);
+    pendingRef.current = [...pendingRef.current, ...newPending];
+    syncPendingBurstHint();
     schedulePlaygroundDebounce();
   };
 
@@ -514,6 +574,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
     setDraft('');
     setMessages((prev) => [...prev, { id: `txt-${Date.now()}`, role: 'user', text }]);
     pendingRef.current = [...pendingRef.current, { kind: 'text', text }];
+    syncPendingBurstHint();
     schedulePlaygroundDebounce();
   };
 
@@ -561,7 +622,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                   type="button"
                   onClick={() => {
                     setPhoneTab('chat');
-                    setImageLightboxOpen(false);
+                    closeQuoteLightbox();
                   }}
                   className={`flex-1 px-1 py-2.5 text-[11px] font-semibold transition ${
                     phoneTab === 'chat'
@@ -646,7 +707,14 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                     {playgroundPhase === 'debounce' ? (
                       <div className="flex justify-start">
                         <div className="rounded-2xl rounded-bl-md border border-cyan-500/30 bg-cyan-950/40 px-3 py-2 text-[11px] leading-snug text-cyan-100/95">
-                          IA esperando más mensajes… (agrupa envíos durante ~20 s)
+                          IA esperando más mensajes… (
+                          {pendingBurstHint.images > 0
+                            ? `${pendingBurstHint.images} imagen${pendingBurstHint.images === 1 ? '' : 'es'}`
+                            : 'sin imágenes'}
+                          {pendingBurstHint.texts > 0
+                            ? `, ${pendingBurstHint.texts} texto${pendingBurstHint.texts === 1 ? '' : 's'}`
+                            : ''}{' '}
+                          en cola · envío en ~{Math.round(PLAYGROUND_DEBOUNCE_MS / 1000)} s)
                         </div>
                       </div>
                     ) : null}
@@ -654,7 +722,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                       <div className="flex justify-start">
                         <div className="rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-white/70">
                           {thinkingMode === 'vision'
-                            ? 'Analizando imagen y generando borrador…'
+                            ? 'Analizando imágenes y generando borrador…'
                             : 'IA pensando…'}
                         </div>
                       </div>
@@ -667,6 +735,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
+                      multiple
                       className="hidden"
                       onChange={handlePickImage}
                       disabled={busyComposer}
@@ -692,7 +761,7 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                             d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
                           />
                         </svg>
-                        Subir Imagen
+                        Subir imagen(es)
                       </button>
                     </div>
                     <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-zinc-800/80 px-2 py-1.5">
@@ -736,21 +805,47 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                     </p>
                   </div>
 
-                  {quotePreviewDataUrl ? (
-                    <button
-                      type="button"
-                      onClick={() => setImageLightboxOpen(true)}
-                      className="group shrink-0 border-b border-slate-200 bg-slate-200/60 p-2 text-center transition hover:bg-slate-200"
-                    >
-                      <img
-                        src={quotePreviewDataUrl}
-                        alt="Vista previa del daño analizado"
-                        className="mx-auto h-24 max-w-full rounded-lg object-cover shadow ring-1 ring-slate-300/80"
-                      />
-                      <p className="mt-1 text-[9px] font-medium text-slate-600 group-hover:text-indigo-700">
-                        Toca para ampliar
+                  {quotePreviewUrls.length > 0 ? (
+                    <div className="shrink-0 border-b border-slate-200 bg-slate-200/60 p-2">
+                      <p className="mb-1.5 text-center text-[9px] font-medium text-slate-600">
+                        {quotePreviewUrls.length === 1
+                          ? 'Toca para ampliar'
+                          : `${quotePreviewUrls.length} evidencias · toca una miniatura para ampliar`}
                       </p>
-                    </button>
+                      {quotePreviewUrls.length === 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => openQuoteLightbox(quotePreviewUrls[0])}
+                          className="group block w-full text-center transition hover:opacity-95"
+                        >
+                          <img
+                            src={quotePreviewUrls[0]}
+                            alt="Evidencia 1"
+                            className="mx-auto h-24 max-w-full rounded-lg object-cover shadow ring-1 ring-slate-300/80"
+                          />
+                        </button>
+                      ) : (
+                        <div className="grid max-h-36 grid-cols-3 gap-2 overflow-y-auto pr-0.5">
+                          {quotePreviewUrls.map((url, idx) => (
+                            <button
+                              key={`${idx}-${url.slice(0, 48)}`}
+                              type="button"
+                              onClick={() => openQuoteLightbox(url)}
+                              className="group relative aspect-square overflow-hidden rounded-lg ring-1 ring-slate-300/80 transition hover:ring-2 hover:ring-indigo-400"
+                            >
+                              <img
+                                src={url}
+                                alt={`Evidencia ${idx + 1}`}
+                                className="h-full w-full object-cover"
+                              />
+                              <span className="absolute bottom-0 left-0 right-0 bg-black/50 py-0.5 text-[8px] font-semibold text-white">
+                                {idx + 1}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ) : null}
 
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
@@ -930,25 +1025,60 @@ function AiPlaygroundSidebar({ testAiResponse, testAiResumeAfterDraft, disabled 
                 </div>
               )}
 
-              {imageLightboxOpen && quotePreviewDataUrl ? (
+              {imageLightboxOpen && lightboxImageUrl ? (
                 <div
                   role="presentation"
                   className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-black/88 p-3"
-                  onClick={() => setImageLightboxOpen(false)}
+                  onClick={closeQuoteLightbox}
                 >
                   <button
                     type="button"
-                    className="absolute right-2 top-2 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/25"
+                    className="absolute right-2 top-2 z-10 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/25"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setImageLightboxOpen(false);
+                      closeQuoteLightbox();
                     }}
                   >
                     ✕ Cerrar
                   </button>
+                  {quotePreviewUrls.length > 1 && lightboxIndex >= 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/15 px-2.5 py-2 text-lg text-white hover:bg-white/25 disabled:opacity-30"
+                        disabled={lightboxIndex <= 0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const prev = quotePreviewUrls[lightboxIndex - 1];
+                          if (prev) setLightboxImageUrl(prev);
+                        }}
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/15 px-2.5 py-2 text-lg text-white hover:bg-white/25 disabled:opacity-30"
+                        disabled={lightboxIndex >= quotePreviewUrls.length - 1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = quotePreviewUrls[lightboxIndex + 1];
+                          if (next) setLightboxImageUrl(next);
+                        }}
+                      >
+                        ›
+                      </button>
+                      <p className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white">
+                        {lightboxIndex + 1} / {quotePreviewUrls.length}
+                      </p>
+                    </>
+                  ) : null}
                   <img
-                    src={quotePreviewDataUrl}
-                    alt=""
+                    src={lightboxImageUrl}
+                    alt={
+                      lightboxIndex >= 0
+                        ? `Evidencia ${lightboxIndex + 1}`
+                        : 'Evidencia ampliada'
+                    }
                     className="max-h-[88%] max-w-full rounded-lg object-contain shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                   />
@@ -1025,23 +1155,24 @@ export default function AiSettingsPage() {
   };
 
   const testAiResponse = useCallback(
-    async ({ userText, imageBase64, history }) => {
+    async ({ userText, imagesBase64, history }) => {
+      const images =
+        Array.isArray(imagesBase64) && imagesBase64.length > 0
+          ? imagesBase64
+              .map((u) => String(u ?? '').trim())
+              .filter(Boolean)
+              .map((u, i) => assertPlaygroundVisionDataUrl(u, `imagesBase64[${i}]`))
+          : [];
       const body = {
         visionPrompt: form.visionPrompt,
         chatAppointmentPrompt: form.chatAppointmentPrompt,
         userText:
           userText != null && String(userText).trim() !== '' ? String(userText).trim() : undefined,
-        imageBase64:
-          imageBase64 != null && String(imageBase64).trim() !== ''
-            ? String(imageBase64).trim()
-            : undefined,
+        ...(images.length > 0 ? { imagesBase64: images } : {}),
         ...(Array.isArray(history) && history.length > 0 ? { history } : {}),
       };
-      if (!body.userText && !body.imageBase64) {
+      if (!body.userText && !body.imagesBase64?.length) {
         throw new Error('Falta mensaje o imagen');
-      }
-      if (body.imageBase64) {
-        body.imageBase64 = assertPlaygroundVisionDataUrl(body.imageBase64, 'imageBase64');
       }
       const r = await fetch(`${API_BASE_URL}/ai-playground/test`, {
         method: 'POST',
