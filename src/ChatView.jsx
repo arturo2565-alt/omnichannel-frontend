@@ -273,6 +273,7 @@ function ChatView({
   isSending,       // Estado de carga del envío
   apiBaseUrl,
   onDraftQuotePatched,
+  onDeleteConversation,
 }) {
 
   const messagesEndRef = useRef(null);
@@ -311,6 +312,17 @@ function ChatView({
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
 
   const [autoPilotToggleBusy, setAutoPilotToggleBusy] = useState(false);
+  const [deleteConversationBusy, setDeleteConversationBusy] = useState(false);
+
+  const handleDeleteConversationClick = useCallback(async () => {
+    if (!selectedConvId || deleteConversationBusy || !onDeleteConversation) return;
+    setDeleteConversationBusy(true);
+    try {
+      await onDeleteConversation();
+    } finally {
+      setDeleteConversationBusy(false);
+    }
+  }, [selectedConvId, deleteConversationBusy, onDeleteConversation]);
 
   const handleAutoPilotToggle = useCallback(async () => {
     if (!apiBaseUrl || !selectedConvId || autoPilotToggleBusy) return;
@@ -897,6 +909,18 @@ function ChatView({
                     />
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteConversationClick()}
+                  disabled={!selectedConvId || deleteConversationBusy}
+                  title="Eliminar conversación y todo su historial"
+                  aria-label="Eliminar conversación"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-lg transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="text-red-500 hover:text-red-700" aria-hidden>
+                    🗑️
+                  </span>
+                </button>
                 <span className={`flex shrink-0 items-center text-xs font-normal ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
                   <span className={`mr-2 h-2 w-2 rounded-full ${isConnected ? 'animate-pulse bg-green-500' : 'bg-red-500'}`} />
                   {isConnected ? 'Online' : 'Desconectado'}

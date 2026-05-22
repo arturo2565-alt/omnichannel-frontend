@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
-import { API_BASE_URL } from './apiConfig.js';
+import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
@@ -35,7 +35,8 @@ function App() {
   // --- 🌟 ESTADOS MULTIMEDIA 🌟 ---
   const [selectedFile, setSelectedFile] = useState(null); 
   const [filePreviewUrl, setFilePreviewUrl] = useState(null); 
-  const [isSending, setIsSending] = useState(false); 
+  const [isSending, setIsSending] = useState(false);
+  const [deleteToast, setDeleteToast] = useState('');
 
   // --- LÓGICA DE CARGA ---
   const fetchConversations = async () => {
@@ -284,6 +285,49 @@ function App() {
     [aiSuggestion],
   );
 
+  const handleDeleteConversation = async () => {
+    if (!selectedConvId) return;
+    const confirmed = window.confirm(
+      '¿Estás seguro de que deseas eliminar esta conversación? Esta acción borrará todo el historial, citas y cotizaciones de forma permanente.',
+    );
+    if (!confirmed) return;
+
+    const origin = String(API_ORIGIN_URL).replace(/\/$/, '');
+    try {
+      const res = await fetch(`${origin}/chat/conversations/${selectedConvId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => '');
+        let msg = raw?.trim() || `Error ${res.status}`;
+        try {
+          const j = JSON.parse(raw);
+          if (j?.message != null) {
+            msg = Array.isArray(j.message)
+              ? j.message.join(', ')
+              : String(j.message);
+          }
+        } catch {
+          /* texto plano */
+        }
+        throw new Error(msg);
+      }
+
+      setContacts((prev) => prev.filter((c) => c.id !== selectedConvId));
+      setSelectedConvId(null);
+      setMessages([]);
+      setAiSuggestion(null);
+      handleClearFile();
+      setDeleteToast('Conversación eliminada correctamente');
+      setTimeout(() => setDeleteToast(null), 4500);
+    } catch (error) {
+      console.error('Delete conversation:', error);
+      window.alert(
+        error?.message ?? 'No se pudo eliminar la conversación',
+      );
+    }
+  };
+
   const handleDraftQuotePatched = ({ messageId, draftQuote, damageAnalysis }) => {
     if (!messageId) return;
     setMessages((prev) =>
@@ -300,6 +344,15 @@ function App() {
   };
 
   return (
+    <>
+    {deleteToast ? (
+      <div
+        role="status"
+        className="fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg ring-1 ring-emerald-700/30"
+      >
+        {deleteToast}
+      </div>
+    ) : null}
     <ChatView 
       contacts={contacts}
       selectedConvId={selectedConvId}
@@ -321,7 +374,9 @@ function App() {
       isSending={isSending}
       apiBaseUrl={API_BASE_URL}
       onDraftQuotePatched={handleDraftQuotePatched}
+      onDeleteConversation={handleDeleteConversation}
     />
+    </>
   );
 }
 
