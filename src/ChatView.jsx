@@ -590,10 +590,21 @@ function ChatView({
     [quoteRows],
   );
 
-  const mensajeClientePreview = useMemo(
-    () => buildClienteQuoteOutboundMessage(quoteRows),
-    [quoteRows],
-  );
+  const mensajeClientePreview = useMemo(() => {
+    const stored = latestDraftQuote?.quote?.formalNarrative?.trim();
+    const isClientPreview =
+      stored &&
+      !stored.startsWith('Estimado cliente') &&
+      (stored.startsWith('👋') || stored.includes('🛠️'));
+    if (!quoteFormDirty && isClientPreview) {
+      return stored;
+    }
+    return buildClienteQuoteOutboundMessage(quoteRows);
+  }, [
+    quoteRows,
+    quoteFormDirty,
+    latestDraftQuote?.quote?.formalNarrative,
+  ]);
 
   const persistDraftQuotePatch = useCallback(async () => {
     if (!apiBaseUrl || !activeDraftForPanel?.id) {
