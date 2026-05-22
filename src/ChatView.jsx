@@ -214,8 +214,34 @@ function formatMoneyClienteQuoteMxAmount(n) {
   return rounded.toLocaleString('es-MX', { maximumFractionDigits: 0 });
 }
 
+/** Resumen interno SISTEMA: para resume-after-draft (mismos montos que el panel). */
+function buildPanelSystemAuthorizationMessage(quoteRows, draftReference) {
+  const lines = (quoteRows ?? [])
+    .map((r) => {
+      const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
+      const n = parsePrecioInput(r.precioInput);
+      const price = Number.isFinite(n) ? Math.max(0, n) : 0;
+      return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
+    })
+    .join('\n');
+  const total = (quoteRows ?? []).reduce((acc, r) => {
+    const n = parsePrecioInput(r.precioInput);
+    return acc + (Number.isFinite(n) ? Math.max(0, n) : 0);
+  }, 0);
+  const refLine = draftReference
+    ? `Referencia interna del borrador: ${draftReference}`
+    : 'Referencia interna del borrador: (sin código)';
+  return [
+    'SISTEMA: El agente ha autorizado la siguiente cotización:',
+    lines,
+    `Total: $${formatMoneyClienteQuoteMxAmount(total)} MXN`,
+    refLine,
+  ].join('\n');
+}
+
 /**
  * Mensaje corto para el cliente (webhook/WhatsApp): piezas del panel, total en negritas (* sintaxis típica de WhatsApp).
+ * Fallback si resume-after-draft no devuelve texto.
  */
 function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_URL) {
   const sorted = [...(rows ?? [])];
@@ -224,7 +250,7 @@ function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_
       const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
       const n = parsePrecioInput(r.precioInput);
       const price = Number.isFinite(n) ? Math.max(0, n) : 0;
-      return `• ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
+      return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
 
@@ -668,8 +694,32 @@ function ChatView({
             `No se pudo activar el autopilot (HTTP ${autopilotRes.status}). La IA no podrá responder solicitudes de cita.`,
         );
       }
+
+      const draftRef =
+        activeDraftForPanel?.quotePayload?.reference ??
+        latestDraftQuote?.quote?.reference ??
+        '';
+      const authorizedQuoteSummary = buildPanelSystemAuthorizationMessage(
+        quoteRows,
+        draftRef,
+      );
+
+      let mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
+      const resumeRes = await fetch(
+        `${apiBaseUrl}/conversations/${selectedConvId}/resume-after-draft`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authorizedQuoteSummary }),
+        },
+      );
+      if (resumeRes.ok) {
+        const resumeData = await resumeRes.json().catch(() => ({}));
+        const aiText = resumeData?.assistantMessage?.trim();
+        if (aiText) mensajeCliente = aiText;
+      }
+
       onRefresh?.();
-      const mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
       await onSendQuoteText?.(mensajeCliente, {
         conversationLeadStatus: 'cotizado',
       });

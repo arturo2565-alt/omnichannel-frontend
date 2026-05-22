@@ -87,7 +87,8 @@ function buildPlaygroundAuthorizedQuoteLinesForSystem(quoteLineEdits) {
     .map((r) => {
       const p = parsePrecioInput(r.precioInput);
       const amt = Number.isFinite(p) ? p : 0;
-      return `- ${r.pieza}: ${formatPlaygroundMoney(amt)}`;
+      const rounded = Math.round(amt);
+      return `🛠️ ${r.pieza}: $${rounded.toLocaleString('es-MX')} MXN`;
     })
     .join('\n');
 }
