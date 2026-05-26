@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { API_ORIGIN_URL } from './apiConfig.js';
+import { apiFetchOrigin } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { DAMAGE_LEVEL_KEYS } from './autofix-pricing.js';
 
@@ -48,7 +48,7 @@ export default function CatalogAdminPage() {
     setSaveOk(false);
     setLoading(true);
     try {
-      const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`);
+      const r = await apiFetchOrigin('/catalog/price-matrix');
       if (!r.ok) throw new Error(await parseJsonError(r));
       const data = await r.json();
       const list = Array.isArray(data?.rows) ? data.rows : [];
@@ -122,7 +122,7 @@ export default function CatalogAdminPage() {
     setSaveOk(false);
     setSeedMessage(null);
     try {
-      const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`, {
+      const r = await apiFetchOrigin('/catalog/price-matrix', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates: dirtyUpdates }),
@@ -166,7 +166,7 @@ export default function CatalogAdminPage() {
     setError(null);
     setSeedMessage(null);
     try {
-      const r = await fetch(`${API_ORIGIN_URL}/catalog/price-matrix`, {
+      const r = await apiFetchOrigin('/catalog/price-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -200,7 +200,7 @@ export default function CatalogAdminPage() {
     setSaveOk(false);
     setSeedMessage(null);
     try {
-      const r = await fetch(`${API_ORIGIN_URL}/catalog/import-legacy-js`, {
+      const r = await apiFetchOrigin('/catalog/import-legacy-js', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ diasEntrega: 3 }),
@@ -220,7 +220,7 @@ export default function CatalogAdminPage() {
     setSaveOk(false);
     setSeedMessage(null);
     try {
-      const r = await fetch(`${API_ORIGIN_URL}/catalog/seed-instant-quote-matrix`, {
+      const r = await apiFetchOrigin('/catalog/seed-instant-quote-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

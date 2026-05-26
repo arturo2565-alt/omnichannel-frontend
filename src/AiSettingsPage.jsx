@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE_URL } from './apiConfig.js';
+import { apiFetchWebhook } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
   AUTO_FIX_BASE_PRICES,
@@ -1105,7 +1105,7 @@ export default function AiSettingsPage() {
     setError(null);
     setSavedOk(false);
     try {
-      const r = await fetch(`${API_BASE_URL}/ai-config`);
+      const r = await apiFetchWebhook('/ai-config');
       if (!r.ok) throw new Error(`No se pudo cargar la configuración (${r.status})`);
       const data = await r.json();
       setForm({
@@ -1138,7 +1138,7 @@ export default function AiSettingsPage() {
     setError(null);
     setSavedOk(false);
     try {
-      const r = await fetch(`${API_BASE_URL}/ai-config`, {
+      const r = await apiFetchWebhook('/ai-config', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -1175,7 +1175,7 @@ export default function AiSettingsPage() {
       if (!body.userText && !body.imagesBase64?.length) {
         throw new Error('Falta mensaje o imagen');
       }
-      const r = await fetch(`${API_BASE_URL}/ai-playground/test`, {
+      const r = await apiFetchWebhook('/ai-playground/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -1212,7 +1212,7 @@ export default function AiSettingsPage() {
         ...(Array.isArray(history) && history.length > 0 ? { history } : {}),
         ...(Array.isArray(visionItems) && visionItems.length > 0 ? { visionItems } : {}),
       };
-      const r = await fetch(`${API_BASE_URL}/ai-playground/resume-after-draft`, {
+      const r = await apiFetchWebhook('/ai-playground/resume-after-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

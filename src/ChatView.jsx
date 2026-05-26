@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar } from 'lucide-react';
+import { Calendar, LogOut } from 'lucide-react';
+import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
@@ -8,6 +9,7 @@ import {
   calculateEstimate,
   coerceDamageLevelCode,
 } from './autofix-pricing';
+import { apiFetchWebhook } from './apiClient.js';
 import {
   PANEL_PIEZA_OPTION_GROUPS,
   findPanelPiezaOption,
@@ -631,6 +633,7 @@ function ChatView({
   onDeleteConversation,
 }) {
 
+  const { logout } = useAuth();
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -691,9 +694,8 @@ function ChatView({
     const next = !currentOn;
     setAutoPilotToggleBusy(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/conversations/${selectedConvId}`, {
+      const res = await apiFetchWebhook(`/conversations/${selectedConvId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isAutoPilotActive: next }),
       });
       if (!res.ok) {
@@ -802,8 +804,8 @@ function ChatView({
         return;
       }
       try {
-        const r = await fetch(
-          `${apiBaseUrl}/conversations/${selectedConvId}/draft-quotes`,
+        const r = await apiFetchWebhook(
+          `/conversations/${selectedConvId}/draft-quotes`,
           signal ? { signal } : {},
         );
         const data = r.ok ? await r.json() : [];
@@ -1070,7 +1072,7 @@ function ChatView({
     const ac = new AbortController();
     void (async () => {
       try {
-        const r = await fetch(`${apiBaseUrl}/appointments`, {
+        const r = await apiFetchWebhook('/appointments', {
           signal: ac.signal,
         });
         const data = r.ok ? await r.json() : [];
@@ -1153,23 +1155,19 @@ function ChatView({
 
       setIsRegeneratingClientePreview(true);
       try {
-        const res = await fetch(
-          `${apiBaseUrl}/draft-quote/preview-narrative`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              pieces: buildPreviewNarrativePiecesFromQuoteRows(rows),
-              modeloVehiculo: resolveModeloVehiculoForPreview(
-                panelDisplayQuote ?? latestDraftQuote?.quote,
-                latestQuoteMessage?.damageAnalysis,
-              ),
-              conversationStatus: leadStatusForQuote,
-              contactName: selectedContact?.contactName ?? '',
-              conversationId: selectedConvId ?? '',
-            }),
-          },
-        );
+        const res = await apiFetchWebhook('/draft-quote/preview-narrative', {
+          method: 'POST',
+          body: JSON.stringify({
+            pieces: buildPreviewNarrativePiecesFromQuoteRows(rows),
+            modeloVehiculo: resolveModeloVehiculoForPreview(
+              panelDisplayQuote ?? latestDraftQuote?.quote,
+              latestQuoteMessage?.damageAnalysis,
+            ),
+            conversationStatus: leadStatusForQuote,
+            contactName: selectedContact?.contactName ?? '',
+            conversationId: selectedConvId ?? '',
+          }),
+        });
         if (!res.ok) {
           const t = await res.text().catch(() => '');
           throw new Error(t || `HTTP ${res.status}`);
@@ -1230,8 +1228,8 @@ function ChatView({
     }
     setIsRegeneratingClientePreview(true);
     try {
-      const res = await fetch(
-        `${apiBaseUrl}/draft-quote/${activeDraftForPanel.id}/regenerate-narrative`,
+      const res = await apiFetchWebhook(
+        `/draft-quote/${activeDraftForPanel.id}/regenerate-narrative`,
         { method: 'POST' },
       );
       if (res.ok) {
@@ -1358,9 +1356,8 @@ function ChatView({
       }
     }
     setQuoteSaveError('');
-    const res = await fetch(`${apiBaseUrl}/quote/${activeDraftForPanel.id}`, {
+    const res = await apiFetchWebhook(`/quote/${activeDraftForPanel.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ inventoryLines: linesPayload }),
     });
     if (!res.ok) {
@@ -1414,11 +1411,10 @@ function ChatView({
       if (!apiBaseUrl || !selectedConvId) {
         throw new Error('Sin conversación activa para activar autopilot');
       }
-      const autopilotRes = await fetch(
-        `${apiBaseUrl}/conversations/${selectedConvId}`,
+      const autopilotRes = await apiFetchWebhook(
+        `/conversations/${selectedConvId}`,
         {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isAutoPilotActive: true }),
         },
       );
@@ -1445,11 +1441,10 @@ function ChatView({
       );
 
       let mensajeCliente = mensajeClientePreview;
-      const resumeRes = await fetch(
-        `${apiBaseUrl}/conversations/${selectedConvId}/resume-after-draft`,
+      const resumeRes = await apiFetchWebhook(
+        `/conversations/${selectedConvId}/resume-after-draft`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ authorizedQuoteSummary }),
         },
       );
@@ -2269,14 +2264,25 @@ function ChatView({
                 Filtra conversaciones por canal
               </p>
             </div>
-            <Link
-              to="/calendar"
-              title="Citas y agenda"
-              aria-label="Ir al calendario de citas"
-              className="lg:hidden inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-indigo-200/90 bg-gradient-to-br from-indigo-50 via-white to-violet-50 text-indigo-700 shadow-md ring-1 ring-indigo-100/80 transition active:scale-95 hover:border-indigo-300 hover:shadow-lg"
-            >
-              <Calendar className="h-5 w-5" strokeWidth={2} aria-hidden />
-            </Link>
+            <div className="flex shrink-0 items-center gap-2 lg:hidden">
+              <Link
+                to="/calendar"
+                title="Citas y agenda"
+                aria-label="Ir al calendario de citas"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-indigo-200/90 bg-gradient-to-br from-indigo-50 via-white to-violet-50 text-indigo-700 shadow-md ring-1 ring-indigo-100/80 transition active:scale-95 hover:border-indigo-300 hover:shadow-lg"
+              >
+                <Calendar className="h-5 w-5" strokeWidth={2} aria-hidden />
+              </Link>
+              <button
+                type="button"
+                onClick={logout}
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 shadow-sm transition active:scale-95 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
+              >
+                <LogOut className="h-5 w-5" strokeWidth={2} aria-hidden />
+              </button>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
             {[

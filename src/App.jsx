@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
-import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
+import { API_BASE_URL } from './apiConfig.js';
+import { apiFetchWebhook, parseApiError } from './apiClient.js';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
@@ -41,7 +42,7 @@ function App() {
   // --- LÓGICA DE CARGA ---
   const fetchConversations = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/conversations`);
+      const response = await apiFetchWebhook('/conversations');
       if (!response.ok) {
         console.error("Error conversaciones HTTP:", response.status);
         setContacts([]);
@@ -58,7 +59,7 @@ function App() {
   const fetchMessagesForConv = async (convId) => {
     if (!convId) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/messages/${convId}`);
+      const response = await apiFetchWebhook(`/messages/${convId}`);
       if (!response.ok) {
         console.error("Error mensajes HTTP:", response.status);
         setMessages([]);
@@ -217,10 +218,9 @@ function App() {
 
         console.log("Subiendo imagen a:", `${API_BASE_URL}/upload`);
         
-        const uploadResp = await fetch(`${API_BASE_URL}/upload`, {
+        const uploadResp = await apiFetchWebhook('/upload', {
           method: 'POST',
           body: formData,
-          // El navegador pone el Content-Type automáticamente con el boundary
         });
         
         if (!uploadResp.ok) {
@@ -248,9 +248,9 @@ function App() {
           : {}),
       };
 
-      await fetch(API_BASE_URL, {
+      await apiFetchWebhook('', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        skipAuth: true,
         body: JSON.stringify(newMessage),
       });
 
@@ -271,7 +271,9 @@ function App() {
     if (!selectedConvId) return;
     setIsAiLoading(true); setAiSuggestion(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/ai-suggest/${selectedConvId}`, { method: 'POST' });
+      const response = await apiFetchWebhook(`/ai-suggest/${selectedConvId}`, {
+        method: 'POST',
+      });
       const data = await response.json();
       setAiSuggestion(data.suggestion);
     } catch (error) { console.error("Error IA:", error); }
@@ -292,25 +294,12 @@ function App() {
     );
     if (!confirmed) return;
 
-    const origin = String(API_ORIGIN_URL).replace(/\/$/, '');
     try {
-      const res = await fetch(`${origin}/chat/conversations/${selectedConvId}`, {
+      const res = await apiFetchWebhook(`/conversations/${selectedConvId}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        let msg = raw?.trim() || `Error ${res.status}`;
-        try {
-          const j = JSON.parse(raw);
-          if (j?.message != null) {
-            msg = Array.isArray(j.message)
-              ? j.message.join(', ')
-              : String(j.message);
-          }
-        } catch {
-          /* texto plano */
-        }
-        throw new Error(msg);
+        throw new Error(await parseApiError(res));
       }
 
       setContacts((prev) => prev.filter((c) => c.id !== selectedConvId));

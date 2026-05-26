@@ -1,13 +1,16 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, Settings2, MessageCircle, Table2 } from 'lucide-react';
+import { Calendar, LogOut, MessageCircle, Settings2, Table2 } from 'lucide-react';
+import { useAuth } from './AuthContext.jsx';
 
 const railBtn =
   'flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105 border focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70';
 
 /** Rail izquierdo oscuro: filtros de canal (opcional) + navegación con estado activo */
 export function OmnichannelLeftRail({ platformSlot }) {
+  const { logout, taller, user } = useAuth();
+
   return (
-    <div className="z-10 hidden w-20 shrink-0 flex-col items-center bg-gray-900 py-4 shadow-xl lg:flex">
+    <div className="z-10 hidden min-h-0 w-20 shrink-0 flex-col items-center bg-gray-900 py-4 shadow-xl lg:flex lg:min-h-full">
       {platformSlot ? (
         <>
           <div className="flex flex-col items-center space-y-4">{platformSlot}</div>
@@ -73,6 +76,25 @@ export function OmnichannelLeftRail({ platformSlot }) {
           <Table2 className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
       </nav>
+
+      <div className="mt-auto flex flex-col items-center gap-2 pt-4">
+        {(taller?.nombre || user?.email) && (
+          <p
+            className="max-w-[4.5rem] truncate text-center text-[9px] leading-tight text-gray-500"
+            title={taller?.nombre || user?.email}
+          >
+            {taller?.nombre || user?.email}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={logout}
+          title="Cerrar sesión"
+          className={`${railBtn} border-gray-600 bg-gray-800/90 text-gray-300 hover:bg-red-900/80 hover:text-white hover:border-red-700`}
+        >
+          <LogOut className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </button>
+      </div>
     </div>
   );
 }

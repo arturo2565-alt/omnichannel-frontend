@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
-import { API_BASE_URL } from './apiConfig.js';
+import { apiFetchWebhook } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 
 const STATUS_LABEL = {
@@ -29,7 +29,7 @@ export default function CalendarPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(`${API_BASE_URL}/appointments`);
+      const r = await apiFetchWebhook('/appointments');
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setItems(Array.isArray(data) ? data : []);
@@ -47,9 +47,8 @@ export default function CalendarPage() {
 
   const patchStatus = async (id, status) => {
     try {
-      const r = await fetch(`${API_BASE_URL}/appointments/${id}`, {
+      const r = await apiFetchWebhook(`/appointments/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
       if (!r.ok) throw new Error('patch');
