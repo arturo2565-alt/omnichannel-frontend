@@ -1,3 +1,5 @@
+import { resolveCatalogPiezaForEstimate } from './panel-pieza-options.js';
+
 /**
  * Matriz de precios (pieza × severidad). Réplica en backend: `omnichannel-backend/src/catalog/legacy-pieza-dano-from-frontend.ts`.
  * Alias solicitado por producto para búsqueda de precios en el panel.
@@ -87,9 +89,10 @@ export function matchPiezaFromAnalysis(parteLibre) {
 }
 
 export function findPiezaRow(pieza) {
-  const n = normalizeText(pieza);
+  const catalogKey = resolveCatalogPiezaForEstimate(pieza);
+  const n = normalizeText(catalogKey);
   if (rowByPiezaNorm.has(n)) return rowByPiezaNorm.get(n);
-  const matched = matchPiezaFromAnalysis(pieza);
+  const matched = matchPiezaFromAnalysis(catalogKey);
   if (!matched) return null;
   return rowByPiezaNorm.get(normalizeText(matched)) ?? null;
 }

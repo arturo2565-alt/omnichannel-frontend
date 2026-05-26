@@ -4,17 +4,21 @@ import { Calendar } from 'lucide-react';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
-  AUTO_FIX_BASE_PRICES,
   DAMAGE_LEVEL_KEYS,
   calculateEstimate,
   coerceDamageLevelCode,
-  matchPiezaFromAnalysis,
 } from './autofix-pricing';
-
-/** Nombres canónicos de pieza en la matriz (coinciden con `value` del select). */
-const MATRIX_PIEZA_KEYS = new Set(
-  AUTO_FIX_BASE_PRICES.map((row) => row.pieza),
-);
+import {
+  PANEL_PIEZA_OPTION_GROUPS,
+  findPanelPiezaOption,
+  getPiezaClienteDisplayName,
+  getPiezaMenuLabel,
+  getPiezaSelectLabel,
+  isInternalDamageRangePieza,
+  isRefaccionPieza,
+  isKnownPanelPiezaCode,
+  normalizePiezaCodeForPanel,
+} from './panel-pieza-options';
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
 // Añade soporte para Facebook y mejora la visualización del badge con círculo perfecto y centrado
@@ -164,26 +168,166 @@ function isPlaceholderPieza(pieza) {
     .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
 }
 
-/** Alinea el texto IA / backend con una fila de la matriz cuando hay match seguro; si no, conserva texto (se muestra como opción extra en el select). */
+/** Alinea texto IA / backend al código del panel (PDI, SI, …) cuando hay match. */
 function normalizePiezaForPanel(raw) {
   const t = String(raw ?? '').trim();
   if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
-  if (MATRIX_PIEZA_KEYS.has(t)) return t;
-  const canon = matchPiezaFromAnalysis(t);
-  if (canon && MATRIX_PIEZA_KEYS.has(canon)) return canon;
+  const code = normalizePiezaCodeForPanel(t);
+  if (isKnownPanelPiezaCode(code)) return code;
   return t;
 }
 
 function recalcRowPriceFromMatrix(row) {
+  if (isInternalDamageRangePieza(row.pieza) || isRefaccionPieza(row.pieza)) {
+    return row;
+  }
   const n = calculateEstimate(row.pieza, row.severidad);
   if (n <= 0) return row;
   return { ...row, precioInput: String(Math.round(n)) };
 }
 
+function parsePrecioMinMaxFromRow(row) {
+  const min = parsePrecioInput(
+    row.precioMinInput ?? row.precioInput ?? '0',
+  );
+  const max = parsePrecioInput(
+    row.precioMaxInput ?? row.precioMinInput ?? row.precioInput ?? '0',
+  );
+  const minSafe = Number.isFinite(min) ? Math.max(0, min) : 0;
+  let maxSafe = Number.isFinite(max) ? Math.max(0, max) : minSafe;
+  if (maxSafe < minSafe) maxSafe = minSafe;
+  return { min: minSafe, max: maxSafe };
+}
+
+function rowAmountForPanelTotal(row) {
+  if (isInternalDamageRangePieza(row.pieza)) {
+    return parsePrecioMinMaxFromRow(row).min;
+  }
+  const n = parsePrecioInput(row.precioInput);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function formatRefaccionClienteLine(detalle, price) {
+  const nombre = String(detalle ?? '').trim() || 'Sin especificar';
+  const amount = Number.isFinite(price) ? Math.max(0, Math.round(price)) : 0;
+  return `⚙️ Refacción (${nombre}): $${formatMoneyClienteQuoteMxAmount(amount)} MXN`;
+}
+
+function parseRefaccionDetalleFromStoredPieza(piezaRaw, descripcionTecnica) {
+  const fromDesc = String(descripcionTecnica ?? '').trim();
+  if (fromDesc) return fromDesc;
+  const p = String(piezaRaw ?? '').trim();
+  const m = p.match(/^refacci[oó]n\s*:\s*(.+)$/i);
+  if (m) return String(m[1]).trim();
+  if (/^refacci[oó]n$/i.test(p)) return '';
+  return '';
+}
+
+function formatInternalDamageClienteLine(min, max) {
+  const { min: a, max: b } = (() => {
+    let lo = min;
+    let hi = max;
+    if (hi < lo) hi = lo;
+    return { min: lo, max: hi };
+  })();
+  return `⚠️ Posibles daños internos: $${formatMoneyClienteQuoteMxAmount(a)} - $${formatMoneyClienteQuoteMxAmount(b)} MXN (Sujeto a desarme)`;
+}
+
+function parseInternalDamageMaxFromDescription(text, fallbackMin) {
+  const s = String(text ?? '');
+  const m = s.match(/\$\s*([\d,.]+)\s*-\s*\$\s*([\d,.]+)/i);
+  if (m) {
+    const max = Number(String(m[2]).replace(/,/g, ''));
+    if (Number.isFinite(max)) return Math.max(0, Math.round(max));
+  }
+  return fallbackMin;
+}
+
+function buildQuoteRowFromSource({
+  id,
+  piezaRaw,
+  severidadRaw,
+  precio,
+  urls,
+  lineDescription,
+  descripcionTecnica,
+}) {
+  const code = DAMAGE_LEVEL_KEYS.includes(severidadRaw)
+    ? severidadRaw
+    : coerceDamageLevelCode(severidadRaw);
+  const pieza = normalizePiezaForPanel(piezaRaw ?? '');
+  const base = {
+    id,
+    pieza,
+    urls_origen: urls,
+  };
+  if (isInternalDamageRangePieza(pieza)) {
+    const min = Math.max(0, Math.round(Number(precio) || 0));
+    const max = parseInternalDamageMaxFromDescription(
+      descripcionTecnica ?? lineDescription,
+      min,
+    );
+    return {
+      ...base,
+      severidad: 'N/A',
+      precioInput: '0',
+      precioMinInput: String(min),
+      precioMaxInput: String(max),
+    };
+  }
+  if (isRefaccionPieza(pieza)) {
+    const detalle = parseRefaccionDetalleFromStoredPieza(
+      piezaRaw,
+      descripcionTecnica ?? lineDescription,
+    );
+    return {
+      ...base,
+      severidad: 'N/A',
+      refaccionDetalle: detalle,
+      precioInput: String(Math.max(0, Math.round(Number(precio) || 0))),
+    };
+  }
+  return {
+    ...base,
+    severidad: code,
+    precioInput: String(Math.round(precio)),
+  };
+}
+
+function applyPiezaSelectionToRow(row, piezaCode) {
+  if (isInternalDamageRangePieza(piezaCode)) {
+    return {
+      ...row,
+      pieza: piezaCode,
+      severidad: 'N/A',
+      precioInput: '0',
+      precioMinInput: row.precioMinInput ?? '0',
+      precioMaxInput: row.precioMaxInput ?? '0',
+      refaccionDetalle: undefined,
+    };
+  }
+  if (isRefaccionPieza(piezaCode)) {
+    return {
+      ...row,
+      pieza: piezaCode,
+      severidad: 'N/A',
+      refaccionDetalle: row.refaccionDetalle ?? '',
+      precioInput: row.precioInput ?? '0',
+      precioMinInput: undefined,
+      precioMaxInput: undefined,
+    };
+  }
+  const next = { ...row, pieza: piezaCode };
+  delete next.precioMinInput;
+  delete next.precioMaxInput;
+  delete next.refaccionDetalle;
+  return recalcRowPriceFromMatrix(next);
+}
+
 function piezaSelectShowsUnmappedFallback(pieza) {
   const t = String(pieza ?? '').trim();
   if (!t || isPlaceholderPieza(t)) return false;
-  return !MATRIX_PIEZA_KEYS.has(t);
+  return !isKnownPanelPiezaCode(t) && !findPanelPiezaOption(t);
 }
 
 /** Compat servidor antiguo: urls_origen primero; luego urls_asociadas */
@@ -221,16 +365,25 @@ function formatMoneyClienteQuoteMxAmount(n) {
 function buildPanelSystemAuthorizationMessage(quoteRows, draftReference) {
   const lines = (quoteRows ?? [])
     .map((r) => {
-      const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
-      const n = parsePrecioInput(r.precioInput);
-      const price = Number.isFinite(n) ? Math.max(0, n) : 0;
+      if (isInternalDamageRangePieza(r.pieza)) {
+        const { min, max } = parsePrecioMinMaxFromRow(r);
+        return formatInternalDamageClienteLine(min, max);
+      }
+      if (isRefaccionPieza(r.pieza)) {
+        return formatRefaccionClienteLine(
+          r.refaccionDetalle,
+          rowAmountForPanelTotal(r),
+        );
+      }
+      const piezaNombre = getPiezaClienteDisplayName(r.pieza);
+      const price = rowAmountForPanelTotal(r);
       return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
-  const total = (quoteRows ?? []).reduce((acc, r) => {
-    const n = parsePrecioInput(r.precioInput);
-    return acc + (Number.isFinite(n) ? Math.max(0, n) : 0);
-  }, 0);
+  const total = (quoteRows ?? []).reduce(
+    (acc, r) => acc + rowAmountForPanelTotal(r),
+    0,
+  );
   const refLine = draftReference
     ? `Referencia interna del borrador: ${draftReference}`
     : 'Referencia interna del borrador: (sin código)';
@@ -260,19 +413,25 @@ function pickBackendClienteNarrative(...candidates) {
 function quoteRowsToToolEmojiLines(rows) {
   return (rows ?? [])
     .map((r) => {
-      const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
-      const n = parsePrecioInput(r.precioInput);
-      const price = Number.isFinite(n) ? Math.max(0, n) : 0;
+      if (isInternalDamageRangePieza(r.pieza)) {
+        const { min, max } = parsePrecioMinMaxFromRow(r);
+        return formatInternalDamageClienteLine(min, max);
+      }
+      if (isRefaccionPieza(r.pieza)) {
+        return formatRefaccionClienteLine(
+          r.refaccionDetalle,
+          rowAmountForPanelTotal(r),
+        );
+      }
+      const piezaNombre = getPiezaClienteDisplayName(r.pieza);
+      const price = rowAmountForPanelTotal(r);
       return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
 }
 
 function totalFromQuoteRows(rows) {
-  return (rows ?? []).reduce((acc, r) => {
-    const n = parsePrecioInput(r.precioInput);
-    return acc + (Number.isFinite(n) ? Math.max(0, n) : 0);
-  }, 0);
+  return (rows ?? []).reduce((acc, r) => acc + rowAmountForPanelTotal(r), 0);
 }
 
 function pickPremiumQuoteVariant(conversationId, variantSalt = '') {
@@ -298,11 +457,32 @@ function formatAppointmentCitaWhen(scheduledAtIso) {
 }
 
 function buildPreviewNarrativePiecesFromQuoteRows(rows) {
-  return (rows ?? []).map((r) => ({
-    pieza: String(r.pieza ?? '').trim(),
-    severidad: r.severidad,
-    precioMx: parsePrecioInput(r.precioInput),
-  }));
+  return (rows ?? []).map((r) => {
+    if (isInternalDamageRangePieza(r.pieza)) {
+      const { min, max } = parsePrecioMinMaxFromRow(r);
+      return {
+        pieza: formatInternalDamageClienteLine(min, max),
+        severidad: 'N/A',
+        precioMx: min,
+        precioMaxMx: max,
+      };
+    }
+    if (isRefaccionPieza(r.pieza)) {
+      const price = rowAmountForPanelTotal(r);
+      const detalle = String(r.refaccionDetalle ?? '').trim();
+      return {
+        pieza: formatRefaccionClienteLine(detalle, price),
+        severidad: 'N/A',
+        precioMx: price,
+        descripcionTecnica: detalle,
+      };
+    }
+    return {
+      pieza: getPiezaClienteDisplayName(r.pieza),
+      severidad: r.severidad,
+      precioMx: parsePrecioInput(r.precioInput),
+    };
+  });
 }
 
 function resolveModeloVehiculoForPreview(quote, damageAnalysis) {
@@ -327,6 +507,18 @@ function quoteRowsValidForNarrativeRegen(rows) {
   for (const r of list) {
     const pieza = String(r.pieza ?? '').trim();
     if (!pieza || isPlaceholderPieza(pieza)) return false;
+    if (isInternalDamageRangePieza(pieza)) {
+      const { min, max } = parsePrecioMinMaxFromRow(r);
+      if (!Number.isFinite(min) || min < 0 || !Number.isFinite(max) || max < 0) {
+        return false;
+      }
+      continue;
+    }
+    if (isRefaccionPieza(pieza)) {
+      const n = parsePrecioInput(r.precioInput);
+      if (!Number.isFinite(n) || n < 0) return false;
+      continue;
+    }
     const n = parsePrecioInput(r.precioInput);
     if (!Number.isFinite(n) || n < 0) return false;
   }
@@ -698,9 +890,6 @@ function ChatView({
       );
       const rows = sorted.map((it, idx) => {
         const rawSev = String(it.severidad ?? 'DM');
-        const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
-          ? rawSev
-          : coerceDamageLevelCode(rawSev);
         let precio = Number(it.precioMx ?? 0);
         const lineAt = lines[idx];
         if (
@@ -713,13 +902,17 @@ function ChatView({
         const urlsRaw = Array.isArray(it.urlsOrigen) ? it.urlsOrigen : [];
         let urls = urlsRaw.map(String).filter(Boolean);
         if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
-        return {
-          id: it.id ? String(it.id) : `row-be-${idx}-${String(it.pieza).slice(0, 20)}`,
-          pieza: normalizePiezaForPanel(it.pieza ?? ''),
-          severidad: code,
-          precioInput: String(Math.round(precio)),
-          urls_origen: urls,
-        };
+        return buildQuoteRowFromSource({
+          id: it.id
+            ? String(it.id)
+            : `row-be-${idx}-${String(it.pieza).slice(0, 20)}`,
+          piezaRaw: it.pieza,
+          severidadRaw: rawSev,
+          precio,
+          urls,
+          lineDescription: lineAt?.description,
+          descripcionTecnica: it.descripcionTecnica,
+        });
       });
       setQuoteRows(rows);
     } else if (inv?.length) {
@@ -739,13 +932,13 @@ function ChatView({
         }
         let urls = urlsFromInventoryItem(it);
         if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
-        return {
+        return buildQuoteRowFromSource({
           id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
-          pieza: normalizePiezaForPanel(it.pieza ?? ''),
-          severidad: code,
-          precioInput: String(Math.round(precio)),
-          urls_origen: urls,
-        };
+          piezaRaw: it.pieza,
+          severidadRaw: rawSev,
+          precio,
+          urls,
+        });
       });
       setQuoteRows(rows);
     } else {
@@ -783,11 +976,58 @@ function ChatView({
       : quoteRows;
 
   const granTotalPanel = useMemo(
+    () => panelRowsForDisplay.reduce((acc, r) => acc + rowAmountForPanelTotal(r), 0),
+    [panelRowsForDisplay],
+  );
+
+  const panelHasInternalDamageRange = useMemo(
+    () => panelRowsForDisplay.some((r) => isInternalDamageRangePieza(r.pieza)),
+    [panelRowsForDisplay],
+  );
+
+  const panelConceptLinesFromRows = useMemo(
     () =>
-      panelRowsForDisplay.reduce((acc, r) => {
-        const n = parsePrecioInput(r.precioInput);
-        return acc + (Number.isFinite(n) ? n : 0);
-      }, 0),
+      panelRowsForDisplay.map((r) => {
+        if (isInternalDamageRangePieza(r.pieza)) {
+          const { min, max } = parsePrecioMinMaxFromRow(r);
+          return {
+            key: r.id,
+            description: '⚠️ Posibles daños internos',
+            amountLabel: `$${formatMoneyClienteQuoteMxAmount(min)} – $${formatMoneyClienteQuoteMxAmount(max)} MXN`,
+            subtotalForSum: min,
+            isRange: true,
+          };
+        }
+        if (isRefaccionPieza(r.pieza)) {
+          const sub = rowAmountForPanelTotal(r);
+          const detalle = String(r.refaccionDetalle ?? '').trim();
+          return {
+            key: r.id,
+            description: detalle
+              ? `⚙️ Refacción (${detalle})`
+              : '⚙️ Refacción',
+            amountLabel: sub.toLocaleString('es-MX', {
+              style: 'currency',
+              currency: 'MXN',
+              maximumFractionDigits: 0,
+            }),
+            subtotalForSum: sub,
+            isRange: false,
+          };
+        }
+        const sub = rowAmountForPanelTotal(r);
+        return {
+          key: r.id,
+          description: getPiezaClienteDisplayName(r.pieza),
+          amountLabel: sub.toLocaleString('es-MX', {
+            style: 'currency',
+            currency: 'MXN',
+            maximumFractionDigits: 0,
+          }),
+          subtotalForSum: sub,
+          isRange: false,
+        };
+      }),
     [panelRowsForDisplay],
   );
 
@@ -1050,12 +1290,38 @@ function ChatView({
       setQuoteSaveError('Añade al menos un servicio a la cotización.');
       throw new Error('bad pieza');
     }
-    const linesPayload = quoteRows.map((r) => ({
-      pieza: r.pieza.trim(),
-      severidad: r.severidad,
-      precioMx: parsePrecioInput(r.precioInput),
-      urls_origen: r.urls_origen ?? [],
-    }));
+    const linesPayload = quoteRows.map((r) => {
+      if (isInternalDamageRangePieza(r.pieza)) {
+        const { min, max } = parsePrecioMinMaxFromRow(r);
+        return {
+          pieza: 'Posibles daños internos',
+          severidad: 'N/A',
+          precioMx: min,
+          precioMaximo: max,
+          precioMaxMx: max,
+          descripcionTecnica: `Rango estimado $${formatMoneyClienteQuoteMxAmount(min)} - $${formatMoneyClienteQuoteMxAmount(max)} MXN (sujeto a desarme)`,
+          urls_origen: r.urls_origen ?? [],
+        };
+      }
+      if (isRefaccionPieza(r.pieza)) {
+        const detalle = String(r.refaccionDetalle ?? '').trim();
+        const price = rowAmountForPanelTotal(r);
+        return {
+          pieza: detalle ? `Refacción: ${detalle}` : 'Refacción',
+          severidad: 'N/A',
+          precioMx: price,
+          detallesRefaccion: detalle || undefined,
+          descripcionTecnica: detalle || 'Refacción manual desde panel',
+          urls_origen: r.urls_origen ?? [],
+        };
+      }
+      return {
+        pieza: getPiezaClienteDisplayName(r.pieza),
+        severidad: r.severidad,
+        precioMx: parsePrecioInput(r.precioInput),
+        urls_origen: r.urls_origen ?? [],
+      };
+    });
     for (let i = 0; i < linesPayload.length; i++) {
       const L = linesPayload[i];
       if (!L.pieza) {
@@ -1067,6 +1333,24 @@ function ChatView({
           `Elige un servicio de la lista en la fila ${i + 1} (sustituir "${MANUAL_ROW_PLACEHOLDER_PIEZA}").`,
         );
         throw new Error('bad pieza');
+      }
+      if (isInternalDamageRangePieza(L.pieza)) {
+        const min = Number(L.precioMx);
+        const max = Number(L.precioMaxMx ?? L.precioMx);
+        if (!Number.isFinite(min) || min < 0 || !Number.isFinite(max) || max < 0) {
+          setQuoteSaveError(
+            `Rango inválido en fila ${i + 1} (mínimo y máximo ≥ 0).`,
+          );
+          throw new Error('bad price');
+        }
+        continue;
+      }
+      if (/^refacci[oó]n/i.test(String(L.pieza ?? ''))) {
+        if (!Number.isFinite(L.precioMx) || L.precioMx < 0) {
+          setQuoteSaveError(`Precio inválido en refacción (fila ${i + 1}).`);
+          throw new Error('bad price');
+        }
+        continue;
       }
       if (!Number.isFinite(L.precioMx) || L.precioMx < 0) {
         setQuoteSaveError(`Precio inválido en fila ${i + 1} (número ≥ 0).`);
@@ -1441,14 +1725,14 @@ function ChatView({
                   <span className="shrink-0 text-[11px] font-bold text-slate-800">
                     Daño {idx + 1}
                   </span>
-                  {row.pieza && !isPlaceholderPieza(row.pieza) ? (
-                    <span
-                      className="truncate text-[10px] font-medium text-slate-500"
-                      title={row.pieza}
-                    >
-                      {row.pieza}
-                    </span>
-                  ) : null}
+                        {row.pieza && !isPlaceholderPieza(row.pieza) ? (
+                          <span
+                            className="truncate text-[10px] font-medium text-slate-500"
+                            title={getPiezaClienteDisplayName(row.pieza)}
+                          >
+                            {getPiezaSelectLabel(row.pieza)}
+                          </span>
+                        ) : null}
                 </div>
                 <button
                   type="button"
@@ -1482,89 +1766,180 @@ function ChatView({
                   </svg>
                 </button>
               </div>
-              <label className="block text-[10px] font-medium text-gray-700">
-                Servicio
-                <select
-                  value={row.pieza}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setQuoteFormDirty(true);
-                    setQuoteRows((prev) =>
-                      prev.map((r) =>
-                        r.id === row.id
-                          ? recalcRowPriceFromMatrix({
-                              ...r,
-                              pieza: v,
-                            })
-                          : r,
-                      ),
-                    );
-                  }}
-                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              <div className="block text-[10px] font-medium text-gray-700">
+                <span>Servicio</span>
+                <div
+                  className={`mt-0.5 flex gap-2 ${
+                    isRefaccionPieza(row.pieza)
+                      ? 'flex-col sm:flex-row sm:items-stretch'
+                      : 'flex-col'
+                  }`}
                 >
-                  <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
-                    Seleccionar servicio…
-                  </option>
-                  {piezaSelectShowsUnmappedFallback(row.pieza) ? (
-                    <option value={row.pieza}>
-                      {row.pieza} (texto IA — elige servicio de la lista)
+                  <select
+                    value={row.pieza}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setQuoteFormDirty(true);
+                      setQuoteRows((prev) =>
+                        prev.map((r) =>
+                          r.id === row.id ? applyPiezaSelectionToRow(r, v) : r,
+                        ),
+                      );
+                    }}
+                    className={`min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+                      isRefaccionPieza(row.pieza) ? 'w-full sm:max-w-[11rem] sm:shrink-0' : 'w-full'
+                    }`}
+                  >
+                    <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
+                      Seleccionar servicio…
                     </option>
+                    {piezaSelectShowsUnmappedFallback(row.pieza) ? (
+                      <option value={row.pieza}>
+                        {row.pieza} (texto IA — elige de la lista)
+                      </option>
+                    ) : null}
+                    {PANEL_PIEZA_OPTION_GROUPS.map(({ group, options }) => (
+                      <optgroup key={group} label={group}>
+                        {options.map((opt) => (
+                          <option
+                            key={opt.code}
+                            value={opt.code}
+                            title={opt.fullName}
+                          >
+                            {opt.menuLabel ?? opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {isRefaccionPieza(row.pieza) ? (
+                    <input
+                      type="text"
+                      value={row.refaccionDetalle ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setQuoteRows((prev) =>
+                          prev.map((r) =>
+                            r.id === row.id ? { ...r, refaccionDetalle: v } : r,
+                          ),
+                        );
+                        setQuoteFormDirty(true);
+                      }}
+                      placeholder="¿Qué refacción es? (Ej: Faro Izquierdo, Amortiguador)"
+                      className="min-h-11 w-full flex-1 rounded-md border border-slate-300 bg-slate-50 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      aria-label="Nombre de la refacción"
+                    />
                   ) : null}
-                  {AUTO_FIX_BASE_PRICES.map((pr) => (
-                    <option key={pr.pieza} value={pr.pieza}>
-                      {pr.pieza}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-2 block text-[10px] font-medium text-gray-700">
-                Severidad
-                <select
-                  value={row.severidad}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setQuoteFormDirty(true);
-                    setQuoteRows((prev) =>
-                      prev.map((r) => {
-                        if (r.id !== row.id) return r;
-                        return recalcRowPriceFromMatrix({
-                          ...r,
-                          severidad: v,
-                        });
-                      }),
-                    );
-                  }}
-                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  {DAMAGE_LEVEL_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {SEVERIDAD_LABELS[k] ?? k}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-2 block text-[10px] font-medium text-gray-700">
-                Precio (MXN)
-                <span className="ml-1 font-normal text-gray-400">
-                  — editable (redondeo / descuento)
-                </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={row.precioInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setQuoteRows((prev) =>
-                      prev.map((r) =>
-                        r.id === row.id ? { ...r, precioInput: v } : r,
-                      ),
-                    );
-                    setQuoteFormDirty(true);
-                  }}
-                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  placeholder="0"
-                />
-              </label>
+                </div>
+              </div>
+              {!isInternalDamageRangePieza(row.pieza) &&
+              !isRefaccionPieza(row.pieza) ? (
+                <label className="mt-2 block text-[10px] font-medium text-gray-700">
+                  Severidad
+                  <select
+                    value={row.severidad}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setQuoteFormDirty(true);
+                      setQuoteRows((prev) =>
+                        prev.map((r) => {
+                          if (r.id !== row.id) return r;
+                          return recalcRowPriceFromMatrix({
+                            ...r,
+                            severidad: v,
+                          });
+                        }),
+                      );
+                    }}
+                    className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    {DAMAGE_LEVEL_KEYS.map((k) => (
+                      <option key={k} value={k}>
+                        {SEVERIDAD_LABELS[k] ?? k}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {isInternalDamageRangePieza(row.pieza) ? (
+                <div className="mt-2">
+                  <p className="text-[10px] font-medium text-amber-900">
+                    Rango estimado (MXN)
+                    <span className="ml-1 font-normal text-amber-700/90">
+                      — sujeto a desarme
+                    </span>
+                  </p>
+                  <div className="mt-1 grid grid-cols-2 gap-2">
+                    <label className="block text-[9px] font-semibold uppercase text-gray-600">
+                      Mínimo
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.precioMinInput ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setQuoteRows((prev) =>
+                            prev.map((r) =>
+                              r.id === row.id
+                                ? { ...r, precioMinInput: v }
+                                : r,
+                            ),
+                          );
+                          setQuoteFormDirty(true);
+                        }}
+                        className="mt-0.5 w-full min-h-11 rounded-md border border-amber-200 bg-amber-50/40 px-2 py-2 text-sm text-gray-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        placeholder="0"
+                      />
+                    </label>
+                    <label className="block text-[9px] font-semibold uppercase text-gray-600">
+                      Máximo
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={row.precioMaxInput ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setQuoteRows((prev) =>
+                            prev.map((r) =>
+                              r.id === row.id
+                                ? { ...r, precioMaxInput: v }
+                                : r,
+                            ),
+                          );
+                          setQuoteFormDirty(true);
+                        }}
+                        className="mt-0.5 w-full min-h-11 rounded-md border border-amber-200 bg-amber-50/40 px-2 py-2 text-sm text-gray-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        placeholder="0"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <label className="mt-2 block text-[10px] font-medium text-gray-700">
+                  Precio (MXN)
+                  <span className="ml-1 font-normal text-gray-400">
+                    {isRefaccionPieza(row.pieza)
+                      ? '— manual (según proveedor)'
+                      : '— editable (redondeo / descuento)'}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={row.precioInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setQuoteRows((prev) =>
+                        prev.map((r) =>
+                          r.id === row.id ? { ...r, precioInput: v } : r,
+                        ),
+                      );
+                      setQuoteFormDirty(true);
+                    }}
+                    className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    placeholder="0"
+                  />
+                </label>
+              )}
 
               <div className="mt-2.5 rounded-md border border-dashed border-slate-200 bg-white px-2 py-1.5">
                 <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1627,6 +2002,9 @@ function ChatView({
         </p>
         <p className="text-[9px] text-emerald-800/90">
           Suma de todos los precios de la lista
+          {panelHasInternalDamageRange
+            ? ' (usa el mínimo de daños internos; el máximo es referencia)'
+            : ''}
         </p>
       </div>
 
@@ -1753,8 +2131,7 @@ function ChatView({
           {showCarousel ? renderQuoteEvidenceCarousel() : null}
           {renderQuoteStatusBadges()}
           {renderQuoteDamagesSection()}
-          {Array.isArray(panelDisplayQuote?.lines) &&
-          panelDisplayQuote.lines.length > 0 ? (
+          {panelConceptLinesFromRows.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
               <table className="w-full min-w-[280px] text-left">
                 <thead className="bg-gray-100 text-[9px] uppercase text-gray-600">
@@ -1764,41 +2141,42 @@ function ChatView({
                   </tr>
                 </thead>
                 <tbody>
-                  {panelDisplayQuote.lines.map((line, idx) => (
-                    <tr key={idx} className="border-t border-gray-100">
+                  {panelConceptLinesFromRows.map((line) => (
+                    <tr key={line.key} className="border-t border-gray-100">
                       <td className="px-2 py-1.5 text-gray-800">
                         {line.description}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-gray-900">
-                        {line.quantity}×
-                        {Number(line.unitPrice).toLocaleString('es-MX', {
-                          style: 'currency',
-                          currency: 'MXN',
-                          maximumFractionDigits: 0,
-                        })}
-                        <br />
-                        <span className="text-[10px] text-gray-500">
-                          {Number(line.subtotal).toLocaleString('es-MX', {
-                            style: 'currency',
-                            currency: 'MXN',
-                            maximumFractionDigits: 0,
-                          })}
-                        </span>
+                        {line.isRange ? (
+                          <span className="text-[10px] leading-snug text-amber-900">
+                            {line.amountLabel}
+                            <br />
+                            <span className="font-normal text-gray-500">
+                              (mín. en gran total)
+                            </span>
+                          </span>
+                        ) : (
+                          line.amountLabel
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div className="border-t border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-xs font-bold text-gray-900">
-                Total:{' '}
-                {Number(
-                  panelDisplayQuote.total ?? panelDisplayQuote.subtotal ?? 0,
-                ).toLocaleString('es-MX', {
+                Total (base):{' '}
+                {granTotalPanel.toLocaleString('es-MX', {
                   style: 'currency',
                   currency: 'MXN',
                   maximumFractionDigits: 0,
                 })}
               </div>
+              {panelHasInternalDamageRange ? (
+                <p className="border-t border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[9px] leading-snug text-amber-950">
+                  Los posibles daños internos se cotizan por rango; el gran total
+                  suma el mínimo. El máximo aplica solo tras desarme en taller.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {renderQuoteClientMessageBlock()}
