@@ -201,12 +201,13 @@ function parsePrecioInput(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** Mapa Google del taller (`VITE_WORKSHOP_MAPS_URL` en `.env`; si no, sustituye la URL aquí). */
-const DEFAULT_WORKSHOP_MAPS_URL =
-  (typeof import.meta !== 'undefined' &&
-    import.meta.env &&
-    String(import.meta.env.VITE_WORKSHOP_MAPS_URL || '').trim()) ||
-  'https://goo.gl/maps/tu-ubicacion-real';
+/** Mapa oficial del taller (`VITE_WORKSHOP_MAPS_URL` en `.env`). Sin valor → no se muestra enlace. */
+const WORKSHOP_MAPS_URL =
+  typeof import.meta !== 'undefined' && import.meta.env
+    ? String(import.meta.env.VITE_WORKSHOP_MAPS_URL || '').trim()
+    : '';
+
+const WORKSHOP_TZ = 'America/Mexico_City';
 
 function formatMoneyClienteQuoteMxAmount(n) {
   const rounded = Math.round(Number(n));
@@ -239,22 +240,14 @@ function buildPanelSystemAuthorizationMessage(quoteRows, draftReference) {
   ].join('\n');
 }
 
-/**
- * Mensaje al cliente desde filas del panel (WhatsApp: *negritas* en total).
- * Respeta lead agendado vs sin cita (sin mapa ni “¿Te agendamos?” si ya tiene cita).
- */
-function buildClienteQuoteOutboundMessage(
-  rows,
-  options = {},
-) {
-  const {
-    leadStatus = 'nuevo',
-    mapsUrl = DEFAULT_WORKSHOP_MAPS_URL,
-  } = options;
-  const isAgendado = normalizeConversationLeadStatus(leadStatus) === 'agendado';
+function isClienteFormalNarrative(text) {
+  const s = String(text ?? '').trim();
+  if (!s || s.startsWith('Estimado cliente')) return false;
+  return s.startsWith('👋') || s.includes('🛠️');
+}
 
-  const sorted = [...(rows ?? [])];
-  const list = sorted
+function quoteRowsToToolEmojiLines(rows) {
+  return (rows ?? [])
     .map((r) => {
       const piezaNombre = String(r.pieza ?? '').trim() || 'Servicio';
       const n = parsePrecioInput(r.precioInput);
@@ -262,41 +255,117 @@ function buildClienteQuoteOutboundMessage(
       return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
+}
 
-  const total = sorted.reduce((acc, r) => {
+function totalFromQuoteRows(rows) {
+  return (rows ?? []).reduce((acc, r) => {
     const n = parsePrecioInput(r.precioInput);
     return acc + (Number.isFinite(n) ? Math.max(0, n) : 0);
   }, 0);
-  const totalFmt = formatMoneyClienteQuoteMxAmount(total);
+}
+
+function pickPremiumQuoteVariant(conversationId) {
+  const id = String(conversationId ?? '');
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h + id.charCodeAt(i)) % 3;
+  }
+  return ['A', 'B', 'C'][h];
+}
+
+function formatAppointmentCitaWhen(scheduledAtIso) {
+  const d = new Date(scheduledAtIso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('es-MX', {
+    timeZone: WORKSHOP_TZ,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Ensambla el mensaje al cliente desde el panel (sin URL de prueba).
+ * Variantes premium A/B/C si no hay cita; cierre con día de cita si está agendado.
+ */
+function assembleDynamicClienteQuoteMessage(rows, options = {}) {
+  const {
+    leadStatus = 'nuevo',
+    contactName = 'cliente',
+    appointmentWhen = null,
+    conversationId = '',
+    mapsUrl = WORKSHOP_MAPS_URL,
+  } = options;
+
+  const name = String(contactName ?? '').trim() || 'cliente';
+  const list = quoteRowsToToolEmojiLines(rows);
+  const totalFmt = formatMoneyClienteQuoteMxAmount(totalFromQuoteRows(rows));
+  const isAgendado = normalizeConversationLeadStatus(leadStatus) === 'agendado';
+  const mapLink = String(mapsUrl ?? '').trim();
 
   if (isAgendado) {
+    const when =
+      String(appointmentWhen ?? '').trim() ||
+      'el día acordado para tu visita';
     return [
-      '👋 ¡Listo! Aquí tienes el desglose del costo extra para tu visita:',
+      `👋 ¡Listo, ${name}! Aquí tienes el desglose del costo extra para tu visita:`,
       '',
       list,
       '',
       `💰 *Inversión Extra Estimada: $${totalFmt} MXN*`,
       '_(Sujeto a revisión física. Incluye materiales premium Sikkens y garantía por escrito.)_',
       '',
-      'Anotamos estos conceptos como un **extra en tu orden de servicio** para el día de tu **cita ya confirmada**.',
+      `Anotamos estos conceptos como un **extra en tu orden de servicio**. **Los realizaremos este mismo ${when} que ingresas tu vehículo al taller.**`,
       '',
       '¿Tienes alguna duda con las piezas o prefieres que lo sumemos al presupuesto inicial? 😊✨',
     ].join('\n');
   }
 
-  const mapLink = String(mapsUrl ?? DEFAULT_WORKSHOP_MAPS_URL).trim();
+  const variant = pickPremiumQuoteVariant(conversationId);
+  const mapBlock = mapLink
+    ? [`📍 Estamos aquí, fácil de llegar: ${mapLink}`, '']
+    : [];
+
+  if (variant === 'B') {
+    return [
+      `👋 ¡Perfecto, ${name}! Te comparto la estimación para dejar tu unidad impecable:`,
+      '',
+      list,
+      '',
+      `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+      'Materiales premium **Sikkens**, acabado espejo y **garantía por escrito** *(sujeto a revisión física en planta)*.',
+      '',
+      ...mapBlock,
+      '📅 ¿Qué día de la semana te queda mejor para ingresar tu unidad?',
+    ].join('\n');
+  }
+
+  if (variant === 'C') {
+    return [
+      `👋 Con gusto, ${name}, este es el resumen de tu cotización:`,
+      '',
+      list,
+      '',
+      `💰 *Inversión estimada: $${totalFmt} MXN*`,
+      '_(Sujeto a revisión en planta. Incluye materiales premium Sikkens, acabado espejo y garantía por escrito.)_',
+      '',
+      ...mapBlock,
+      'Para agendar tu ingreso al taller, dime qué día de la semana te funciona mejor. ✨',
+    ].join('\n');
+  }
 
   return [
-    '👋 Aquí tienes el desglose de tu cotización:',
+    `👋 ¡Listo, ${name}! Aquí tienes el desglose de tu cotización:`,
     '',
     list,
     '',
     `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
-    '_(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens)_',
+    '_(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens.)_',
     '',
-    `📍 Estamos aquí, fácil de llegar: ${mapLink}`,
-    '',
-    '📅 ¿Qué día de la semana te queda mejor para ingresar tu unidad?',
+    ...mapBlock,
+    '📅 Tenemos espacios esta semana. ¿Qué día te queda mejor para ingresar tu unidad?',
   ].join('\n');
 }
 
@@ -618,22 +687,85 @@ function ChatView({
     selectedContact?.status,
   );
 
-  const mensajeClientePreview = useMemo(() => {
-    if (quoteRows.length > 0) {
-      return buildClienteQuoteOutboundMessage(quoteRows, {
-        leadStatus: leadStatusForQuote,
-      });
+  const [conversationAppointmentWhen, setConversationAppointmentWhen] =
+    useState(null);
+
+  useEffect(() => {
+    if (
+      !selectedConvId ||
+      !apiBaseUrl ||
+      leadStatusForQuote !== 'agendado'
+    ) {
+      setConversationAppointmentWhen(null);
+      return;
     }
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const r = await fetch(`${apiBaseUrl}/appointments`, {
+          signal: ac.signal,
+        });
+        const data = r.ok ? await r.json() : [];
+        const list = Array.isArray(data) ? data : [];
+        const active = list
+          .filter(
+            (a) =>
+              a?.conversationId === selectedConvId &&
+              ['confirmada', 'pendiente'].includes(
+                String(a?.status ?? '').toLowerCase(),
+              ) &&
+              a?.scheduledAt,
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.scheduledAt).getTime() -
+              new Date(a.scheduledAt).getTime(),
+          )[0];
+        const when = active?.scheduledAt
+          ? formatAppointmentCitaWhen(active.scheduledAt)
+          : null;
+        setConversationAppointmentWhen(when);
+      } catch (e) {
+        if (e?.name !== 'AbortError') {
+          setConversationAppointmentWhen(null);
+        }
+      }
+    })();
+    return () => ac.abort();
+  }, [selectedConvId, apiBaseUrl, leadStatusForQuote]);
+
+  const mensajeClientePreview = useMemo(() => {
+    const dynamicOpts = {
+      leadStatus: leadStatusForQuote,
+      contactName: selectedUserName,
+      appointmentWhen: conversationAppointmentWhen,
+      conversationId: selectedConvId,
+      mapsUrl: WORKSHOP_MAPS_URL,
+    };
+
+    if (quoteFormDirty && quoteRows.length > 0) {
+      return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
+    }
+
     const stored = latestDraftQuote?.quote?.formalNarrative?.trim();
-    const isClientPreview =
-      stored &&
-      !stored.startsWith('Estimado cliente') &&
-      (stored.startsWith('👋') || stored.includes('🛠️'));
-    if (isClientPreview) {
+    if (stored && isClienteFormalNarrative(stored)) {
       return stored;
     }
+
+    if (quoteRows.length > 0) {
+      return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
+    }
+
     return 'Añade servicios al borrador para ver el mensaje al cliente.';
-  }, [quoteRows, leadStatusForQuote, latestDraftQuote?.quote?.formalNarrative]);
+  }, [
+    quoteRows,
+    quoteFormDirty,
+    leadStatusForQuote,
+    latestDraftQuote?.quote?.formalNarrative,
+    selectedUserName,
+    conversationAppointmentWhen,
+    selectedConvId,
+  ]);
 
   const persistDraftQuotePatch = useCallback(async () => {
     if (!apiBaseUrl || !activeDraftForPanel?.id) {
@@ -744,9 +876,18 @@ function ChatView({
         draftRef,
       );
 
-      let mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows, {
-        leadStatus: leadStatusForQuote,
-      });
+      const storedNarrative =
+        latestDraftQuote?.quote?.formalNarrative?.trim() ?? '';
+      let mensajeCliente =
+        storedNarrative && isClienteFormalNarrative(storedNarrative)
+          ? storedNarrative
+          : assembleDynamicClienteQuoteMessage(quoteRows, {
+              leadStatus: leadStatusForQuote,
+              contactName: selectedUserName,
+              appointmentWhen: conversationAppointmentWhen,
+              conversationId: selectedConvId,
+              mapsUrl: WORKSHOP_MAPS_URL,
+            });
       const resumeRes = await fetch(
         `${apiBaseUrl}/conversations/${selectedConvId}/resume-after-draft`,
         {
@@ -1461,11 +1602,7 @@ function ChatView({
                   type="button"
                   disabled={isSending || isSavingQuote || isSendingFinalQuote}
                   onClick={() => {
-                    setReply(
-                      buildClienteQuoteOutboundMessage(quoteRows, {
-                        leadStatus: leadStatusForQuote,
-                      }),
-                    );
+                    setReply(mensajeClientePreview);
                     document.getElementById('chat-reply-input')?.focus?.();
                   }}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
