@@ -273,8 +273,8 @@ function totalFromQuoteRows(rows) {
   }, 0);
 }
 
-function pickPremiumQuoteVariant(conversationId) {
-  const id = String(conversationId ?? '');
+function pickPremiumQuoteVariant(conversationId, variantSalt = '') {
+  const id = `${String(conversationId ?? '')}${String(variantSalt ?? '')}`;
   let h = 0;
   for (let i = 0; i < id.length; i++) {
     h = (h + id.charCodeAt(i)) % 3;
@@ -306,6 +306,7 @@ function assembleDynamicClienteQuoteMessage(rows, options = {}) {
     appointmentWhen = null,
     conversationId = '',
     mapsUrl = WORKSHOP_MAPS_URL,
+    variantSalt = '',
   } = options;
 
   const name = String(contactName ?? '').trim() || 'cliente';
@@ -332,7 +333,7 @@ function assembleDynamicClienteQuoteMessage(rows, options = {}) {
     ].join('\n');
   }
 
-  const variant = pickPremiumQuoteVariant(conversationId);
+  const variant = pickPremiumQuoteVariant(conversationId, variantSalt);
   const mapBlock = mapLink
     ? [`📍 Estamos aquí, fácil de llegar: ${mapLink}`, '']
     : [];
@@ -508,6 +509,10 @@ function ChatView({
   /** Una fila por daño/pieza: pieza, severidad, precio editable, URLs para mini galería */
   const [quoteRows, setQuoteRows] = useState([]);
   const [quoteFormDirty, setQuoteFormDirty] = useState(false);
+  const [clientePreviewLocalFallback, setClientePreviewLocalFallback] =
+    useState('');
+  const [isRegeneratingClientePreview, setIsRegeneratingClientePreview] =
+    useState(false);
   const [quoteSaveError, setQuoteSaveError] = useState('');
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
@@ -526,6 +531,16 @@ function ChatView({
       null
     );
   }, [conversationDraftRows, latestDraftQuote?.messageId]);
+
+  useEffect(() => {
+    setClientePreviewLocalFallback('');
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    if (quoteFormDirty) {
+      setClientePreviewLocalFallback('');
+    }
+  }, [quoteFormDirty]);
 
   const refreshConversationDraftQuotes = useCallback(
     async (signal) => {
@@ -765,6 +780,11 @@ function ChatView({
       return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
     }
 
+    const fallbackTrim = String(clientePreviewLocalFallback ?? '').trim();
+    if (fallbackTrim.length > 0) {
+      return fallbackTrim;
+    }
+
     const backendNarrative = pickBackendClienteNarrative(
       latestDraftQuote?.quote?.formalNarrative,
       activeDraftForPanel?.quotePayload?.formalNarrative,
@@ -783,6 +803,7 @@ function ChatView({
   }, [
     quoteRows,
     quoteFormDirty,
+    clientePreviewLocalFallback,
     leadStatusForQuote,
     latestDraftQuote?.quote?.formalNarrative,
     activeDraftForPanel?.quotePayload?.formalNarrative,
@@ -791,6 +812,79 @@ function ChatView({
     selectedUserName,
     conversationAppointmentWhen,
     selectedConvId,
+  ]);
+
+  const handleRegenerateClientePreview = useCallback(async () => {
+    if (
+      quoteFormDirty ||
+      !apiBaseUrl ||
+      !activeDraftForPanel?.id ||
+      quoteRows.length === 0
+    ) {
+      return;
+    }
+    setIsRegeneratingClientePreview(true);
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/draft-quote/${activeDraftForPanel.id}/regenerate-narrative`,
+        { method: 'POST' },
+      );
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setClientePreviewLocalFallback('');
+        const msgId = data?.messageId ?? latestDraftQuote?.messageId ?? null;
+        if (data?.quotePayload && msgId) {
+          onDraftQuotePatched?.({
+            messageId: msgId,
+            draftQuote: data.quotePayload,
+          });
+        }
+        await refreshConversationDraftQuotes();
+        setQuoteSaveError('');
+      } else {
+        const text = assembleDynamicClienteQuoteMessage(quoteRows, {
+          leadStatus: leadStatusForQuote,
+          contactName: selectedUserName,
+          appointmentWhen: conversationAppointmentWhen,
+          conversationId: selectedConvId,
+          mapsUrl: WORKSHOP_MAPS_URL,
+          variantSalt: `${Date.now()}-${Math.random()}`,
+        });
+        setClientePreviewLocalFallback(text);
+        setQuoteSaveError(
+          `No se pudo regenerar con la IA (HTTP ${res.status}). Se mostró una variante local A/B/C.`,
+        );
+      }
+    } catch (e) {
+      const text = assembleDynamicClienteQuoteMessage(quoteRows, {
+        leadStatus: leadStatusForQuote,
+        contactName: selectedUserName,
+        appointmentWhen: conversationAppointmentWhen,
+        conversationId: selectedConvId,
+        mapsUrl: WORKSHOP_MAPS_URL,
+        variantSalt: `${Date.now()}-${Math.random()}`,
+      });
+      setClientePreviewLocalFallback(text);
+      setQuoteSaveError(
+        e?.message
+          ? `${e.message} (variante local A/B/C)`
+          : 'Error de red; se mostró variante local A/B/C.',
+      );
+    } finally {
+      setIsRegeneratingClientePreview(false);
+    }
+  }, [
+    quoteFormDirty,
+    apiBaseUrl,
+    activeDraftForPanel?.id,
+    quoteRows,
+    leadStatusForQuote,
+    selectedUserName,
+    conversationAppointmentWhen,
+    selectedConvId,
+    latestDraftQuote?.messageId,
+    onDraftQuotePatched,
+    refreshConversationDraftQuotes,
   ]);
 
   const persistDraftQuotePatch = useCallback(async () => {
@@ -845,6 +939,7 @@ function ChatView({
     });
     await refreshConversationDraftQuotes();
     setQuoteFormDirty(false);
+    setClientePreviewLocalFallback('');
     return entity;
   }, [
     apiBaseUrl,
@@ -1577,9 +1672,47 @@ function ChatView({
                 </div>
               ) : null}
               <div className="mt-2 min-h-0 max-h-56 overflow-y-auto rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                  Mensaje al cliente (envío / copiar)
-                </p>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                    Mensaje al cliente (envío / copiar)
+                  </p>
+                  <button
+                    type="button"
+                    title={
+                      quoteFormDirty
+                        ? 'Guarda los cambios antes de regenerar con la IA'
+                        : 'Regenerar redacción (variante A/B/C)'
+                    }
+                    disabled={
+                      quoteFormDirty ||
+                      isSending ||
+                      isSavingQuote ||
+                      isSendingFinalQuote ||
+                      isRegeneratingClientePreview ||
+                      !activeDraftForPanel?.id ||
+                      quoteRows.length === 0
+                    }
+                    onClick={() => void handleRegenerateClientePreview()}
+                    className="inline-flex shrink-0 items-center justify-center rounded-md border border-emerald-300 bg-white p-1.5 text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-45"
+                    aria-label="Regenerar mensaje al cliente"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.5}
+                      stroke="currentColor"
+                      className={`h-4 w-4 ${isRegeneratingClientePreview ? 'animate-spin' : ''}`}
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+                      />
+                    </svg>
+                  </button>
+                </div>
                 <pre className="whitespace-pre-wrap font-sans">{mensajeClientePreview}</pre>
               </div>
               <div className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gray-200 pt-3">
