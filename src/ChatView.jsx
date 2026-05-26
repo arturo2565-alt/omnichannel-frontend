@@ -789,6 +789,26 @@ function ChatView({
     [panelRowsForDisplay],
   );
 
+  /** Miniaturas de evidencia para carrusel del panel (filas + borrador + mensaje). */
+  const quoteEvidenceImageUrls = useMemo(() => {
+    const urls = new Set();
+    for (const r of panelRowsForDisplay) {
+      for (const u of r.urls_origen ?? []) {
+        const s = String(u ?? '').trim();
+        if (s && isImage(s)) urls.add(s);
+      }
+    }
+    const draftImg = String(activeDraftForPanel?.imageUrl ?? '').trim();
+    if (draftImg && isImage(draftImg)) urls.add(draftImg);
+    const msgContent = String(latestQuoteMessage?.content ?? '').trim();
+    if (msgContent && isImage(msgContent)) urls.add(msgContent);
+    return [...urls];
+  }, [
+    panelRowsForDisplay,
+    activeDraftForPanel?.imageUrl,
+    latestQuoteMessage?.content,
+  ]);
+
   const leadStatusForQuote = normalizeConversationLeadStatus(
     selectedContact?.status,
   );
@@ -1197,6 +1217,15 @@ function ChatView({
   }, [selectedConvId]);
 
   useEffect(() => {
+    if (!quoteDrawerOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [quoteDrawerOpen]);
+
+  useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
     const onChange = () => {
       if (mq.matches) setShowChatWindow(false);
@@ -1219,7 +1248,393 @@ function ChatView({
   const quotePanelPendingApproval =
     panelDisplayQuote?.status === 'PENDING_APPROVAL';
 
-  const renderDraftQuotePanelBody = () => (
+  const renderQuoteEvidenceCarousel = () => {
+    if (!quoteEvidenceImageUrls.length) return null;
+    return (
+      <div
+        className="flex gap-2 overflow-x-auto py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label="Fotos de evidencia de la cotización"
+      >
+        {quoteEvidenceImageUrls.map((imgUrl) => (
+          <button
+            key={imgUrl}
+            type="button"
+            title="Abrir imagen"
+            onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
+            className="shrink-0 overflow-hidden rounded-lg border border-gray-200 shadow-sm transition active:scale-[0.98]"
+          >
+            <img
+              src={imgUrl}
+              alt="Evidencia"
+              className="h-16 w-16 object-cover"
+            />
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderQuoteStatusBadges = () => (
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+          isPanelReadOnly
+            ? 'bg-slate-200 text-slate-700'
+            : 'bg-amber-100 text-amber-800'
+        }`}
+      >
+        {isPanelReadOnly
+          ? 'Referencia (solo lectura)'
+          : panelDisplayQuote?.status === 'PENDING_APPROVAL'
+            ? 'Pendiente de aprobación'
+            : panelDisplayQuote?.status ?? 'Cotización'}
+      </span>
+      {panelDisplayQuote?.reference ? (
+        <span className="text-[10px] text-gray-500">
+          {panelDisplayQuote.reference}
+        </span>
+      ) : null}
+      {quoteFormDirty && !isPanelReadOnly ? (
+        <span className="text-[10px] font-medium text-amber-700">
+          Cambios sin guardar
+        </span>
+      ) : null}
+      {isPanelReadOnly ? (
+        <button
+          type="button"
+          className="min-h-11 text-[10px] font-medium text-indigo-700 underline"
+          onClick={() => setPanelQuoteFrozen(null)}
+        >
+          Volver a editar
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const renderQuoteDamagesSection = () => (
+    <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+        Daños detectados (
+        {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
+          ? panelQuoteFrozen.quoteRows
+          : quoteRows
+        ).length}
+        ){isPanelReadOnly ? ' — referencia' : ' — editable por servicio'}
+      </p>
+      <div
+        className={`flex flex-col gap-3 ${
+          isPanelReadOnly ? 'pointer-events-none opacity-90' : ''
+        }`}
+      >
+        {panelRowsForDisplay.map((row, idx) => {
+          const thumbs = row.urls_origen ?? [];
+          return (
+            <div
+              key={row.id}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm"
+            >
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+                <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span className="shrink-0 text-[11px] font-bold text-slate-800">
+                    Daño {idx + 1}
+                  </span>
+                  {row.pieza && !isPlaceholderPieza(row.pieza) ? (
+                    <span
+                      className="truncate text-[10px] font-medium text-slate-500"
+                      title={row.pieza}
+                    >
+                      {row.pieza}
+                    </span>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  disabled={quoteRows.length <= 1}
+                  onClick={() => handleRemoveQuoteRow(row.id)}
+                  title={
+                    quoteRows.length <= 1
+                      ? 'Debe quedar al menos un servicio en el borrador'
+                      : 'Quitar este servicio de la cotización'
+                  }
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35"
+                  aria-label="Eliminar servicio de la cotización"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    <line x1="10" x2="10" y1="11" y2="17" />
+                    <line x1="14" x2="14" y1="11" y2="17" />
+                  </svg>
+                </button>
+              </div>
+              <label className="block text-[10px] font-medium text-gray-700">
+                Servicio
+                <select
+                  value={row.pieza}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuoteFormDirty(true);
+                    setQuoteRows((prev) =>
+                      prev.map((r) =>
+                        r.id === row.id
+                          ? recalcRowPriceFromMatrix({
+                              ...r,
+                              pieza: v,
+                            })
+                          : r,
+                      ),
+                    );
+                  }}
+                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
+                    Seleccionar servicio…
+                  </option>
+                  {piezaSelectShowsUnmappedFallback(row.pieza) ? (
+                    <option value={row.pieza}>
+                      {row.pieza} (texto IA — elige servicio de la lista)
+                    </option>
+                  ) : null}
+                  {AUTO_FIX_BASE_PRICES.map((pr) => (
+                    <option key={pr.pieza} value={pr.pieza}>
+                      {pr.pieza}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-2 block text-[10px] font-medium text-gray-700">
+                Severidad
+                <select
+                  value={row.severidad}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuoteFormDirty(true);
+                    setQuoteRows((prev) =>
+                      prev.map((r) => {
+                        if (r.id !== row.id) return r;
+                        return recalcRowPriceFromMatrix({
+                          ...r,
+                          severidad: v,
+                        });
+                      }),
+                    );
+                  }}
+                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  {DAMAGE_LEVEL_KEYS.map((k) => (
+                    <option key={k} value={k}>
+                      {SEVERIDAD_LABELS[k] ?? k}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-2 block text-[10px] font-medium text-gray-700">
+                Precio (MXN)
+                <span className="ml-1 font-normal text-gray-400">
+                  — editable (redondeo / descuento)
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={row.precioInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuoteRows((prev) =>
+                      prev.map((r) =>
+                        r.id === row.id ? { ...r, precioInput: v } : r,
+                      ),
+                    );
+                    setQuoteFormDirty(true);
+                  }}
+                  className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder="0"
+                />
+              </label>
+
+              <div className="mt-2.5 rounded-md border border-dashed border-slate-200 bg-white px-2 py-1.5">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  Fotos (evidencia)
+                </p>
+                {thumbs.length > 0 ? (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {thumbs.map((url) => (
+                      <button
+                        key={url}
+                        type="button"
+                        title="Abrir imagen"
+                        onClick={() =>
+                          window.open(url, '_blank', 'noopener,noreferrer')
+                        }
+                        className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
+                      >
+                        <img
+                          src={url}
+                          alt=""
+                          className="h-12 w-12 object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-0.5 text-[9px] italic text-gray-400">
+                    Sin fotos vinculadas a este daño.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          disabled={
+            isPanelReadOnly ||
+            !activeDraftForPanel?.id ||
+            isSavingQuote ||
+            isSendingFinalQuote
+          }
+          onClick={handleAddManualPiezaRow}
+          className="min-h-12 w-full rounded-lg border border-dashed border-indigo-300 bg-white py-2.5 text-[11px] font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          + Añadir servicio manualmente
+        </button>
+      </div>
+
+      <div className="rounded-lg border-2 border-emerald-300 bg-emerald-50 px-3 py-2.5 text-right">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
+          Gran total
+        </p>
+        <p className="text-xl font-bold tabular-nums text-emerald-950">
+          {granTotalPanel.toLocaleString('es-MX', {
+            style: 'currency',
+            currency: 'MXN',
+            maximumFractionDigits: 0,
+          })}
+        </p>
+        <p className="text-[9px] text-emerald-800/90">
+          Suma de todos los precios de la lista
+        </p>
+      </div>
+
+      {!activeDraftForPanel?.id ? (
+        <p className="text-[10px] text-amber-800">
+          Obteniendo enlace del borrador en el servidor…
+        </p>
+      ) : null}
+      {quoteSaveError ? (
+        <p className="text-[10px] text-red-600">{quoteSaveError}</p>
+      ) : null}
+    </section>
+  );
+
+  const renderQuoteClientMessageBlock = () => (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+          Mensaje al cliente (envío / copiar)
+        </p>
+        <button
+          type="button"
+          title={
+            isPanelReadOnly
+              ? 'Modo referencia: vuelve a editar para regenerar'
+              : 'Regenerar redacción (variante A/B/C)'
+          }
+          disabled={
+            isPanelReadOnly ||
+            isSending ||
+            isSavingQuote ||
+            isSendingFinalQuote ||
+            isRegeneratingClientePreview ||
+            !activeDraftForPanel?.id ||
+            quoteRows.length === 0
+          }
+          onClick={() => void handleRegenerateClientePreview()}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-emerald-300 bg-white text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-45"
+          aria-label="Regenerar mensaje al cliente"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+            stroke="currentColor"
+            className={`h-5 w-5 ${isRegeneratingClientePreview ? 'animate-spin' : ''}`}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+            />
+          </svg>
+        </button>
+      </div>
+      <pre className="min-h-[80px] whitespace-pre-wrap font-sans text-sm leading-relaxed">
+        {mensajeClientePreview}
+      </pre>
+    </div>
+  );
+
+  const renderQuoteActionButtons = () => (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        disabled={
+          isPanelReadOnly ||
+          isSending ||
+          isSavingQuote ||
+          isSendingFinalQuote ||
+          !activeDraftForPanel?.id
+        }
+        onClick={handleGuardarCambios}
+        className="min-h-12 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isSavingQuote ? 'Guardando…' : 'Guardar Cambios'}
+      </button>
+      <button
+        type="button"
+        disabled={
+          isPanelReadOnly ||
+          isSending ||
+          isSavingQuote ||
+          isSendingFinalQuote ||
+          !activeDraftForPanel?.id
+        }
+        onClick={handleEnviarCotizacionFinal}
+        className="min-h-12 w-full rounded-xl bg-emerald-600 px-4 py-3 text-base font-bold text-white shadow-lg transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isSendingFinalQuote || isSending
+          ? 'Enviando…'
+          : 'Enviar Cotización Final'}
+      </button>
+      <button
+        type="button"
+        disabled={isSending || isSavingQuote || isSendingFinalQuote}
+        onClick={() => {
+          setReply(mensajeClientePreview);
+          document.getElementById('chat-reply-input')?.focus?.();
+          setQuoteDrawerOpen(false);
+        }}
+        className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Copiar mensaje al cliente al cuadro de respuesta
+      </button>
+    </div>
+  );
+
+  const renderDraftQuotePanelScrollContent = ({ showCarousel = false } = {}) => (
     <>
       {!selectedConvId ? (
         <p className="text-center text-xs text-gray-500">
@@ -1232,270 +1647,14 @@ function ChatView({
         </div>
       ) : (
         <>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                isPanelReadOnly
-                  ? 'bg-slate-200 text-slate-700'
-                  : 'bg-amber-100 text-amber-800'
-              }`}
-            >
-              {isPanelReadOnly
-                ? 'Referencia (solo lectura)'
-                : panelDisplayQuote?.status === 'PENDING_APPROVAL'
-                  ? 'Pendiente de aprobación'
-                  : panelDisplayQuote?.status ?? 'Cotización'}
-            </span>
-            {panelDisplayQuote?.reference ? (
-              <span className="text-[10px] text-gray-500">
-                {panelDisplayQuote.reference}
-              </span>
-            ) : null}
-            {quoteFormDirty && !isPanelReadOnly ? (
-              <span className="text-[10px] font-medium text-amber-700">
-                Cambios sin guardar
-              </span>
-            ) : null}
-            {isPanelReadOnly ? (
-              <button
-                type="button"
-                className="min-h-11 text-[10px] font-medium text-indigo-700 underline"
-                onClick={() => setPanelQuoteFrozen(null)}
-              >
-                Volver a editar
-              </button>
-            ) : null}
-          </div>
-
-          <div className="mb-3 flex max-h-[70vh] min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-            <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-              Daños detectados (
-              {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
-                ? panelQuoteFrozen.quoteRows
-                : quoteRows
-              ).length}
-              ){isPanelReadOnly ? ' — referencia' : ' — editable por servicio'}
-            </p>
-            <div
-              className={`min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-auto overscroll-contain pr-0.5 ${
-                isPanelReadOnly ? 'pointer-events-none opacity-90' : ''
-              }`}
-            >
-              {panelRowsForDisplay.map((row, idx) => {
-                const thumbs = row.urls_origen ?? [];
-                return (
-                  <div
-                    key={row.id}
-                    className="min-w-[260px] w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-left shadow-sm sm:min-w-0"
-                  >
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
-                      <div className="flex min-w-0 flex-1 items-baseline gap-2">
-                        <span className="shrink-0 text-[11px] font-bold text-slate-800">
-                          Daño {idx + 1}
-                        </span>
-                        {row.pieza && !isPlaceholderPieza(row.pieza) ? (
-                          <span
-                            className="truncate text-[10px] font-medium text-slate-500"
-                            title={row.pieza}
-                          >
-                            {row.pieza}
-                          </span>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        disabled={quoteRows.length <= 1}
-                        onClick={() => handleRemoveQuoteRow(row.id)}
-                        title={
-                          quoteRows.length <= 1
-                            ? 'Debe quedar al menos un servicio en el borrador'
-                            : 'Quitar este servicio de la cotización'
-                        }
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-transparent text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35"
-                        aria-label="Eliminar servicio de la cotización"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden
-                        >
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                          <line x1="10" x2="10" y1="11" y2="17" />
-                          <line x1="14" x2="14" y1="11" y2="17" />
-                        </svg>
-                      </button>
-                    </div>
-                    <label className="block text-[10px] font-medium text-gray-700">
-                      Servicio
-                      <select
-                        value={row.pieza}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setQuoteFormDirty(true);
-                          setQuoteRows((prev) =>
-                            prev.map((r) =>
-                              r.id === row.id
-                                ? recalcRowPriceFromMatrix({
-                                    ...r,
-                                    pieza: v,
-                                  })
-                                : r,
-                            ),
-                          );
-                        }}
-                        className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        <option value={MANUAL_ROW_PLACEHOLDER_PIEZA}>
-                          Seleccionar servicio…
-                        </option>
-                        {piezaSelectShowsUnmappedFallback(row.pieza) ? (
-                          <option value={row.pieza}>
-                            {row.pieza} (texto IA — elige servicio de la lista)
-                          </option>
-                        ) : null}
-                        {AUTO_FIX_BASE_PRICES.map((pr) => (
-                          <option key={pr.pieza} value={pr.pieza}>
-                            {pr.pieza}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="mt-2 block text-[10px] font-medium text-gray-700">
-                      Severidad
-                      <select
-                        value={row.severidad}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setQuoteFormDirty(true);
-                          setQuoteRows((prev) =>
-                            prev.map((r) => {
-                              if (r.id !== row.id) return r;
-                              return recalcRowPriceFromMatrix({
-                                ...r,
-                                severidad: v,
-                              });
-                            }),
-                          );
-                        }}
-                        className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        {DAMAGE_LEVEL_KEYS.map((k) => (
-                          <option key={k} value={k}>
-                            {SEVERIDAD_LABELS[k] ?? k}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="mt-2 block text-[10px] font-medium text-gray-700">
-                      Precio (MXN)
-                      <span className="ml-1 font-normal text-gray-400">
-                        — editable (redondeo / descuento)
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={row.precioInput}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setQuoteRows((prev) =>
-                            prev.map((r) =>
-                              r.id === row.id ? { ...r, precioInput: v } : r,
-                            ),
-                          );
-                          setQuoteFormDirty(true);
-                        }}
-                        className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        placeholder="0"
-                      />
-                    </label>
-
-                    <div className="mt-2.5 rounded-md border border-dashed border-slate-200 bg-white px-2 py-1.5">
-                      <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
-                        Fotos (evidencia)
-                      </p>
-                      {thumbs.length > 0 ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {thumbs.map((url) => (
-                            <button
-                              key={url}
-                              type="button"
-                              title="Abrir imagen"
-                              onClick={() =>
-                                window.open(url, '_blank', 'noopener,noreferrer')
-                              }
-                              className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
-                            >
-                              <img
-                                src={url}
-                                alt=""
-                                className="h-12 w-12 object-cover"
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-0.5 text-[9px] italic text-gray-400">
-                          Sin fotos vinculadas a este daño.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              <button
-                type="button"
-                disabled={
-                  isPanelReadOnly ||
-                  !activeDraftForPanel?.id ||
-                  isSavingQuote ||
-                  isSendingFinalQuote
-                }
-                onClick={handleAddManualPiezaRow}
-                className="min-h-12 w-full rounded-lg border border-dashed border-indigo-300 bg-white py-2.5 text-[11px] font-semibold text-indigo-800 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                + Añadir servicio manualmente
-              </button>
-            </div>
-            <div className="shrink-0 rounded-lg border-2 border-emerald-300 bg-emerald-50 px-3 py-2.5 text-right">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
-                Gran total
-              </p>
-              <p className="text-xl font-bold tabular-nums text-emerald-950">
-                {granTotalPanel.toLocaleString('es-MX', {
-                  style: 'currency',
-                  currency: 'MXN',
-                  maximumFractionDigits: 0,
-                })}
-              </p>
-              <p className="text-[9px] text-emerald-800/90">
-                Suma de todos los precios de la lista
-              </p>
-            </div>
-
-            {!activeDraftForPanel?.id ? (
-              <p className="text-[10px] text-amber-800">
-                Obteniendo enlace del borrador en el servidor…
-              </p>
-            ) : null}
-            {quoteSaveError ? (
-              <p className="text-[10px] text-red-600">{quoteSaveError}</p>
-            ) : null}
-          </div>
-
+          {showCarousel ? renderQuoteEvidenceCarousel() : null}
+          {renderQuoteStatusBadges()}
+          {renderQuoteDamagesSection()}
           {Array.isArray(panelDisplayQuote?.lines) &&
           panelDisplayQuote.lines.length > 0 ? (
-            <div className="mb-3 min-h-[100px] max-h-64 overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
               <table className="w-full min-w-[280px] text-left">
-                <thead className="sticky top-0 bg-gray-100 text-[9px] uppercase text-gray-600">
+                <thead className="bg-gray-100 text-[9px] uppercase text-gray-600">
                   <tr>
                     <th className="px-2 py-1.5">Concepto</th>
                     <th className="px-2 py-1.5 text-right">Total</th>
@@ -1539,99 +1698,22 @@ function ChatView({
               </div>
             </div>
           ) : null}
-          <div className="mt-2 min-h-0 max-h-56 overflow-y-auto rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 text-xs leading-relaxed text-gray-800 shadow-sm">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                Mensaje al cliente (envío / copiar)
-              </p>
-              <button
-                type="button"
-                title={
-                  isPanelReadOnly
-                    ? 'Modo referencia: vuelve a editar para regenerar'
-                    : 'Regenerar redacción (variante A/B/C)'
-                }
-                disabled={
-                  isPanelReadOnly ||
-                  isSending ||
-                  isSavingQuote ||
-                  isSendingFinalQuote ||
-                  isRegeneratingClientePreview ||
-                  !activeDraftForPanel?.id ||
-                  quoteRows.length === 0
-                }
-                onClick={() => void handleRegenerateClientePreview()}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-emerald-300 bg-white text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-45"
-                aria-label="Regenerar mensaje al cliente"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className={`h-5 w-5 ${isRegeneratingClientePreview ? 'animate-spin' : ''}`}
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
-                  />
-                </svg>
-              </button>
-            </div>
-            <pre className="whitespace-pre-wrap font-sans">{mensajeClientePreview}</pre>
-          </div>
-          <div className="mt-3 flex shrink-0 flex-col gap-2 border-t border-gray-200 pt-3">
-            <button
-              type="button"
-              disabled={
-                isPanelReadOnly ||
-                isSending ||
-                isSavingQuote ||
-                isSendingFinalQuote ||
-                !activeDraftForPanel?.id
-              }
-              onClick={handleGuardarCambios}
-              className="min-h-12 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSavingQuote ? 'Guardando…' : 'Guardar Cambios'}
-            </button>
-            <button
-              type="button"
-              disabled={
-                isPanelReadOnly ||
-                isSending ||
-                isSavingQuote ||
-                isSendingFinalQuote ||
-                !activeDraftForPanel?.id
-              }
-              onClick={handleEnviarCotizacionFinal}
-              className="min-h-12 w-full rounded-xl bg-emerald-600 px-4 py-3 text-base font-bold text-white shadow-lg transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSendingFinalQuote || isSending
-                ? 'Enviando…'
-                : 'Enviar Cotización Final'}
-            </button>
-            <button
-              type="button"
-              disabled={isSending || isSavingQuote || isSendingFinalQuote}
-              onClick={() => {
-                setReply(mensajeClientePreview);
-                document.getElementById('chat-reply-input')?.focus?.();
-                setQuoteDrawerOpen(false);
-              }}
-              className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Copiar mensaje al cliente al cuadro de respuesta
-            </button>
-          </div>
+          {renderQuoteClientMessageBlock()}
         </>
       )}
     </>
   );
 
+  const renderDraftQuotePanelBody = () => (
+    <>
+      {renderDraftQuotePanelScrollContent({ showCarousel: true })}
+      {hasPanelQuote && selectedConvId ? (
+        <div className="mt-3 flex flex-col gap-2 border-t border-gray-200 pt-3">
+          {renderQuoteActionButtons()}
+        </div>
+      ) : null}
+    </>
+  );
   const mobileChatOpen = Boolean(showChatWindow && selectedConvId);
 
   return (
@@ -2054,27 +2136,38 @@ function ChatView({
             aria-label="Cerrar cotización"
             onClick={() => setQuoteDrawerOpen(false)}
           />
-          <div className="relative flex max-h-[min(92vh,900px)] min-h-0 flex-col rounded-t-2xl border border-gray-200 bg-slate-50 shadow-2xl">
-            <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
-              <div>
-                <h2 className="text-sm font-bold tracking-tight text-gray-900">
-                  Cotización de IA
-                </h2>
-                <p className="mt-0.5 text-[10px] text-gray-500">
-                  Revisa, edita y envía al cliente
-                </p>
+          <div className="relative flex h-[min(92dvh,900px)] max-h-[92dvh] w-full min-h-0 flex-col rounded-t-2xl border border-gray-200 bg-slate-50 shadow-2xl">
+            <div className="shrink-0 border-b border-gray-200 bg-white px-4 pt-3 pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-bold tracking-tight text-gray-900">
+                    Cotización de IA
+                  </h2>
+                  <p className="mt-0.5 text-[10px] text-gray-500">
+                    Revisa, edita y envía al cliente
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuoteDrawerOpen(false)}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-600"
+                  aria-label="Cerrar panel"
+                >
+                  ✕
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setQuoteDrawerOpen(false)}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-600"
-                aria-label="Cerrar panel"
-              >
-                ✕
-              </button>
+              {renderQuoteEvidenceCarousel()}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              {renderDraftQuotePanelBody()}
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y px-4 pb-32 space-y-4 [-webkit-overflow-scrolling:touch]">
+                {renderDraftQuotePanelScrollContent()}
+              </div>
+              {hasPanelQuote && selectedConvId ? (
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-gray-200 bg-white px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+                  {renderQuoteActionButtons()}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
