@@ -446,6 +446,8 @@ function ChatView({
   const [showChatWindow, setShowChatWindow] = useState(false);
   /** En móvil: panel de cotización en bottom drawer */
   const [quoteDrawerOpen, setQuoteDrawerOpen] = useState(false);
+  /** Índice en `quoteEvidenceImageUrls` del visor fullscreen; null = cerrado */
+  const [activeImageIndex, setActiveImageIndex] = useState(null);
 
   const filteredContacts = useMemo(() => {
     if (platformFilter === 'all') return contacts;
@@ -1214,16 +1216,42 @@ function ChatView({
 
   useEffect(() => {
     setQuoteDrawerOpen(false);
+    setActiveImageIndex(null);
   }, [selectedConvId]);
 
   useEffect(() => {
-    if (!quoteDrawerOpen) return;
+    if (!quoteDrawerOpen) setActiveImageIndex(null);
+  }, [quoteDrawerOpen]);
+
+  useEffect(() => {
+    if (!quoteDrawerOpen && activeImageIndex === null) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prevOverflow;
     };
-  }, [quoteDrawerOpen]);
+  }, [quoteDrawerOpen, activeImageIndex]);
+
+  useEffect(() => {
+    if (activeImageIndex === null) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setActiveImageIndex(null);
+        return;
+      }
+      if (e.key === 'ArrowLeft' && activeImageIndex > 0) {
+        setActiveImageIndex((i) => (i !== null ? i - 1 : null));
+      }
+      if (
+        e.key === 'ArrowRight' &&
+        activeImageIndex < quoteEvidenceImageUrls.length - 1
+      ) {
+        setActiveImageIndex((i) => (i !== null ? i + 1 : null));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeImageIndex, quoteEvidenceImageUrls.length]);
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
@@ -1255,21 +1283,96 @@ function ChatView({
         className="flex gap-2 overflow-x-auto py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         aria-label="Fotos de evidencia de la cotización"
       >
-        {quoteEvidenceImageUrls.map((imgUrl) => (
+        {quoteEvidenceImageUrls.map((imgUrl, idx) => (
           <button
-            key={imgUrl}
+            key={`${imgUrl}-${idx}`}
             type="button"
-            title="Abrir imagen"
-            onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
-            className="shrink-0 overflow-hidden rounded-lg border border-gray-200 shadow-sm transition active:scale-[0.98]"
+            title="Ver imagen en grande"
+            onClick={() => setActiveImageIndex(idx)}
+            className="shrink-0 overflow-hidden rounded-lg border border-gray-200 shadow-sm transition active:scale-95"
           >
             <img
               src={imgUrl}
               alt="Evidencia"
-              className="h-16 w-16 object-cover"
+              className="h-16 w-16 cursor-pointer object-cover transition-transform"
             />
           </button>
         ))}
+      </div>
+    );
+  };
+
+  const renderQuoteEvidenceLightbox = () => {
+    if (activeImageIndex === null) return null;
+    const urls = quoteEvidenceImageUrls;
+    const current = urls[activeImageIndex];
+    if (!current) return null;
+
+    const canPrev = activeImageIndex > 0;
+    const canNext = activeImageIndex < urls.length - 1;
+    const navBtnClass =
+      'inline-flex h-12 w-12 min-h-[48px] min-w-[48px] items-center justify-center rounded-full bg-white/10 p-3 text-2xl font-bold text-white shadow-lg backdrop-blur-sm transition active:scale-95 hover:bg-white/20 disabled:pointer-events-none disabled:opacity-25';
+
+    return (
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Visor de evidencia fotográfica"
+        onClick={() => setActiveImageIndex(null)}
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveImageIndex(null);
+          }}
+          className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 z-10 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-2xl text-white backdrop-blur-sm transition hover:bg-white/20"
+          aria-label="Cerrar visor"
+        >
+          ✕
+        </button>
+
+        {canPrev ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveImageIndex((i) => (i !== null && i > 0 ? i - 1 : i));
+            }}
+            className={`absolute left-3 top-1/2 z-10 -translate-y-1/2 sm:left-6 ${navBtnClass}`}
+            aria-label="Foto anterior"
+          >
+            ‹
+          </button>
+        ) : null}
+
+        <img
+          src={current}
+          alt={`Evidencia ${activeImageIndex + 1} de ${urls.length}`}
+          className="max-h-[80vh] max-w-full object-contain px-14 sm:px-20"
+          onClick={(e) => e.stopPropagation()}
+        />
+
+        {canNext ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveImageIndex((i) =>
+                i !== null && i < urls.length - 1 ? i + 1 : i,
+              );
+            }}
+            className={`absolute right-3 top-1/2 z-10 -translate-y-1/2 sm:right-6 ${navBtnClass}`}
+            aria-label="Foto siguiente"
+          >
+            ›
+          </button>
+        ) : null}
+
+        <p className="pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-0 right-0 text-center text-sm font-medium text-white/80">
+          {activeImageIndex + 1} / {urls.length}
+        </p>
       </div>
     );
   };
@@ -2172,6 +2275,8 @@ function ChatView({
           </div>
         </div>
       ) : null}
+
+      {renderQuoteEvidenceLightbox()}
       </div>
     </div>
   );
