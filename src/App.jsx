@@ -4,6 +4,24 @@ import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
 
+/** Un solo chat por id y por externalId/contactUid (webhooks o estado duplicado). */
+function dedupeConversations(conversations) {
+  const list = Array.isArray(conversations) ? conversations : [];
+  const byId = list.filter(
+    (conv, index, self) => self.findIndex((c) => c.id === conv.id) === index,
+  );
+  return byId.filter((conv, index, self) => {
+    const uid = String(conv.externalId ?? conv.contactUid ?? '').trim();
+    if (!uid) return true;
+    return (
+      self.findIndex(
+        (c) =>
+          String(c.externalId ?? c.contactUid ?? '').trim() === uid,
+      ) === index
+    );
+  });
+}
+
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
   if (!text?.trim()) return [];
@@ -38,6 +56,11 @@ function App() {
   const [isSending, setIsSending] = useState(false);
   const [deleteToast, setDeleteToast] = useState('');
 
+  const uniqueContacts = useMemo(
+    () => dedupeConversations(contacts),
+    [contacts],
+  );
+
   // --- LÓGICA DE CARGA ---
   const fetchConversations = async () => {
     try {
@@ -48,7 +71,7 @@ function App() {
         return;
       }
       const data = await response.json();
-      setContacts(Array.isArray(data) ? data : []);
+      setContacts(dedupeConversations(data));
     } catch (error) {
       console.error("Error conversaciones:", error);
       setContacts([]);
@@ -235,7 +258,7 @@ function App() {
       }
 
       // --- ENVÍO FINAL DEL MENSAJE ---
-      const currentConv = contacts.find(c => c.id === selectedConvId);
+      const currentConv = uniqueContacts.find((c) => c.id === selectedConvId);
       const newMessage = {
         message: finalContent,
         platform: currentConv?.platform || 'web-dashboard',
@@ -278,7 +301,8 @@ function App() {
     finally { setIsAiLoading(false); }
   };
 
-  const selectedUserName = contacts.find(c => c.id === selectedConvId)?.contactName || "Usuario";
+  const selectedUserName =
+    uniqueContacts.find((c) => c.id === selectedConvId)?.contactName || 'Usuario';
 
   const quickReplySuggestions = useMemo(
     () => suggestionLinesFromAi(aiSuggestion),
@@ -354,7 +378,7 @@ function App() {
       </div>
     ) : null}
     <ChatView 
-      contacts={contacts}
+      contacts={uniqueContacts}
       selectedConvId={selectedConvId}
       setSelectedConvId={setSelectedConvId}
       selectedUserName={selectedUserName}
