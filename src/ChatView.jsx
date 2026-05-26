@@ -246,6 +246,15 @@ function isClienteFormalNarrative(text) {
   return s.startsWith('👋') || s.includes('🛠️');
 }
 
+function pickBackendClienteNarrative(...candidates) {
+  for (const raw of candidates) {
+    const t = String(raw ?? '').trim();
+    if (!t) continue;
+    if (isClienteFormalNarrative(t)) return t;
+  }
+  return '';
+}
+
 function quoteRowsToToolEmojiLines(rows) {
   return (rows ?? [])
     .map((r) => {
@@ -349,7 +358,7 @@ function assembleDynamicClienteQuoteMessage(rows, options = {}) {
       list,
       '',
       `💰 *Inversión estimada: $${totalFmt} MXN*`,
-      '_(Sujeto a revisión en planta. Incluye materiales premium Sikkens, acabado espejo y garantía por escrito.)_',
+      '_(Sujeto a revisión física. Incluye materiales premium Sikkens, acabado espejo y garantía por escrito.)_',
       '',
       ...mapBlock,
       'Para agendar tu ingreso al taller, dime qué día de la semana te funciona mejor. ✨',
@@ -476,7 +485,16 @@ function ChatView({
     const list = Array.isArray(messages) ? messages : [];
     for (let i = list.length - 1; i >= 0; i--) {
       const q = list[i]?.draftQuote;
-      if (q && q.formalNarrative) return { messageId: list[i].id, quote: q };
+      const backendNarrative = pickBackendClienteNarrative(
+        q?.formalNarrative,
+        q?.quotePayload?.formalNarrative,
+      );
+      if (q && backendNarrative) {
+        return {
+          messageId: list[i].id,
+          quote: { ...q, formalNarrative: backendNarrative },
+        };
+      }
     }
     return null;
   }, [messages]);
@@ -747,9 +765,14 @@ function ChatView({
       return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
     }
 
-    const stored = latestDraftQuote?.quote?.formalNarrative?.trim();
-    if (stored && isClienteFormalNarrative(stored)) {
-      return stored;
+    const backendNarrative = pickBackendClienteNarrative(
+      latestDraftQuote?.quote?.formalNarrative,
+      activeDraftForPanel?.quotePayload?.formalNarrative,
+      latestQuoteMessage?.draftQuote?.formalNarrative,
+      latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
+    );
+    if (backendNarrative) {
+      return backendNarrative;
     }
 
     if (quoteRows.length > 0) {
@@ -762,6 +785,9 @@ function ChatView({
     quoteFormDirty,
     leadStatusForQuote,
     latestDraftQuote?.quote?.formalNarrative,
+    activeDraftForPanel?.quotePayload?.formalNarrative,
+    latestQuoteMessage?.draftQuote?.formalNarrative,
+    latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
     selectedUserName,
     conversationAppointmentWhen,
     selectedConvId,
@@ -876,18 +902,7 @@ function ChatView({
         draftRef,
       );
 
-      const storedNarrative =
-        latestDraftQuote?.quote?.formalNarrative?.trim() ?? '';
-      let mensajeCliente =
-        storedNarrative && isClienteFormalNarrative(storedNarrative)
-          ? storedNarrative
-          : assembleDynamicClienteQuoteMessage(quoteRows, {
-              leadStatus: leadStatusForQuote,
-              contactName: selectedUserName,
-              appointmentWhen: conversationAppointmentWhen,
-              conversationId: selectedConvId,
-              mapsUrl: WORKSHOP_MAPS_URL,
-            });
+      let mensajeCliente = mensajeClientePreview;
       const resumeRes = await fetch(
         `${apiBaseUrl}/conversations/${selectedConvId}/resume-after-draft`,
         {
@@ -897,9 +912,7 @@ function ChatView({
         },
       );
       if (resumeRes.ok) {
-        const resumeData = await resumeRes.json().catch(() => ({}));
-        const aiText = resumeData?.assistantMessage?.trim();
-        if (aiText) mensajeCliente = aiText;
+        await resumeRes.json().catch(() => ({}));
       }
 
       onRefresh?.();
