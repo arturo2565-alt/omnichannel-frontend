@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Calendar } from 'lucide-react';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
@@ -1671,10 +1673,10 @@ function ChatView({
       />
 
       {/* 2–4. Bandeja + chat + panel cotización */}
-      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 lg:grid-cols-12">
+      <div className="grid min-h-0 min-w-0 w-full flex-1 grid-cols-1 lg:grid-cols-12">
       {/* 2. LISTA CONTACTOS */}
       <div
-        className={`flex min-h-0 flex-col border-r border-gray-200 bg-white shadow-inner lg:col-span-3 ${
+        className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white shadow-inner lg:col-span-3 ${
           mobileChatOpen ? 'hidden lg:flex' : 'flex'
         }`}
       >
@@ -1692,14 +1694,26 @@ function ChatView({
             </div>
           ) : null}
           <div
-            className={`border-b border-gray-100/80 px-4 ${pendingPorCotizarCount === 0 ? 'pt-4 pb-3' : 'pt-2 pb-3'}`}
+            className={`flex items-center justify-between gap-3 border-b border-gray-100/80 px-4 ${
+              pendingPorCotizarCount === 0 ? 'pt-4 pb-3' : 'pt-2 pb-3'
+            }`}
           >
-            <h2 className="text-lg font-bold tracking-tight text-gray-900">
-              Bandeja
-            </h2>
-            <p className="mt-1 text-[11px] font-medium text-gray-500">
-              Filtra conversaciones por canal
-            </p>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-bold tracking-tight text-gray-900">
+                Bandeja
+              </h2>
+              <p className="mt-1 text-[11px] font-medium text-gray-500">
+                Filtra conversaciones por canal
+              </p>
+            </div>
+            <Link
+              to="/calendar"
+              title="Citas y agenda"
+              aria-label="Ir al calendario de citas"
+              className="lg:hidden inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-indigo-200/90 bg-gradient-to-br from-indigo-50 via-white to-violet-50 text-indigo-700 shadow-md ring-1 ring-indigo-100/80 transition active:scale-95 hover:border-indigo-300 hover:shadow-lg"
+            >
+              <Calendar className="h-5 w-5" strokeWidth={2} aria-hidden />
+            </Link>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
             {[

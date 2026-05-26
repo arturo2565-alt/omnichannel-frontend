@@ -7,7 +7,7 @@ const railBtn =
 /** Rail izquierdo oscuro: filtros de canal (opcional) + navegación con estado activo */
 export function OmnichannelLeftRail({ platformSlot }) {
   return (
-    <div className="flex w-20 shrink-0 flex-col items-center bg-gray-900 py-4 shadow-xl z-10">
+    <div className="z-10 hidden w-20 shrink-0 flex-col items-center bg-gray-900 py-4 shadow-xl lg:flex">
       {platformSlot ? (
         <>
           <div className="flex flex-col items-center space-y-4">{platformSlot}</div>
