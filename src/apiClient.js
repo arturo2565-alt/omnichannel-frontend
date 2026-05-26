@@ -1,5 +1,9 @@
 import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
-import { clearAuthSession, getAccessToken } from './authStorage.js';
+import {
+  clearAuthSession,
+  getAccessToken,
+  getAuthTallerId,
+} from './authStorage.js';
 
 /** Evita redirecciones en bucle si varias peticiones fallan a la vez. */
 let redirectingToLogin = false;
@@ -106,6 +110,41 @@ export async function loginRequest(credentials) {
 /**
  * @param {{ email: string; password: string; nombreTaller: string; metaPageId?: string }} payload
  */
+/**
+ * Envía mensaje outbound del agente (JWT + `tallerId` en el body).
+ * @param {{
+ *   conversationId: string;
+ *   message: string;
+ *   platform?: string;
+ *   user?: string;
+ *   conversationLeadStatus?: 'cotizado';
+ *   tallerId?: string;
+ * }} payload
+ */
+export async function sendAgentMessageRequest(payload) {
+  const tallerId =
+    String(payload.tallerId ?? '').trim() || getAuthTallerId();
+  if (!tallerId) {
+    throw new Error('No hay taller en sesión. Inicia sesión de nuevo.');
+  }
+  const token = getAccessToken()?.trim();
+  if (!token) {
+    throw new Error('No hay token de sesión. Inicia sesión de nuevo.');
+  }
+
+  const res = await apiFetchWebhook('/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      tallerId,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  return res.json();
+}
+
 export async function registerRequest(payload) {
   const res = await apiFetchOrigin('/auth/register', {
     method: 'POST',

@@ -53,3 +53,16 @@ export function clearAuthSession() {
 export function isAuthenticated() {
   return Boolean(getAccessToken()?.trim());
 }
+
+/** UUID del taller de la sesión (contexto / localStorage). */
+export function getAuthTallerId() {
+  const fromTaller = getStoredTaller()?.id;
+  if (fromTaller != null && String(fromTaller).trim()) {
+    return String(fromTaller).trim();
+  }
+  const fromUser = getStoredUser()?.tallerId;
+  if (fromUser != null && String(fromUser).trim()) {
+    return String(fromUser).trim();
+  }
+  return '';
+}

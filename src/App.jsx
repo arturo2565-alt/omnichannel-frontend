@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 import { API_BASE_URL } from './apiConfig.js';
-import { apiFetchWebhook, parseApiError } from './apiClient.js';
+import { apiFetchWebhook, sendAgentMessageRequest } from './apiClient.js';
+import { useAuth } from './AuthContext.jsx';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
@@ -23,6 +24,8 @@ const socket = io('https://omnichannel-backend-production.up.railway.app', {
 
 function App() {
   const [searchParams] = useSearchParams();
+  const { taller, user } = useAuth();
+  const authTallerId = taller?.id ?? user?.tallerId ?? '';
 
   // --- ESTADOS ---
   const [contacts, setContacts] = useState([]);
@@ -206,6 +209,10 @@ function App() {
     const textContent = useOverride ? textFromOverride : textFromInput;
 
     if ((!textContent && !selectedFile) || !selectedConvId || isSending) return;
+    if (!authTallerId) {
+      alert('Sesión sin taller asignado. Cierra sesión e inicia de nuevo.');
+      return;
+    }
 
     setIsSending(true);
     let finalContent = textContent;
@@ -236,22 +243,15 @@ function App() {
 
       // --- ENVÍO FINAL DEL MENSAJE ---
       const currentConv = contacts.find(c => c.id === selectedConvId);
-      const newMessage = {
+      await sendAgentMessageRequest({
         message: finalContent,
         platform: currentConv?.platform || 'web-dashboard',
-        user: 'Arturo (Agente)',
-        id: currentConv?.externalId,
+        user: user?.email ? `Agente (${user.email})` : 'Agente',
         conversationId: selectedConvId,
-        direction: 'outbound',
+        tallerId: authTallerId,
         ...(sendOptions?.conversationLeadStatus === 'cotizado'
           ? { conversationLeadStatus: 'cotizado' }
           : {}),
-      };
-
-      await apiFetchWebhook('', {
-        method: 'POST',
-        skipAuth: true,
-        body: JSON.stringify(newMessage),
       });
 
       if (!useOverride) setReply("");
