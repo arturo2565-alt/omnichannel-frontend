@@ -240,10 +240,19 @@ function buildPanelSystemAuthorizationMessage(quoteRows, draftReference) {
 }
 
 /**
- * Mensaje corto para el cliente (webhook/WhatsApp): piezas del panel, total en negritas (* sintaxis típica de WhatsApp).
- * Fallback si resume-after-draft no devuelve texto.
+ * Mensaje al cliente desde filas del panel (WhatsApp: *negritas* en total).
+ * Respeta lead agendado vs sin cita (sin mapa ni “¿Te agendamos?” si ya tiene cita).
  */
-function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_URL) {
+function buildClienteQuoteOutboundMessage(
+  rows,
+  options = {},
+) {
+  const {
+    leadStatus = 'nuevo',
+    mapsUrl = DEFAULT_WORKSHOP_MAPS_URL,
+  } = options;
+  const isAgendado = normalizeConversationLeadStatus(leadStatus) === 'agendado';
+
   const sorted = [...(rows ?? [])];
   const list = sorted
     .map((r) => {
@@ -260,19 +269,34 @@ function buildClienteQuoteOutboundMessage(rows, mapsUrl = DEFAULT_WORKSHOP_MAPS_
   }, 0);
   const totalFmt = formatMoneyClienteQuoteMxAmount(total);
 
+  if (isAgendado) {
+    return [
+      '👋 ¡Listo! Aquí tienes el desglose del costo extra para tu visita:',
+      '',
+      list,
+      '',
+      `💰 *Inversión Extra Estimada: $${totalFmt} MXN*`,
+      '_(Sujeto a revisión física. Incluye materiales premium Sikkens y garantía por escrito.)_',
+      '',
+      'Anotamos estos conceptos como un **extra en tu orden de servicio** para el día de tu **cita ya confirmada**.',
+      '',
+      '¿Tienes alguna duda con las piezas o prefieres que lo sumemos al presupuesto inicial? 😊✨',
+    ].join('\n');
+  }
+
   const mapLink = String(mapsUrl ?? DEFAULT_WORKSHOP_MAPS_URL).trim();
 
   return [
-    '👋 Claro, el estimado para tu vehículo es:',
+    '👋 Aquí tienes el desglose de tu cotización:',
     '',
     list,
     '',
-    `✨ Inversión Total Estimada: *$${totalFmt} MXN*`,
-    '(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens)',
+    `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+    '_(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens)_',
     '',
     `📍 Estamos aquí, fácil de llegar: ${mapLink}`,
     '',
-    '📅 Tenemos 2 espacios esta semana. ¿Te agendamos?',
+    '📅 ¿Qué día de la semana te queda mejor para ingresar tu unidad?',
   ].join('\n');
 }
 
@@ -590,21 +614,26 @@ function ChatView({
     [quoteRows],
   );
 
+  const leadStatusForQuote = normalizeConversationLeadStatus(
+    selectedContact?.status,
+  );
+
   const mensajeClientePreview = useMemo(() => {
+    if (quoteRows.length > 0) {
+      return buildClienteQuoteOutboundMessage(quoteRows, {
+        leadStatus: leadStatusForQuote,
+      });
+    }
     const stored = latestDraftQuote?.quote?.formalNarrative?.trim();
     const isClientPreview =
       stored &&
       !stored.startsWith('Estimado cliente') &&
       (stored.startsWith('👋') || stored.includes('🛠️'));
-    if (!quoteFormDirty && isClientPreview) {
+    if (isClientPreview) {
       return stored;
     }
-    return buildClienteQuoteOutboundMessage(quoteRows);
-  }, [
-    quoteRows,
-    quoteFormDirty,
-    latestDraftQuote?.quote?.formalNarrative,
-  ]);
+    return 'Añade servicios al borrador para ver el mensaje al cliente.';
+  }, [quoteRows, leadStatusForQuote, latestDraftQuote?.quote?.formalNarrative]);
 
   const persistDraftQuotePatch = useCallback(async () => {
     if (!apiBaseUrl || !activeDraftForPanel?.id) {
@@ -715,7 +744,9 @@ function ChatView({
         draftRef,
       );
 
-      let mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows);
+      let mensajeCliente = buildClienteQuoteOutboundMessage(quoteRows, {
+        leadStatus: leadStatusForQuote,
+      });
       const resumeRes = await fetch(
         `${apiBaseUrl}/conversations/${selectedConvId}/resume-after-draft`,
         {
@@ -1430,7 +1461,11 @@ function ChatView({
                   type="button"
                   disabled={isSending || isSavingQuote || isSendingFinalQuote}
                   onClick={() => {
-                    setReply(buildClienteQuoteOutboundMessage(quoteRows));
+                    setReply(
+                      buildClienteQuoteOutboundMessage(quoteRows, {
+                        leadStatus: leadStatusForQuote,
+                      }),
+                    );
                     document.getElementById('chat-reply-input')?.focus?.();
                   }}
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
