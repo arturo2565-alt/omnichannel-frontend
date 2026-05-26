@@ -295,10 +295,42 @@ function formatAppointmentCitaWhen(scheduledAtIso) {
   });
 }
 
-/**
- * Ensambla el mensaje al cliente desde el panel (sin URL de prueba).
- * Variantes premium A/B/C si no hay cita; cierre con día de cita si está agendado.
- */
+function buildPreviewNarrativePiecesFromQuoteRows(rows) {
+  return (rows ?? []).map((r) => ({
+    pieza: String(r.pieza ?? '').trim(),
+    severidad: r.severidad,
+    precioMx: parsePrecioInput(r.precioInput),
+  }));
+}
+
+function resolveModeloVehiculoForPreview(quote, damageAnalysis) {
+  const q = quote ?? {};
+  const d = damageAnalysis ?? {};
+  const basis = q.analysisBasis ?? {};
+  return (
+    String(
+      q.modeloVehiculo ??
+        q.vehicleModel ??
+        d.modeloVehiculo ??
+        d.vehicleModel ??
+        basis.modeloVehiculo ??
+        '',
+    ).trim() || ''
+  );
+}
+
+function quoteRowsValidForNarrativeRegen(rows) {
+  const list = rows ?? [];
+  if (!list.length) return false;
+  for (const r of list) {
+    const pieza = String(r.pieza ?? '').trim();
+    if (!pieza || isPlaceholderPieza(pieza)) return false;
+    const n = parsePrecioInput(r.precioInput);
+    if (!Number.isFinite(n) || n < 0) return false;
+  }
+  return true;
+}
+
 function assembleDynamicClienteQuoteMessage(rows, options = {}) {
   const {
     leadStatus = 'nuevo',
@@ -482,35 +514,54 @@ function ChatView({
     onRefresh,
   ]);
 
+  const [conversationDraftRows, setConversationDraftRows] = useState([]);
+
   const latestDraftQuote = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
     for (let i = list.length - 1; i >= 0; i--) {
       const q = list[i]?.draftQuote;
-      const backendNarrative = pickBackendClienteNarrative(
-        q?.formalNarrative,
-        q?.quotePayload?.formalNarrative,
-      );
-      if (q && backendNarrative) {
+      if (q) {
+        const clientNarrative = pickBackendClienteNarrative(
+          q.formalNarrative,
+          q.quotePayload?.formalNarrative,
+        );
         return {
           messageId: list[i].id,
-          quote: { ...q, formalNarrative: backendNarrative },
+          quote: {
+            ...q,
+            formalNarrative: clientNarrative || String(q.formalNarrative ?? '').trim(),
+          },
         };
       }
     }
+    const draftRow = Array.isArray(conversationDraftRows)
+      ? conversationDraftRows[0]
+      : null;
+    const qp = draftRow?.quotePayload;
+    if (qp) {
+      const clientNarrative = pickBackendClienteNarrative(qp.formalNarrative);
+      return {
+        messageId: draftRow.messageId ?? null,
+        quote: {
+          ...qp,
+          formalNarrative: clientNarrative || String(qp.formalNarrative ?? '').trim(),
+        },
+      };
+    }
     return null;
-  }, [messages]);
+  }, [messages, conversationDraftRows]);
 
   const latestQuoteMessage = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
     return list.find((m) => m.id === latestDraftQuote?.messageId) ?? null;
   }, [messages, latestDraftQuote?.messageId]);
-
-  const [conversationDraftRows, setConversationDraftRows] = useState([]);
   /** Una fila por daño/pieza: pieza, severidad, precio editable, URLs para mini galería */
   const [quoteRows, setQuoteRows] = useState([]);
   const [quoteFormDirty, setQuoteFormDirty] = useState(false);
   const [clientePreviewLocalFallback, setClientePreviewLocalFallback] =
     useState('');
+  const [dirtyPreviewNarrative, setDirtyPreviewNarrative] = useState('');
+  const [panelQuoteFrozen, setPanelQuoteFrozen] = useState(null);
   const [isRegeneratingClientePreview, setIsRegeneratingClientePreview] =
     useState(false);
   const [quoteSaveError, setQuoteSaveError] = useState('');
@@ -534,13 +585,15 @@ function ChatView({
 
   useEffect(() => {
     setClientePreviewLocalFallback('');
+    setDirtyPreviewNarrative('');
+    setPanelQuoteFrozen(null);
   }, [selectedConvId]);
 
-  useEffect(() => {
-    if (quoteFormDirty) {
-      setClientePreviewLocalFallback('');
-    }
-  }, [quoteFormDirty]);
+  const isPanelReadOnly = Boolean(panelQuoteFrozen) && !quoteFormDirty;
+
+  const panelDisplayQuote = panelQuoteFrozen?.quote ?? latestDraftQuote?.quote;
+
+  const hasPanelQuote = Boolean(panelDisplayQuote || panelQuoteFrozen);
 
   const refreshConversationDraftQuotes = useCallback(
     async (signal) => {
@@ -610,6 +663,7 @@ function ChatView({
   }, [latestDraftQuote, latestQuoteMessage, activeDraftForPanel]);
 
   useEffect(() => {
+    if (panelQuoteFrozen) return;
     if (!latestDraftQuote?.quote) return;
     const q = latestDraftQuote.quote;
     const basis = q.analysisBasis ?? {};
@@ -705,15 +759,28 @@ function ChatView({
     }
     setQuoteFormDirty(false);
     setQuoteSaveError('');
-  }, [quoteSyncKey]);
+  }, [quoteSyncKey, panelQuoteFrozen]);
+
+  const quoteRowsEditKey = useMemo(
+    () =>
+      quoteRows
+        .map((r) => `${r.id}:${r.pieza}:${r.severidad}:${r.precioInput}`)
+        .join('|'),
+    [quoteRows],
+  );
+
+  const panelRowsForDisplay =
+    isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
+      ? panelQuoteFrozen.quoteRows
+      : quoteRows;
 
   const granTotalPanel = useMemo(
     () =>
-      quoteRows.reduce((acc, r) => {
+      panelRowsForDisplay.reduce((acc, r) => {
         const n = parsePrecioInput(r.precioInput);
         return acc + (Number.isFinite(n) ? n : 0);
       }, 0),
-    [quoteRows],
+    [panelRowsForDisplay],
   );
 
   const leadStatusForQuote = normalizeConversationLeadStatus(
@@ -768,16 +835,17 @@ function ChatView({
   }, [selectedConvId, apiBaseUrl, leadStatusForQuote]);
 
   const mensajeClientePreview = useMemo(() => {
-    const dynamicOpts = {
-      leadStatus: leadStatusForQuote,
-      contactName: selectedUserName,
-      appointmentWhen: conversationAppointmentWhen,
-      conversationId: selectedConvId,
-      mapsUrl: WORKSHOP_MAPS_URL,
-    };
+    if (panelQuoteFrozen?.mensajeCliente?.trim()) {
+      return panelQuoteFrozen.mensajeCliente.trim();
+    }
 
-    if (quoteFormDirty && quoteRows.length > 0) {
-      return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
+    if (quoteFormDirty) {
+      const dirty = String(dirtyPreviewNarrative ?? '').trim();
+      if (dirty) return dirty;
+      if (isRegeneratingClientePreview) {
+        return 'Actualizando redacción premium con IA…';
+      }
+      return 'Preparando vista previa con IA…';
     }
 
     const fallbackTrim = String(clientePreviewLocalFallback ?? '').trim();
@@ -790,37 +858,106 @@ function ChatView({
       activeDraftForPanel?.quotePayload?.formalNarrative,
       latestQuoteMessage?.draftQuote?.formalNarrative,
       latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
+      panelDisplayQuote?.formalNarrative,
     );
     if (backendNarrative) {
       return backendNarrative;
     }
 
-    if (quoteRows.length > 0) {
-      return assembleDynamicClienteQuoteMessage(quoteRows, dynamicOpts);
-    }
-
     return 'Añade servicios al borrador para ver el mensaje al cliente.';
   }, [
-    quoteRows,
+    panelQuoteFrozen,
     quoteFormDirty,
+    dirtyPreviewNarrative,
+    isRegeneratingClientePreview,
     clientePreviewLocalFallback,
-    leadStatusForQuote,
     latestDraftQuote?.quote?.formalNarrative,
     activeDraftForPanel?.quotePayload?.formalNarrative,
     latestQuoteMessage?.draftQuote?.formalNarrative,
     latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
-    selectedUserName,
-    conversationAppointmentWhen,
-    selectedConvId,
+    panelDisplayQuote?.formalNarrative,
+  ]);
+
+  const previewNarrativeFromQuoteRows = useCallback(
+    async (rows) => {
+      if (!apiBaseUrl) return null;
+      if (!quoteRowsValidForNarrativeRegen(rows)) return null;
+
+      setIsRegeneratingClientePreview(true);
+      try {
+        const res = await fetch(
+          `${apiBaseUrl}/draft-quote/preview-narrative`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pieces: buildPreviewNarrativePiecesFromQuoteRows(rows),
+              modeloVehiculo: resolveModeloVehiculoForPreview(
+                panelDisplayQuote ?? latestDraftQuote?.quote,
+                latestQuoteMessage?.damageAnalysis,
+              ),
+              conversationStatus: leadStatusForQuote,
+              contactName: selectedContact?.contactName ?? '',
+              conversationId: selectedConvId ?? '',
+            }),
+          },
+        );
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+        const data = await res.json().catch(() => ({}));
+        const narrative = pickBackendClienteNarrative(data?.narrative);
+        if (narrative) {
+          setDirtyPreviewNarrative(narrative);
+          setClientePreviewLocalFallback('');
+        }
+        setQuoteSaveError('');
+        return narrative;
+      } catch (e) {
+        setQuoteSaveError(
+          e?.message || 'No se pudo actualizar la vista previa con IA.',
+        );
+        return null;
+      } finally {
+        setIsRegeneratingClientePreview(false);
+      }
+    },
+    [
+      apiBaseUrl,
+      panelDisplayQuote,
+      latestDraftQuote?.quote,
+      latestQuoteMessage?.damageAnalysis,
+      leadStatusForQuote,
+      selectedContact?.contactName,
+      selectedConvId,
+    ],
+  );
+
+  useEffect(() => {
+    if (!quoteFormDirty || isPanelReadOnly) return;
+    if (!quoteRowsValidForNarrativeRegen(quoteRows)) return;
+    const t = setTimeout(() => {
+      void previewNarrativeFromQuoteRows(quoteRows);
+    }, 750);
+    return () => clearTimeout(t);
+  }, [
+    quoteRowsEditKey,
+    quoteFormDirty,
+    isPanelReadOnly,
+    previewNarrativeFromQuoteRows,
+    quoteRows,
   ]);
 
   const handleRegenerateClientePreview = useCallback(async () => {
-    if (
-      quoteFormDirty ||
-      !apiBaseUrl ||
-      !activeDraftForPanel?.id ||
-      quoteRows.length === 0
-    ) {
+    if (!apiBaseUrl || quoteRows.length === 0) {
+      return;
+    }
+    if (quoteFormDirty) {
+      await previewNarrativeFromQuoteRows(quoteRows);
+      return;
+    }
+    if (!activeDraftForPanel?.id) {
       return;
     }
     setIsRegeneratingClientePreview(true);
@@ -842,50 +979,37 @@ function ChatView({
         await refreshConversationDraftQuotes();
         setQuoteSaveError('');
       } else {
-        const text = assembleDynamicClienteQuoteMessage(quoteRows, {
-          leadStatus: leadStatusForQuote,
-          contactName: selectedUserName,
-          appointmentWhen: conversationAppointmentWhen,
-          conversationId: selectedConvId,
-          mapsUrl: WORKSHOP_MAPS_URL,
-          variantSalt: `${Date.now()}-${Math.random()}`,
-        });
-        setClientePreviewLocalFallback(text);
-        setQuoteSaveError(
-          `No se pudo regenerar con la IA (HTTP ${res.status}). Se mostró una variante local A/B/C.`,
-        );
+        throw new Error(`HTTP ${res.status}`);
       }
     } catch (e) {
-      const text = assembleDynamicClienteQuoteMessage(quoteRows, {
-        leadStatus: leadStatusForQuote,
-        contactName: selectedUserName,
-        appointmentWhen: conversationAppointmentWhen,
-        conversationId: selectedConvId,
-        mapsUrl: WORKSHOP_MAPS_URL,
-        variantSalt: `${Date.now()}-${Math.random()}`,
-      });
-      setClientePreviewLocalFallback(text);
       setQuoteSaveError(
-        e?.message
-          ? `${e.message} (variante local A/B/C)`
-          : 'Error de red; se mostró variante local A/B/C.',
+        e?.message || 'No se pudo regenerar la redacción con IA.',
       );
     } finally {
       setIsRegeneratingClientePreview(false);
     }
   }, [
-    quoteFormDirty,
     apiBaseUrl,
     activeDraftForPanel?.id,
     quoteRows,
-    leadStatusForQuote,
-    selectedUserName,
-    conversationAppointmentWhen,
-    selectedConvId,
+    quoteFormDirty,
+    previewNarrativeFromQuoteRows,
     latestDraftQuote?.messageId,
     onDraftQuotePatched,
     refreshConversationDraftQuotes,
   ]);
+
+  const freezePanelQuoteSnapshot = useCallback(
+    (mensajeCliente, quotePayload) => {
+      if (!quotePayload) return;
+      setPanelQuoteFrozen({
+        quote: quotePayload,
+        quoteRows: quoteRows.map((r) => ({ ...r })),
+        mensajeCliente: String(mensajeCliente ?? '').trim(),
+      });
+    },
+    [quoteRows],
+  );
 
   const persistDraftQuotePatch = useCallback(async () => {
     if (!apiBaseUrl || !activeDraftForPanel?.id) {
@@ -940,6 +1064,11 @@ function ChatView({
     await refreshConversationDraftQuotes();
     setQuoteFormDirty(false);
     setClientePreviewLocalFallback('');
+    setDirtyPreviewNarrative('');
+    const savedNarrative = pickBackendClienteNarrative(
+      entity.quotePayload?.formalNarrative,
+    );
+    freezePanelQuoteSnapshot(savedNarrative, entity.quotePayload);
     return entity;
   }, [
     apiBaseUrl,
@@ -948,6 +1077,7 @@ function ChatView({
     onDraftQuotePatched,
     selectedConvId,
     refreshConversationDraftQuotes,
+    freezePanelQuoteSnapshot,
   ]);
 
   const handleGuardarCambios = async () => {
@@ -995,6 +1125,11 @@ function ChatView({
       const authorizedQuoteSummary = buildPanelSystemAuthorizationMessage(
         quoteRows,
         draftRef,
+      );
+
+      freezePanelQuoteSnapshot(
+        mensajeClientePreview,
+        activeDraftForPanel?.quotePayload ?? latestDraftQuote?.quote,
       );
 
       let mensajeCliente = mensajeClientePreview;
@@ -1402,30 +1537,62 @@ function ChatView({
         <div className="flex flex-1 flex-col overflow-hidden p-3">
           {!selectedConvId ? (
             <p className="text-center text-xs text-gray-500">Selecciona una conversación para ver cotizaciones de este chat.</p>
-          ) : !latestDraftQuote ? (
+          ) : !hasPanelQuote ? (
             <div className="rounded-lg border border-dashed border-gray-300 bg-white/80 p-4 text-center text-xs text-gray-500">
               Aquí aparecerá la cotización cuando el sistema analice una imagen (daños / taller) en este chat.
             </div>
           ) : (
             <>
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
-                  {latestDraftQuote.quote.status === 'PENDING_APPROVAL' ? 'Pendiente de aprobación' : latestDraftQuote.quote.status}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                    isPanelReadOnly
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {isPanelReadOnly
+                    ? 'Referencia (solo lectura)'
+                    : panelDisplayQuote?.status === 'PENDING_APPROVAL'
+                      ? 'Pendiente de aprobación'
+                      : panelDisplayQuote?.status ?? 'Cotización'}
                 </span>
-                {latestDraftQuote.quote.reference ? (
-                  <span className="text-[10px] text-gray-500">{latestDraftQuote.quote.reference}</span>
+                {panelDisplayQuote?.reference ? (
+                  <span className="text-[10px] text-gray-500">
+                    {panelDisplayQuote.reference}
+                  </span>
                 ) : null}
-                {quoteFormDirty ? (
-                  <span className="text-[10px] font-medium text-amber-700">Cambios sin guardar</span>
+                {quoteFormDirty && !isPanelReadOnly ? (
+                  <span className="text-[10px] font-medium text-amber-700">
+                    Cambios sin guardar
+                  </span>
+                ) : null}
+                {isPanelReadOnly ? (
+                  <button
+                    type="button"
+                    className="text-[10px] font-medium text-indigo-700 underline"
+                    onClick={() => setPanelQuoteFrozen(null)}
+                  >
+                    Volver a editar
+                  </button>
                 ) : null}
               </div>
 
               <div className="mb-3 flex max-h-[70vh] min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                 <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Daños detectados ({quoteRows.length}) — editable por servicio
+                  Daños detectados (
+                  {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
+                    ? panelQuoteFrozen.quoteRows
+                    : quoteRows
+                  ).length}
+                  ){isPanelReadOnly ? ' — referencia' : ' — editable por servicio'}
                 </p>
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5">
-                  {quoteRows.map((row, idx) => {
+                <div
+                  className={`min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5 ${
+                    isPanelReadOnly ? 'pointer-events-none opacity-90' : ''
+                  }`}
+                >
+                  {panelRowsForDisplay.map((row, idx) => {
                     const thumbs = row.urls_origen ?? [];
                     return (
                       <div
@@ -1598,6 +1765,7 @@ function ChatView({
                   <button
                     type="button"
                     disabled={
+                      isPanelReadOnly ||
                       !activeDraftForPanel?.id ||
                       isSavingQuote ||
                       isSendingFinalQuote
@@ -1639,7 +1807,8 @@ function ChatView({
                 ) : null}
               </div>
 
-              {Array.isArray(latestDraftQuote.quote.lines) && latestDraftQuote.quote.lines.length > 0 ? (
+              {Array.isArray(panelDisplayQuote?.lines) &&
+              panelDisplayQuote.lines.length > 0 ? (
                 <div className="mb-3 min-h-[100px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
                   <table className="w-full text-left">
                     <thead className="sticky top-0 bg-gray-100 text-[9px] uppercase text-gray-600">
@@ -1649,7 +1818,7 @@ function ChatView({
                       </tr>
                     </thead>
                     <tbody>
-                      {latestDraftQuote.quote.lines.map((line, idx) => (
+                      {panelDisplayQuote.lines.map((line, idx) => (
                         <tr key={idx} className="border-t border-gray-100">
                           <td className="px-2 py-1.5 text-gray-800">{line.description}</td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-gray-900">
@@ -1663,7 +1832,9 @@ function ChatView({
                   </table>
                   <div className="border-t border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-xs font-bold text-gray-900">
                     Total:{' '}
-                    {Number(latestDraftQuote.quote.total ?? latestDraftQuote.quote.subtotal ?? 0).toLocaleString('es-MX', {
+                    {Number(
+                      panelDisplayQuote.total ?? panelDisplayQuote.subtotal ?? 0,
+                    ).toLocaleString('es-MX', {
                       style: 'currency',
                       currency: 'MXN',
                       maximumFractionDigits: 0,
@@ -1679,12 +1850,12 @@ function ChatView({
                   <button
                     type="button"
                     title={
-                      quoteFormDirty
-                        ? 'Guarda los cambios antes de regenerar con la IA'
+                      isPanelReadOnly
+                        ? 'Modo referencia: vuelve a editar para regenerar'
                         : 'Regenerar redacción (variante A/B/C)'
                     }
                     disabled={
-                      quoteFormDirty ||
+                      isPanelReadOnly ||
                       isSending ||
                       isSavingQuote ||
                       isSendingFinalQuote ||
@@ -1719,6 +1890,7 @@ function ChatView({
                 <button
                   type="button"
                   disabled={
+                    isPanelReadOnly ||
                     isSending ||
                     isSavingQuote ||
                     isSendingFinalQuote ||
@@ -1732,6 +1904,7 @@ function ChatView({
                 <button
                   type="button"
                   disabled={
+                    isPanelReadOnly ||
                     isSending ||
                     isSavingQuote ||
                     isSendingFinalQuote ||
