@@ -102,3 +102,25 @@ export async function loginRequest(credentials) {
   }
   return res.json();
 }
+
+/**
+ * @param {{ email: string; password: string; nombreTaller: string; metaPageId?: string }} payload
+ */
+export async function registerRequest(payload) {
+  const res = await apiFetchOrigin('/auth/register', {
+    method: 'POST',
+    skipAuth: true,
+    body: JSON.stringify({
+      email: payload.email,
+      password: payload.password,
+      nombreTaller: payload.nombreTaller,
+      ...(payload.metaPageId?.trim()
+        ? { metaPageId: payload.metaPageId.trim() }
+        : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  return res.json();
+}
