@@ -255,24 +255,6 @@ function pickBackendClienteNarrative(...candidates) {
   return '';
 }
 
-/** Bandeja: un solo ítem por `id` y por `externalId` / `contactUid` del canal. */
-function dedupeConversations(conversations) {
-  const list = Array.isArray(conversations) ? conversations : [];
-  const byId = list.filter(
-    (conv, index, self) => self.findIndex((c) => c.id === conv.id) === index,
-  );
-  return byId.filter((conv, index, self) => {
-    const uid = String(conv.externalId ?? conv.contactUid ?? '').trim();
-    if (!uid) return true;
-    return (
-      self.findIndex(
-        (c) =>
-          String(c.externalId ?? c.contactUid ?? '').trim() === uid,
-      ) === index
-    );
-  });
-}
-
 function quoteRowsToToolEmojiLines(rows) {
   return (rows ?? [])
     .map((r) => {
@@ -459,17 +441,10 @@ function ChatView({
   const fileInputRef = useRef(null); // Referencia al input hidden
   const [platformFilter, setPlatformFilter] = useState('all');
 
-  const uniqueContacts = useMemo(
-    () => dedupeConversations(contacts),
-    [contacts],
-  );
-
   const filteredContacts = useMemo(() => {
-    if (platformFilter === 'all') return uniqueContacts;
-    return uniqueContacts.filter(
-      (c) => classifyPlatform(c.platform) === platformFilter,
-    );
-  }, [uniqueContacts, platformFilter]);
+    if (platformFilter === 'all') return contacts;
+    return contacts.filter((c) => classifyPlatform(c.platform) === platformFilter);
+  }, [contacts, platformFilter]);
 
   /** Urgencia primero: `por_cotizar`, luego el resto por actividad reciente. */
   const sortedBandejaContacts = useMemo(() => {
@@ -489,13 +464,13 @@ function ChatView({
 
   const pendingPorCotizarCount = useMemo(
     () =>
-      uniqueContacts.filter(
+      contacts.filter(
         (c) => normalizeConversationLeadStatus(c.status) === 'por_cotizar',
       ).length,
-    [uniqueContacts],
+    [contacts],
   );
 
-  const selectedContact = uniqueContacts.find((c) => c.id === selectedConvId);
+  const selectedContact = contacts.find((c) => c.id === selectedConvId);
 
   const [autoPilotToggleBusy, setAutoPilotToggleBusy] = useState(false);
   const [deleteConversationBusy, setDeleteConversationBusy] = useState(false);
