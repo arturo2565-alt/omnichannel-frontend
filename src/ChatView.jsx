@@ -18,6 +18,7 @@ import {
   getPiezaSelectLabel,
   isInternalDamageRangePieza,
   isRefaccionPieza,
+  isBanioPinturaCompletoPieza,
   isKnownPanelPiezaCode,
   normalizePiezaCodeForPanel,
 } from './panel-pieza-options';
@@ -180,7 +181,11 @@ function normalizePiezaForPanel(raw) {
 }
 
 function recalcRowPriceFromMatrix(row) {
-  if (isInternalDamageRangePieza(row.pieza) || isRefaccionPieza(row.pieza)) {
+  if (
+    isInternalDamageRangePieza(row.pieza) ||
+    isRefaccionPieza(row.pieza) ||
+    isBanioPinturaCompletoPieza(row.pieza)
+  ) {
     return row;
   }
   const n = calculateEstimate(row.pieza, row.severidad);
@@ -286,6 +291,14 @@ function buildQuoteRowFromSource({
       ...base,
       severidad: 'N/A',
       refaccionDetalle: detalle,
+      precioInput: String(Math.max(0, Math.round(Number(precio) || 0))),
+    };
+  }
+  if (isBanioPinturaCompletoPieza(pieza)) {
+    const tier = String(severidadRaw ?? '').trim() || 'Mediano';
+    return {
+      ...base,
+      severidad: tier,
       precioInput: String(Math.max(0, Math.round(Number(precio) || 0))),
     };
   }
@@ -399,8 +412,25 @@ function buildPanelSystemAuthorizationMessage(quoteRows, draftReference) {
 
 function isClienteFormalNarrative(text) {
   const s = String(text ?? '').trim();
-  if (!s || s.startsWith('Estimado cliente')) return false;
-  return s.startsWith('👋') || s.includes('🛠️');
+  if (!s) return false;
+  if (
+    s.startsWith('Estimado cliente,') &&
+    s.includes('PROPUESTA DE COTIZACIÓN')
+  ) {
+    return false;
+  }
+  if (s.startsWith('👋') || s.includes('🛠️') || s.startsWith('🎨')) {
+    return true;
+  }
+  if (
+    /ba[nñ]o de pintura/i.test(s) &&
+    (s.includes('💰') ||
+      /total estimado/i.test(s) ||
+      s.includes('Inversión'))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function pickBackendClienteNarrative(...candidates) {
@@ -410,6 +440,20 @@ function pickBackendClienteNarrative(...candidates) {
     if (isClienteFormalNarrative(t)) return t;
   }
   return '';
+}
+
+/** Campos del borrador que pueden traer el mensaje al cliente (BPC y reparaciones comunes). */
+function draftQuoteClienteMessageFields(draft) {
+  if (!draft || typeof draft !== 'object') return [];
+  const qp = draft.quotePayload;
+  return [
+    draft.generatedMessage,
+    draft.clientMessage,
+    draft.formalNarrative,
+    qp?.generatedMessage,
+    qp?.clientMessage,
+    qp?.formalNarrative,
+  ];
 }
 
 function quoteRowsToToolEmojiLines(rows) {
@@ -427,7 +471,8 @@ function quoteRowsToToolEmojiLines(rows) {
       }
       const piezaNombre = getPiezaClienteDisplayName(r.pieza);
       const price = rowAmountForPanelTotal(r);
-      return `🛠️ ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
+      const emoji = isBanioPinturaCompletoPieza(r.pieza) ? '🎨' : '🛠️';
+      return `${emoji} ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
 }
@@ -479,6 +524,14 @@ function buildPreviewNarrativePiecesFromQuoteRows(rows) {
         descripcionTecnica: detalle,
       };
     }
+    if (isBanioPinturaCompletoPieza(r.pieza)) {
+      const price = rowAmountForPanelTotal(r);
+      return {
+        pieza: getPiezaClienteDisplayName(r.pieza),
+        severidad: String(r.severidad ?? 'Mediano'),
+        precioMx: price,
+      };
+    }
     return {
       pieza: getPiezaClienteDisplayName(r.pieza),
       severidad: r.severidad,
@@ -517,6 +570,11 @@ function quoteRowsValidForNarrativeRegen(rows) {
       continue;
     }
     if (isRefaccionPieza(pieza)) {
+      const n = parsePrecioInput(r.precioInput);
+      if (!Number.isFinite(n) || n < 0) return false;
+      continue;
+    }
+    if (isBanioPinturaCompletoPieza(pieza)) {
       const n = parsePrecioInput(r.precioInput);
       if (!Number.isFinite(n) || n < 0) return false;
       continue;
@@ -724,8 +782,7 @@ function ChatView({
       const q = list[i]?.draftQuote;
       if (q) {
         const clientNarrative = pickBackendClienteNarrative(
-          q.formalNarrative,
-          q.quotePayload?.formalNarrative,
+          ...draftQuoteClienteMessageFields(q),
         );
         return {
           messageId: list[i].id,
@@ -741,7 +798,9 @@ function ChatView({
       : null;
     const qp = draftRow?.quotePayload;
     if (qp) {
-      const clientNarrative = pickBackendClienteNarrative(qp.formalNarrative);
+      const clientNarrative = pickBackendClienteNarrative(
+        ...draftQuoteClienteMessageFields(qp),
+      );
       return {
         messageId: draftRow.messageId ?? null,
         quote: {
@@ -1017,6 +1076,23 @@ function ChatView({
             isRange: false,
           };
         }
+        if (isBanioPinturaCompletoPieza(r.pieza)) {
+          const sub = rowAmountForPanelTotal(r);
+          const tier = String(r.severidad ?? '').trim();
+          return {
+            key: r.id,
+            description: tier
+              ? `🎨 ${getPiezaClienteDisplayName(r.pieza)} (${tier})`
+              : `🎨 ${getPiezaClienteDisplayName(r.pieza)}`,
+            amountLabel: sub.toLocaleString('es-MX', {
+              style: 'currency',
+              currency: 'MXN',
+              maximumFractionDigits: 0,
+            }),
+            subtotalForSum: sub,
+            isRange: false,
+          };
+        }
         const sub = rowAmountForPanelTotal(r);
         return {
           key: r.id,
@@ -1124,14 +1200,46 @@ function ChatView({
     }
 
     const backendNarrative = pickBackendClienteNarrative(
-      latestDraftQuote?.quote?.formalNarrative,
-      activeDraftForPanel?.quotePayload?.formalNarrative,
-      latestQuoteMessage?.draftQuote?.formalNarrative,
-      latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
-      panelDisplayQuote?.formalNarrative,
+      ...draftQuoteClienteMessageFields(latestDraftQuote?.quote),
+      ...draftQuoteClienteMessageFields(activeDraftForPanel?.quotePayload),
+      ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote),
+      ...draftQuoteClienteMessageFields(panelDisplayQuote),
     );
     if (backendNarrative) {
       return backendNarrative;
+    }
+
+    const rowsForPreview =
+      panelQuoteFrozen?.quoteRows?.length
+        ? panelQuoteFrozen.quoteRows
+        : quoteRows;
+    if (quoteRowsValidForNarrativeRegen(rowsForPreview)) {
+      const assembled = assembleDynamicClienteQuoteMessage(rowsForPreview, {
+        leadStatus: leadStatusForQuote,
+        contactName: selectedContact?.contactName ?? 'cliente',
+        appointmentWhen: conversationAppointmentWhen,
+        conversationId: selectedConvId ?? '',
+        mapsUrl: WORKSHOP_MAPS_URL,
+      });
+      if (assembled?.trim()) {
+        return assembled.trim();
+      }
+    }
+
+    if (hasPanelQuote && granTotalPanel > 0 && rowsForPreview.length > 0) {
+      const linesOnly = quoteRowsToToolEmojiLines(rowsForPreview);
+      const totalFmt = formatMoneyClienteQuoteMxAmount(
+        totalFromQuoteRows(rowsForPreview),
+      );
+      if (linesOnly.trim()) {
+        return [
+          `👋 Estimado cliente, aquí tienes el desglose de tu cotización:`,
+          '',
+          linesOnly,
+          '',
+          `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+        ].join('\n');
+      }
     }
 
     return 'Añade servicios al borrador para ver el mensaje al cliente.';
@@ -1146,6 +1254,13 @@ function ChatView({
     latestQuoteMessage?.draftQuote?.formalNarrative,
     latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
     panelDisplayQuote?.formalNarrative,
+    quoteRows,
+    hasPanelQuote,
+    granTotalPanel,
+    leadStatusForQuote,
+    selectedContact?.contactName,
+    conversationAppointmentWhen,
+    selectedConvId,
   ]);
 
   const previewNarrativeFromQuoteRows = useCallback(
@@ -1173,7 +1288,14 @@ function ChatView({
           throw new Error(t || `HTTP ${res.status}`);
         }
         const data = await res.json().catch(() => ({}));
-        const narrative = pickBackendClienteNarrative(data?.narrative);
+        const narrative = pickBackendClienteNarrative(
+          data?.narrative,
+          data?.generatedMessage,
+          data?.clientMessage,
+          data?.quotePayload?.generatedMessage,
+          data?.quotePayload?.clientMessage,
+          data?.quotePayload?.formalNarrative,
+        );
         if (narrative) {
           setDirtyPreviewNarrative(narrative);
           setClientePreviewLocalFallback('');
@@ -1375,7 +1497,7 @@ function ChatView({
     setClientePreviewLocalFallback('');
     setDirtyPreviewNarrative('');
     const savedNarrative = pickBackendClienteNarrative(
-      entity.quotePayload?.formalNarrative,
+      ...draftQuoteClienteMessageFields(entity.quotePayload),
     );
     freezePanelQuoteSnapshot(savedNarrative, entity.quotePayload);
     return entity;

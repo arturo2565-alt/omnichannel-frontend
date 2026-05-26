@@ -13,6 +13,9 @@ export const PANEL_PIEZA_INTERNAL_DAMAGES_CODE = 'PDI_INT';
 /** Refacción con nombre y precio manual (sin matriz). */
 export const PANEL_PIEZA_REFACCION_CODE = 'REFACCION';
 
+/** Baño de pintura completo (visión / catálogo por tamaño, no por código de golpe). */
+export const PANEL_PIEZA_BPC_CODE = 'BPC';
+
 /**
  * Opciones del panel: `code` (valor guardado / select), `label` (visible corto),
  * `fullName` (cliente / narrativa), `catalogPieza` (matriz de precios).
@@ -108,6 +111,15 @@ export const PANEL_PIEZA_OPTIONS = [
     catalogPieza: 'Estetica Exterior',
     group: 'Otros',
   },
+  {
+    code: PANEL_PIEZA_BPC_CODE,
+    label: 'BPC',
+    menuLabel: 'BPC — Baño de pintura completo',
+    fullName: 'Baño de Pintura Completo',
+    catalogPieza: 'Baño de Pintura Exterior',
+    group: 'Especiales',
+    banioCompleto: true,
+  },
 ];
 
 export const PANEL_PIEZA_CODES = new Set(PANEL_PIEZA_OPTIONS.map((o) => o.code));
@@ -138,6 +150,23 @@ aliasNormToCode.set(
 );
 aliasNormToCode.set(normalizePiezaText('refaccion'), PANEL_PIEZA_REFACCION_CODE);
 aliasNormToCode.set(normalizePiezaText('refacción'), PANEL_PIEZA_REFACCION_CODE);
+aliasNormToCode.set(normalizePiezaText('bpc'), PANEL_PIEZA_BPC_CODE);
+aliasNormToCode.set(
+  normalizePiezaText('bano de pintura completo'),
+  PANEL_PIEZA_BPC_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('baño de pintura completo'),
+  PANEL_PIEZA_BPC_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('bano de pintura exterior'),
+  PANEL_PIEZA_BPC_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('baño de pintura exterior'),
+  PANEL_PIEZA_BPC_CODE,
+);
 
 const catalogNamesByLengthDesc = [
   ...new Set(PANEL_PIEZA_OPTIONS.map((o) => o.catalogPieza)),
@@ -228,8 +257,24 @@ export function isRefaccionPieza(raw) {
   );
 }
 
+export function isBanioPinturaCompletoPieza(raw) {
+  const t = String(raw ?? '').trim();
+  if (t === PANEL_PIEZA_BPC_CODE) return true;
+  if (Boolean(findPanelPiezaOption(raw)?.banioCompleto)) return true;
+  const n = normalizePiezaText(t);
+  return (
+    n === 'bpc' ||
+    n.includes('bano de pintura completo') ||
+    n.includes('baño de pintura completo')
+  );
+}
+
 export function isSpecialPanelPieza(raw) {
-  return isInternalDamageRangePieza(raw) || isRefaccionPieza(raw);
+  return (
+    isInternalDamageRangePieza(raw) ||
+    isRefaccionPieza(raw) ||
+    isBanioPinturaCompletoPieza(raw)
+  );
 }
 
 /** Nombre completo para cliente / narrativa / API. */
