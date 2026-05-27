@@ -147,8 +147,39 @@ function App() {
         );
       });
     };
+    const onPeritajeAwaitingVehicle = (payload) => {
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.id === payload.conversationId
+            ? {
+                ...c,
+                ...(payload.isAutoPilotActive !== undefined
+                  ? { isAutoPilotActive: payload.isAutoPilotActive }
+                  : {}),
+              }
+            : c,
+        ),
+      );
+      if (payload.conversationId !== selectedConvId) {
+        fetchConversations();
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === payload.messageId
+            ? {
+                ...m,
+                damageAnalysis: payload.damageAnalysis ?? m.damageAnalysis,
+                draftQuote: null,
+              }
+            : m,
+        ),
+      );
+      fetchConversations();
+    };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
+    socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
     return () => { 
       socket.off('connect'); 
@@ -157,6 +188,7 @@ function App() {
       socket.off('aiSuggestion');
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
+      socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);
     };
   }, [selectedConvId]);

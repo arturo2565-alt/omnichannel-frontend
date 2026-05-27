@@ -854,7 +854,22 @@ function ChatView({
 
   const panelDisplayQuote = panelQuoteFrozen?.quote ?? latestDraftQuote?.quote;
 
-  const hasPanelQuote = Boolean(panelDisplayQuote || panelQuoteFrozen);
+  const isAwaitingVehicleBanioDraft =
+    activeDraftForPanel?.status === 'AWAITING_VEHICLE' ||
+    Boolean(
+      activeDraftForPanel?.damageAnalysis?.banioPinturaGate?.solicitarModeloBanio,
+    );
+
+  const hasPanelQuote =
+    !isAwaitingVehicleBanioDraft &&
+    Boolean(
+      panelQuoteFrozen ||
+        (panelDisplayQuote && Number(panelDisplayQuote.total ?? 0) > 0),
+    );
+
+  const hasPanelPeritajeOnly =
+    isAwaitingVehicleBanioDraft &&
+    Boolean(activeDraftForPanel?.damageAnalysis);
 
   const refreshConversationDraftQuotes = useCallback(
     async (signal) => {
@@ -877,6 +892,14 @@ function ChatView({
     [selectedConvId, apiBaseUrl],
   );
 
+  const banioGateRefreshKey = useMemo(() => {
+    const list = Array.isArray(messages) ? messages : [];
+    return list
+      .map((m) => m.damageAnalysis?.banioPinturaGate?.guardadoEn ?? '')
+      .filter(Boolean)
+      .join('|');
+  }, [messages]);
+
   useEffect(() => {
     if (!selectedConvId || !apiBaseUrl) {
       setConversationDraftRows([]);
@@ -891,6 +914,7 @@ function ChatView({
     latestDraftQuote?.messageId,
     latestDraftQuote?.quote?.total,
     latestDraftQuote?.quote?.subtotal,
+    banioGateRefreshKey,
     refreshConversationDraftQuotes,
   ]);
 
@@ -922,6 +946,50 @@ function ChatView({
         : '';
     return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}|bk:${itemsKey}|dk:${activeDraftForPanel?.id ?? ''}`;
   }, [latestDraftQuote, latestQuoteMessage, activeDraftForPanel]);
+
+  useEffect(() => {
+    if (panelQuoteFrozen) return;
+    if (activeDraftForPanel?.status !== 'AWAITING_VEHICLE') return;
+    const gate = activeDraftForPanel.damageAnalysis?.banioPinturaGate;
+    const inv =
+      (Array.isArray(gate?.inventarioVisual) && gate.inventarioVisual.length > 0
+        ? gate.inventarioVisual
+        : null) ??
+      (Array.isArray(activeDraftForPanel.damageAnalysis?.inventory) &&
+      activeDraftForPanel.damageAnalysis.inventory.length > 0
+        ? activeDraftForPanel.damageAnalysis.inventory
+        : null);
+    if (!inv?.length) return;
+    const msgImg =
+      latestQuoteMessage?.content && isImage(latestQuoteMessage.content)
+        ? [latestQuoteMessage.content]
+        : [];
+    const rows = inv.map((it, idx) => {
+      const rawSev = String(it.severidad ?? 'DM');
+      const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
+        ? rawSev
+        : coerceDamageLevelCode(rawSev);
+      let urls = urlsFromInventoryItem(it);
+      if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
+      return buildQuoteRowFromSource({
+        id: `row-await-${idx}-${String(it.pieza).slice(0, 24)}`,
+        piezaRaw: it.pieza,
+        severidadRaw: rawSev,
+        precio: 0,
+        urls,
+        descripcionTecnica: it.descripcionTecnica,
+      });
+    });
+    setQuoteRows(rows);
+    setQuoteFormDirty(false);
+    setQuoteSaveError('');
+  }, [
+    activeDraftForPanel?.id,
+    activeDraftForPanel?.status,
+    activeDraftForPanel?.damageAnalysis,
+    latestQuoteMessage?.content,
+    panelQuoteFrozen,
+  ]);
 
   useEffect(() => {
     if (panelQuoteFrozen) return;
@@ -2238,17 +2306,35 @@ function ChatView({
         <p className="text-center text-xs text-gray-500">
           Selecciona una conversación para ver cotizaciones de este chat.
         </p>
-      ) : !hasPanelQuote ? (
+      ) : !hasPanelQuote && !hasPanelPeritajeOnly ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white/80 p-4 text-center text-xs text-gray-500">
           Aquí aparecerá la cotización cuando el sistema analice una imagen (daños /
           taller) en este chat.
         </div>
       ) : (
         <>
+          {hasPanelPeritajeOnly ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs leading-relaxed text-amber-950">
+              <p className="font-semibold">Baño de pintura — falta marca y modelo</p>
+              <p className="mt-1 text-[11px]">
+                El peritaje visual ya está guardado. No hay precios hasta que el
+                cliente indique su vehículo; el asistente lo solicitará en el chat.
+              </p>
+              {activeDraftForPanel?.damageAnalysis?.banioPinturaGate
+                ?.resumenDanosVisuales ? (
+                <p className="mt-2 whitespace-pre-wrap text-[11px] text-amber-900/90">
+                  {
+                    activeDraftForPanel.damageAnalysis.banioPinturaGate
+                      .resumenDanosVisuales
+                  }
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {showCarousel ? renderQuoteEvidenceCarousel() : null}
-          {renderQuoteStatusBadges()}
+          {hasPanelQuote ? renderQuoteStatusBadges() : null}
           {renderQuoteDamagesSection()}
-          {panelConceptLinesFromRows.length > 0 ? (
+          {hasPanelQuote && panelConceptLinesFromRows.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
               <table className="w-full min-w-[280px] text-left">
                 <thead className="bg-gray-100 text-[9px] uppercase text-gray-600">
@@ -2296,7 +2382,7 @@ function ChatView({
               ) : null}
             </div>
           ) : null}
-          {renderQuoteClientMessageBlock()}
+          {hasPanelQuote ? renderQuoteClientMessageBlock() : null}
         </>
       )}
     </>
