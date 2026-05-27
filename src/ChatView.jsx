@@ -1424,7 +1424,18 @@ function ChatView({
       );
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        setClientePreviewLocalFallback('');
+        const freshNarrative = pickBackendClienteNarrative(
+          data?.clientMessage,
+          data?.generatedMessage,
+          data?.narrative,
+          ...draftQuoteClienteMessageFields(data?.quotePayload),
+        );
+        if (freshNarrative) {
+          setClientePreviewLocalFallback(freshNarrative);
+        } else {
+          setClientePreviewLocalFallback('');
+        }
+        setDirtyPreviewNarrative('');
         const msgId = data?.messageId ?? latestDraftQuote?.messageId ?? null;
         if (data?.quotePayload && msgId) {
           onDraftQuotePatched?.({
