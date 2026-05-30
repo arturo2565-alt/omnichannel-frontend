@@ -87,6 +87,8 @@ export const PANEL_PIEZA_OPTIONS = [
   { code: 'ED', label: 'ED', fullName: 'Estribos derechos', catalogPieza: 'Estribo', group: 'Estribos' },
   { code: 'FD', label: 'FD', fullName: 'Fascia delantera', catalogPieza: 'Fascia', group: 'Fascias' },
   { code: 'FT', label: 'FT', fullName: 'Fascia trasera', catalogPieza: 'Fascia', group: 'Fascias' },
+  { code: 'POI', label: 'POI', fullName: 'Poste izquierdo', catalogPieza: 'Poste', group: 'Postes' },
+  { code: 'POD', label: 'POD', fullName: 'Poste derecho', catalogPieza: 'Poste', group: 'Postes' },
   { code: 'Cofre', label: 'Cofre', fullName: 'Cofre', catalogPieza: 'Cofre', group: 'Otros' },
   {
     code: 'Tapa Cajuela',
@@ -126,12 +128,54 @@ export const PANEL_PIEZA_CODES = new Set(PANEL_PIEZA_OPTIONS.map((o) => o.code))
 
 const byCode = new Map(PANEL_PIEZA_OPTIONS.map((o) => [o.code, o]));
 
+/** Aliases explícitos cuando varias siglas comparten catalogPieza (p. ej. FD/FT → Fascia). */
+const EXPLICIT_PIEZA_ALIASES = {
+  'fascia delantera': 'FD',
+  'fascia delantero': 'FD',
+  'fascia trasera': 'FT',
+  'fascia trasero': 'FT',
+  'salpicadera izquierda': 'SI',
+  'salpicadera derecha': 'SD',
+  'salpicadera delantera izquierda': 'SI',
+  'salpicadera delantera derecha': 'SD',
+  'salpicadera del izquierda': 'SI',
+  'salpicadera trasera izquierda': 'STI',
+  'salpicadera trasera derecha': 'STD',
+  'puerta delantera izquierda': 'PDI',
+  'puerta delantera derecha': 'PDD',
+  'puerta trasera izquierda': 'PTI',
+  'puerta trasera derecha': 'PTD',
+  'estribo izquierdo': 'EI',
+  'estribos izquierdos': 'EI',
+  'estribo derecho': 'ED',
+  'estribos derechos': 'ED',
+  'poste izquierdo': 'POI',
+  'poste derecho': 'POD',
+};
+
+const catalogPiezaCodeCounts = new Map();
+for (const opt of PANEL_PIEZA_OPTIONS) {
+  if (!opt.catalogPieza) continue;
+  catalogPiezaCodeCounts.set(
+    opt.catalogPieza,
+    (catalogPiezaCodeCounts.get(opt.catalogPieza) ?? 0) + 1,
+  );
+}
+
 const aliasNormToCode = new Map();
 for (const opt of PANEL_PIEZA_OPTIONS) {
   aliasNormToCode.set(normalizePiezaText(opt.code), opt.code);
   aliasNormToCode.set(normalizePiezaText(opt.label), opt.code);
   aliasNormToCode.set(normalizePiezaText(opt.fullName), opt.code);
-  aliasNormToCode.set(normalizePiezaText(opt.catalogPieza), opt.code);
+  if (
+    opt.catalogPieza &&
+    catalogPiezaCodeCounts.get(opt.catalogPieza) === 1
+  ) {
+    aliasNormToCode.set(normalizePiezaText(opt.catalogPieza), opt.code);
+  }
+}
+for (const [alias, code] of Object.entries(EXPLICIT_PIEZA_ALIASES)) {
+  aliasNormToCode.set(normalizePiezaText(alias), code);
 }
 aliasNormToCode.set(normalizePiezaText('salpicadera delantera izquierda'), 'SI');
 aliasNormToCode.set(normalizePiezaText('salpicadera del izquierda'), 'SI');
@@ -192,11 +236,36 @@ export const PANEL_PIEZA_OPTION_GROUPS = [
   'Puertas',
   'Estribos',
   'Fascias',
+  'Postes',
   'Otros',
 ].map((group) => ({
   group,
   options: PANEL_PIEZA_OPTIONS.filter((o) => o.group === group),
 }));
+
+function disambiguatePanelOptionsFromText(text, candidates) {
+  if (!candidates?.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  const n = normalizePiezaText(text);
+  const wantsDelantera = /\bdelantera?\b|\bdel\b/.test(n);
+  const wantsTrasera = /\btrasera?\b|\btras\b/.test(n);
+  const wantsIzquierd = /\bizquierd/.test(n);
+  const wantsDerech = /\bderech/.test(n);
+
+  let pool = [...candidates];
+  if (wantsDelantera) {
+    pool = pool.filter((o) => /delantera|del\b/i.test(o.fullName));
+  } else if (wantsTrasera) {
+    pool = pool.filter((o) => /trasera|tras\b/i.test(o.fullName));
+  }
+  if (wantsIzquierd) {
+    pool = pool.filter((o) => /izquierd/i.test(o.fullName));
+  } else if (wantsDerech) {
+    pool = pool.filter((o) => /derech/i.test(o.fullName));
+  }
+  if (pool.length === 1) return pool[0];
+  return null;
+}
 
 export function findPanelPiezaOption(raw) {
   const t = String(raw ?? '').trim();
@@ -207,8 +276,16 @@ export function findPanelPiezaOption(raw) {
   if (direct) return byCode.get(direct) ?? null;
   for (const opt of PANEL_PIEZA_OPTIONS) {
     const fn = normalizePiezaText(opt.fullName);
-    if (n === fn || n.includes(fn) || fn.includes(n)) return opt;
+    if (n === fn) return opt;
   }
+  const partialHits = [];
+  for (const opt of PANEL_PIEZA_OPTIONS) {
+    const fn = normalizePiezaText(opt.fullName);
+    if (n.includes(fn) || fn.includes(n)) partialHits.push(opt);
+  }
+  const disambiguated = disambiguatePanelOptionsFromText(t, partialHits);
+  if (disambiguated) return disambiguated;
+  if (partialHits.length === 1) return partialHits[0];
   const canon = matchCatalogPiezaFromFreeText(t);
   if (canon) {
     const normCanon = normalizePiezaText(canon);
@@ -216,6 +293,8 @@ export function findPanelPiezaOption(raw) {
       (o) => normalizePiezaText(o.catalogPieza) === normCanon,
     );
     if (hits.length === 1) return hits[0];
+    const fromCanon = disambiguatePanelOptionsFromText(t, hits);
+    if (fromCanon) return fromCanon;
   }
   return null;
 }
