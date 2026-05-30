@@ -364,6 +364,16 @@ function App() {
     );
   };
 
+  const handleClienteEsperandoAtendido = (conversationId) => {
+    setContacts((prev) =>
+      prev.map((c) =>
+        c.id === conversationId ?
+          { ...c, clienteEsperandoAfuera: false }
+        : c,
+      ),
+    );
+  };
+
   return (
     <>
     {deleteToast ? (
@@ -396,6 +406,7 @@ function App() {
       apiBaseUrl={API_BASE_URL}
       onDraftQuotePatched={handleDraftQuotePatched}
       onDeleteConversation={handleDeleteConversation}
+      onClienteEsperandoAtendido={handleClienteEsperandoAtendido}
     />
     </>
   );

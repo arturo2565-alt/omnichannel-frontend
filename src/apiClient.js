@@ -84,9 +84,27 @@ export function apiFetchWebhook(path, options) {
   return apiFetch(joinBase(API_BASE_URL, path), options);
 }
 
-/** Rutas en la raíz Nest (`/auth`, `/catalog`). */
+/** Rutas en la raíz Nest (`/auth`, `/catalog`, `/api/chats`). */
 export function apiFetchOrigin(path, options) {
   return apiFetch(joinBase(API_ORIGIN_URL, path), options);
+}
+
+/**
+ * Kill switch: apaga alarma Twilio de cliente esperando afuera.
+ * @param {string} conversationId
+ */
+export async function markClienteAtendidoRequest(conversationId) {
+  const id = String(conversationId ?? '').trim();
+  if (!id) {
+    throw new Error('Falta el id de la conversación.');
+  }
+  const res = await apiFetchOrigin(`/api/chats/${id}/marcar-atendido`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  return res.json();
 }
 
 /**

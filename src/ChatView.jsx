@@ -9,7 +9,7 @@ import {
   calculateEstimate,
   coerceDamageLevelCode,
 } from './autofix-pricing';
-import { apiFetchWebhook } from './apiClient.js';
+import { apiFetchWebhook, markClienteAtendidoRequest } from './apiClient.js';
 import {
   PANEL_PIEZA_OPTION_GROUPS,
   findPanelPiezaOption,
@@ -689,6 +689,7 @@ function ChatView({
   apiBaseUrl,
   onDraftQuotePatched,
   onDeleteConversation,
+  onClienteEsperandoAtendido,
 }) {
 
   const { logout } = useAuth();
@@ -735,6 +736,45 @@ function ChatView({
 
   const [autoPilotToggleBusy, setAutoPilotToggleBusy] = useState(false);
   const [deleteConversationBusy, setDeleteConversationBusy] = useState(false);
+  const [arrivalAlarmBusy, setArrivalAlarmBusy] = useState(false);
+  const [arrivalAlarmDismissedLocal, setArrivalAlarmDismissedLocal] =
+    useState(false);
+
+  useEffect(() => {
+    setArrivalAlarmDismissedLocal(false);
+  }, [selectedConvId]);
+
+  const clienteEsperandoAfuera = useMemo(() => {
+    if (arrivalAlarmDismissedLocal) return false;
+    return Boolean(selectedContact?.clienteEsperandoAfuera);
+  }, [
+    arrivalAlarmDismissedLocal,
+    selectedContact?.clienteEsperandoAfuera,
+  ]);
+
+  const handleConfirmarRecepcionCliente = useCallback(async () => {
+    if (!selectedConvId || arrivalAlarmBusy || !clienteEsperandoAfuera) return;
+    setArrivalAlarmBusy(true);
+    try {
+      await markClienteAtendidoRequest(selectedConvId);
+      setArrivalAlarmDismissedLocal(true);
+      onClienteEsperandoAtendido?.(selectedConvId);
+      onRefresh?.();
+    } catch (e) {
+      console.error('marcar-atendido:', e);
+      window.alert(
+        e?.message ?? 'No se pudo confirmar la recepción del cliente.',
+      );
+    } finally {
+      setArrivalAlarmBusy(false);
+    }
+  }, [
+    selectedConvId,
+    arrivalAlarmBusy,
+    clienteEsperandoAfuera,
+    onClienteEsperandoAtendido,
+    onRefresh,
+  ]);
 
   const handleDeleteConversationClick = useCallback(async () => {
     if (!selectedConvId || deleteConversationBusy || !onDeleteConversation) return;
@@ -2717,7 +2757,20 @@ function ChatView({
 
             {/* --- SECCIÓN DE ENTRADA PRO (Multimedia + IA) --- */}
             <div className="p-4 border-t bg-gray-50 mt-auto z-10">
-              
+              {clienteEsperandoAfuera ? (
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmarRecepcionCliente()}
+                  disabled={arrivalAlarmBusy}
+                  className="arrival-alarm-banner mb-3 w-full rounded-xl border-2 border-red-950 px-4 py-4 text-center text-sm font-extrabold uppercase tracking-wide text-white shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:cursor-wait disabled:opacity-80 sm:text-base"
+                  aria-live="assertive"
+                >
+                  {arrivalAlarmBusy ?
+                    '⏳ Confirmando recepción…'
+                  : '🚨 CLIENTE AFUERA - CLIC PARA CONFIRMAR RECEPCIÓN'}
+                </button>
+              ) : null}
+
               <QuickReplies
                 suggestions={quickReplySuggestions}
                 onPick={setReply}
