@@ -958,17 +958,6 @@ function ChatView({
     refreshConversationDraftQuotes,
   ]);
 
-  useEffect(() => {
-    const onQuoteUpdated = (ev) => {
-      const detail = ev?.detail;
-      if (!detail || detail.conversationId !== selectedConvId) return;
-      void refreshConversationDraftQuotes();
-    };
-    window.addEventListener('omnichannel:quoteUpdated', onQuoteUpdated);
-    return () =>
-      window.removeEventListener('omnichannel:quoteUpdated', onQuoteUpdated);
-  }, [selectedConvId, refreshConversationDraftQuotes]);
-
   const quoteSyncKey = useMemo(() => {
     if (!latestDraftQuote?.quote) return '';
     const q = latestDraftQuote.quote;
@@ -1090,13 +1079,8 @@ function ChatView({
           severidadRaw: rawSev,
           precio,
           urls,
-          lineDescription: it.nombreVisible || lineAt?.description,
-          descripcionTecnica:
-            it.descripcionTecnica ||
-            it.evidencia ||
-            (it.fuente === 'texto_cliente'
-              ? 'Declarado por cliente (sin foto)'
-              : ''),
+          lineDescription: lineAt?.description,
+          descripcionTecnica: it.descripcionTecnica,
         });
       });
       setQuoteRows(rows);

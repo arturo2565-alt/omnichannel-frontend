@@ -177,16 +177,7 @@ function App() {
       );
       fetchConversations();
     };
-    const onQuoteUpdated = (payload) => {
-      mergeQuoteIntoMessages(payload);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('omnichannel:quoteUpdated', { detail: payload }),
-        );
-      }
-    };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
-    socket.on('quoteUpdated', onQuoteUpdated);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
     socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
@@ -196,7 +187,6 @@ function App() {
       socket.off('newMessage'); 
       socket.off('aiSuggestion');
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
-      socket.off('quoteUpdated', onQuoteUpdated);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);
