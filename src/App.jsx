@@ -177,7 +177,16 @@ function App() {
       );
       fetchConversations();
     };
+    const onCotizacionActualizada = (payload) => {
+      mergeQuoteIntoMessages(payload);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('omnichannel:cotizacionActualizada', { detail: payload }),
+        );
+      }
+    };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
+    socket.on('cotizacionActualizada', onCotizacionActualizada);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
     socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
@@ -187,6 +196,7 @@ function App() {
       socket.off('newMessage'); 
       socket.off('aiSuggestion');
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
+      socket.off('cotizacionActualizada', onCotizacionActualizada);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);

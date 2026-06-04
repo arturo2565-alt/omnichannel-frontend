@@ -958,6 +958,23 @@ function ChatView({
     refreshConversationDraftQuotes,
   ]);
 
+  useEffect(() => {
+    const onCotizacionActualizada = (ev) => {
+      const detail = ev?.detail;
+      if (!detail || detail.conversationId !== selectedConvId) return;
+      void refreshConversationDraftQuotes();
+    };
+    window.addEventListener(
+      'omnichannel:cotizacionActualizada',
+      onCotizacionActualizada,
+    );
+    return () =>
+      window.removeEventListener(
+        'omnichannel:cotizacionActualizada',
+        onCotizacionActualizada,
+      );
+  }, [selectedConvId, refreshConversationDraftQuotes]);
+
   const quoteSyncKey = useMemo(() => {
     if (!latestDraftQuote?.quote) return '';
     const q = latestDraftQuote.quote;
