@@ -962,6 +962,15 @@ function ChatView({
     const onCotizacionActualizada = (ev) => {
       const detail = ev?.detail;
       if (!detail || detail.conversationId !== selectedConvId) return;
+      const debeDesbloquear =
+        detail.panelDesbloqueado === true ||
+        detail.requiresHumanReview === true ||
+        (detail.statusAnterior === 'APPROVED' &&
+          detail.cotizacionStatus === 'PENDING_APPROVAL');
+      if (debeDesbloquear) {
+        setPanelQuoteFrozen(null);
+        setQuoteFormDirty(false);
+      }
       void refreshConversationDraftQuotes();
     };
     window.addEventListener(
