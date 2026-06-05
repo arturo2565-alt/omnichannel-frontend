@@ -688,6 +688,8 @@ function ChatView({
   isSending,       // Estado de carga del envío
   apiBaseUrl,
   onDraftQuotePatched,
+  draftQuoteLevePatch,
+  onDraftQuoteLeveConsumed,
   onDeleteConversation,
   onClienteEsperandoAtendido,
 }) {
@@ -958,32 +960,6 @@ function ChatView({
     refreshConversationDraftQuotes,
   ]);
 
-  useEffect(() => {
-    const onCotizacionActualizada = (ev) => {
-      const detail = ev?.detail;
-      if (!detail || detail.conversationId !== selectedConvId) return;
-      const debeDesbloquear =
-        detail.panelDesbloqueado === true ||
-        detail.requiresHumanReview === true ||
-        (detail.statusAnterior === 'APPROVED' &&
-          detail.cotizacionStatus === 'PENDING_APPROVAL');
-      if (debeDesbloquear) {
-        setPanelQuoteFrozen(null);
-        setQuoteFormDirty(false);
-      }
-      void refreshConversationDraftQuotes();
-    };
-    window.addEventListener(
-      'omnichannel:cotizacionActualizada',
-      onCotizacionActualizada,
-    );
-    return () =>
-      window.removeEventListener(
-        'omnichannel:cotizacionActualizada',
-        onCotizacionActualizada,
-      );
-  }, [selectedConvId, refreshConversationDraftQuotes]);
-
   const quoteSyncKey = useMemo(() => {
     if (!latestDraftQuote?.quote) return '';
     const q = latestDraftQuote.quote;
@@ -1012,6 +988,60 @@ function ChatView({
         : '';
     return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}|bk:${itemsKey}|dk:${activeDraftForPanel?.id ?? ''}`;
   }, [latestDraftQuote, latestQuoteMessage, activeDraftForPanel]);
+
+  useEffect(() => {
+    if (!draftQuoteLevePatch) return;
+    if (
+      draftQuoteLevePatch.conversationId &&
+      draftQuoteLevePatch.conversationId !== selectedConvId
+    ) {
+      onDraftQuoteLeveConsumed?.();
+      return;
+    }
+
+    const {
+      piezaAgregada,
+      precioPieza,
+      nuevoTotalGlobal,
+      draftQuote,
+      damageAnalysis,
+      messageId,
+    } = draftQuoteLevePatch;
+
+    onDraftQuotePatched?.({ messageId, draftQuote, damageAnalysis });
+    void refreshConversationDraftQuotes();
+
+    const piezaCode = normalizePiezaForPanel(piezaAgregada ?? '');
+    const newRow = {
+      id: `row-leve-${Date.now()}`,
+      pieza: piezaCode,
+      severidad: 'DL',
+      precioInput: String(Math.round(Number(precioPieza) || 0)),
+      urls_origen: [],
+    };
+
+    setPanelQuoteFrozen((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        quote: {
+          ...prev.quote,
+          ...(draftQuote ?? {}),
+          total: nuevoTotalGlobal,
+          subtotal: nuevoTotalGlobal,
+        },
+        quoteRows: [...prev.quoteRows, newRow],
+      };
+    });
+
+    onDraftQuoteLeveConsumed?.();
+  }, [
+    draftQuoteLevePatch,
+    selectedConvId,
+    onDraftQuotePatched,
+    onDraftQuoteLeveConsumed,
+    refreshConversationDraftQuotes,
+  ]);
 
   useEffect(() => {
     if (panelQuoteFrozen) return;
