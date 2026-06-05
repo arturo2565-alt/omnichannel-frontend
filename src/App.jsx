@@ -179,6 +179,7 @@ function App() {
     };
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
+    socket.on('activeQuoteUpdated', mergeQuoteIntoMessages);
     socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
     return () => { 
@@ -188,6 +189,7 @@ function App() {
       socket.off('aiSuggestion');
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
+      socket.off('activeQuoteUpdated', mergeQuoteIntoMessages);
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);
     };
