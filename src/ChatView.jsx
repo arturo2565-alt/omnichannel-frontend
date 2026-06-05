@@ -688,8 +688,6 @@ function ChatView({
   isSending,       // Estado de carga del envío
   apiBaseUrl,
   onDraftQuotePatched,
-  draftQuoteLevePatch,
-  onDraftQuoteLeveConsumed,
   onDeleteConversation,
   onClienteEsperandoAtendido,
 }) {
@@ -988,60 +986,6 @@ function ChatView({
         : '';
     return `${latestDraftQuote.messageId}|${q.total}|${invKey}|${linesKey}|bk:${itemsKey}|dk:${activeDraftForPanel?.id ?? ''}`;
   }, [latestDraftQuote, latestQuoteMessage, activeDraftForPanel]);
-
-  useEffect(() => {
-    if (!draftQuoteLevePatch) return;
-    if (
-      draftQuoteLevePatch.conversationId &&
-      draftQuoteLevePatch.conversationId !== selectedConvId
-    ) {
-      onDraftQuoteLeveConsumed?.();
-      return;
-    }
-
-    const {
-      piezaAgregada,
-      precioPieza,
-      nuevoTotalGlobal,
-      draftQuote,
-      damageAnalysis,
-      messageId,
-    } = draftQuoteLevePatch;
-
-    onDraftQuotePatched?.({ messageId, draftQuote, damageAnalysis });
-    void refreshConversationDraftQuotes();
-
-    const piezaCode = normalizePiezaForPanel(piezaAgregada ?? '');
-    const newRow = {
-      id: `row-leve-${Date.now()}`,
-      pieza: piezaCode,
-      severidad: 'DL',
-      precioInput: String(Math.round(Number(precioPieza) || 0)),
-      urls_origen: [],
-    };
-
-    setPanelQuoteFrozen((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        quote: {
-          ...prev.quote,
-          ...(draftQuote ?? {}),
-          total: nuevoTotalGlobal,
-          subtotal: nuevoTotalGlobal,
-        },
-        quoteRows: [...prev.quoteRows, newRow],
-      };
-    });
-
-    onDraftQuoteLeveConsumed?.();
-  }, [
-    draftQuoteLevePatch,
-    selectedConvId,
-    onDraftQuotePatched,
-    onDraftQuoteLeveConsumed,
-    refreshConversationDraftQuotes,
-  ]);
 
   useEffect(() => {
     if (panelQuoteFrozen) return;

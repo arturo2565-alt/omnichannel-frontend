@@ -41,7 +41,6 @@ function App() {
   const [filePreviewUrl, setFilePreviewUrl] = useState(null); 
   const [isSending, setIsSending] = useState(false);
   const [deleteToast, setDeleteToast] = useState('');
-  const [draftQuoteLevePatch, setDraftQuoteLevePatch] = useState(null);
 
   // --- LÓGICA DE CARGA ---
   const fetchConversations = async () => {
@@ -182,25 +181,6 @@ function App() {
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
     socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
-    const onDraftQuoteLeveAdded = (payload) => {
-      if (payload.messageId) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === payload.messageId
-              ? {
-                  ...m,
-                  damageAnalysis:
-                    payload.damageAnalysis ?? m.damageAnalysis,
-                  draftQuote: payload.draftQuote ?? m.draftQuote,
-                }
-              : m,
-          ),
-        );
-      }
-      setDraftQuoteLevePatch(payload);
-      fetchConversations();
-    };
-    socket.on('draftQuoteLeveAdded', onDraftQuoteLeveAdded);
     return () => { 
       socket.off('connect'); 
       socket.off('disconnect'); 
@@ -210,7 +190,6 @@ function App() {
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);
-      socket.off('draftQuoteLeveAdded', onDraftQuoteLeveAdded);
     };
   }, [selectedConvId]);
 
@@ -426,8 +405,6 @@ function App() {
       isSending={isSending}
       apiBaseUrl={API_BASE_URL}
       onDraftQuotePatched={handleDraftQuotePatched}
-      draftQuoteLevePatch={draftQuoteLevePatch}
-      onDraftQuoteLeveConsumed={() => setDraftQuoteLevePatch(null)}
       onDeleteConversation={handleDeleteConversation}
       onClienteEsperandoAtendido={handleClienteEsperandoAtendido}
     />
