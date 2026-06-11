@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
 import { apiFetchWebhook } from './apiClient.js';
+import { API_ORIGIN_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 
 const STATUS_LABEL = {
@@ -43,6 +45,23 @@ export default function CalendarPage() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    const socket = io(API_ORIGIN_URL, { transports: ['websocket'] });
+    const onAppointment = () => {
+      void load();
+    };
+    socket.on('appointmentCreated', onAppointment);
+    socket.on('conversationLeadUpdated', (payload) => {
+      if (String(payload?.status ?? '').toLowerCase() === 'agendado') {
+        void load();
+      }
+    });
+    return () => {
+      socket.off('appointmentCreated', onAppointment);
+      socket.disconnect();
+    };
   }, [load]);
 
   const patchStatus = async (id, status) => {

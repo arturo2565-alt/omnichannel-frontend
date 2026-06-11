@@ -896,11 +896,12 @@ function ChatView({
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
 
-  /** Borrador editable del carrito (solo PENDING / complemento). */
+  /** Borrador editable del carrito activo (siempre editable, incluso post-envío). */
   const activeDraftForPanel = useMemo(() => {
-    const pending = conversationCart?.pendingDraft;
-    if (pending?.id) {
-      return pending;
+    const fromCart =
+      conversationCart?.activeDraft ?? conversationCart?.pendingDraft;
+    if (fromCart?.id) {
+      return fromCart;
     }
     if (!Array.isArray(conversationDraftRows) || conversationDraftRows.length === 0) {
       return null;
@@ -920,6 +921,7 @@ function ChatView({
       ) ?? null
     );
   }, [
+    conversationCart?.activeDraft,
     conversationCart?.pendingDraft,
     conversationDraftRows,
     latestDraftQuote?.messageId,
@@ -944,6 +946,21 @@ function ChatView({
 
   const cartEstado = conversationCart?.estadoCarrito ?? null;
   const isComplementCart = cartEstado === 'complemento_pendiente';
+  const isCartModifiedSinceSend =
+    cartEstado === 'activo_modificado' ||
+    Boolean(conversationCart?.hayCambiosDesdeUltimoEnvio);
+  const lastSendSnapshot =
+    conversationCart?.lastSendSnapshot ??
+    activeDraftForPanel?.quotePayload?.lastSendSnapshot ??
+    null;
+  const quoteSendCount = Math.max(
+    0,
+    Number(
+      conversationCart?.sendCount ??
+        activeDraftForPanel?.quotePayload?.sendCount ??
+        0,
+    ) || 0,
+  );
   const isCartApprovedOnly =
     cartEstado === 'aprobado' && !conversationCart?.pendingDraft?.id;
   const cartTotalGlobal = Math.max(
@@ -1259,16 +1276,9 @@ function ChatView({
   );
 
   const granTotalDisplay = useMemo(() => {
-    if (isComplementCart && cartTotalGlobal > 0) return cartTotalGlobal;
-    if (isCartApprovedOnly && cartTotalAprobado > 0) return cartTotalAprobado;
+    if (cartTotalGlobal > 0 && !quoteFormDirty) return cartTotalGlobal;
     return granTotalPanel;
-  }, [
-    isComplementCart,
-    isCartApprovedOnly,
-    cartTotalGlobal,
-    cartTotalAprobado,
-    granTotalPanel,
-  ]);
+  }, [cartTotalGlobal, granTotalPanel, quoteFormDirty]);
 
   const panelHasInternalDamageRange = useMemo(
     () => panelRowsForDisplay.some((r) => isInternalDamageRangePieza(r.pieza)),
@@ -2023,29 +2033,34 @@ function ChatView({
 
   const renderQuoteStatusBadges = () => (
     <div className="flex flex-wrap items-center gap-2">
+      {quoteSendCount > 0 ? (
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-sky-900">
+          Enviada {quoteSendCount > 1 ? `×${quoteSendCount}` : ''}
+        </span>
+      ) : null}
+      {isCartModifiedSinceSend ? (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+          Cambios desde último envío
+        </span>
+      ) : null}
       {cartEstado === 'complemento_pendiente' ? (
         <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-900">
           Complemento pendiente
-        </span>
-      ) : null}
-      {cartEstado === 'aprobado' ? (
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-900">
-          Cotización aprobada
         </span>
       ) : null}
       <span
         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
           isPanelReadOnly
             ? 'bg-slate-200 text-slate-700'
-            : 'bg-amber-100 text-amber-800'
+            : 'bg-emerald-100 text-emerald-800'
         }`}
       >
         {isPanelReadOnly
           ? 'Referencia (solo lectura)'
-          : isComplementCart
-            ? 'Editando complemento'
+          : quoteSendCount > 0
+            ? 'Carrito activo (editable)'
             : panelDisplayQuote?.status === 'PENDING_APPROVAL'
-              ? 'Pendiente de aprobación'
+              ? 'Pendiente de envío'
               : panelDisplayQuote?.status ?? 'Cotización'}
       </span>
       {panelDisplayQuote?.reference ? (
@@ -2070,52 +2085,54 @@ function ChatView({
     </div>
   );
 
-  const renderApprovedCartSection = () => {
-    if (!approvedCartDisplayLines.length) return null;
+  const renderLastSendSnapshotSection = () => {
+    if (!lastSendSnapshot?.desglose?.length) return null;
+    const sentTotal = Math.max(0, Math.round(Number(lastSendSnapshot.total) || 0));
     return (
-      <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 shadow-sm">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
-          Ya aprobado —{' '}
-          {cartTotalAprobado.toLocaleString('es-MX', {
+      <section className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 shadow-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-900">
+          Último envío al cliente —{' '}
+          {sentTotal.toLocaleString('es-MX', {
             style: 'currency',
             currency: 'MXN',
             maximumFractionDigits: 0,
           })}
         </p>
         <ul className="mt-2 space-y-1">
-          {approvedCartDisplayLines.map((line) => (
+          {lastSendSnapshot.desglose.map((line, idx) => (
             <li
-              key={line.key}
-              className="flex items-center justify-between gap-2 text-[11px] text-emerald-950"
+              key={`${line.pieza}-${idx}`}
+              className="flex items-center justify-between gap-2 text-[11px] text-sky-950"
             >
               <span className="min-w-0 truncate">{line.pieza}</span>
               <span className="shrink-0 font-medium tabular-nums">
-                {line.precioMx.toLocaleString('es-MX', {
-                  style: 'currency',
-                  currency: 'MXN',
-                  maximumFractionDigits: 0,
-                })}
+                {Math.max(0, Math.round(Number(line.precioMx) || 0)).toLocaleString(
+                  'es-MX',
+                  {
+                    style: 'currency',
+                    currency: 'MXN',
+                    maximumFractionDigits: 0,
+                  },
+                )}
               </span>
             </li>
           ))}
         </ul>
-        {isComplementCart ? (
-          <p className="mt-2 text-[9px] leading-snug text-indigo-900">
-            Los servicios editables abajo son complemento nuevo (chat o panel).
-          </p>
-        ) : isCartApprovedOnly ? (
-          <p className="mt-2 text-[9px] leading-snug text-emerald-900/90">
-            Puedes añadir servicios manuales para abrir un complemento pendiente.
+        {isCartModifiedSinceSend ? (
+          <p className="mt-2 text-[9px] leading-snug text-amber-900">
+            El carrito editable abajo refleja cambios posteriores (chat o panel).
           </p>
         ) : null}
       </section>
     );
   };
 
+  const renderApprovedCartSection = () => renderLastSendSnapshotSection();
+
   const renderQuoteDamagesSection = () => (
     <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-        {isComplementCart ? 'Complemento (editable)' : 'Daños detectados'} (
+        Carrito activo (
         {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
           ? panelQuoteFrozen.quoteRows
           : quoteRows
@@ -2416,18 +2433,7 @@ function ChatView({
         </p>
         {isComplementCart ? (
           <p className="mt-1 text-[9px] leading-snug text-emerald-900/90">
-            Aprobado:{' '}
-            {cartTotalAprobado.toLocaleString('es-MX', {
-              style: 'currency',
-              currency: 'MXN',
-              maximumFractionDigits: 0,
-            })}{' '}
-            + complemento:{' '}
-            {cartTotalComplemento.toLocaleString('es-MX', {
-              style: 'currency',
-              currency: 'MXN',
-              maximumFractionDigits: 0,
-            })}
+            Total actual del carrito editable
           </p>
         ) : (
           <p className="text-[9px] text-emerald-800/90">
@@ -2439,11 +2445,7 @@ function ChatView({
         )}
       </div>
 
-      {isCartApprovedOnly && !activeDraftForPanel?.id ? (
-        <p className="text-[10px] text-emerald-900">
-          Cotización aprobada. Añade servicios abajo para registrar un complemento.
-        </p>
-      ) : !activeDraftForPanel?.id ? (
+      {!activeDraftForPanel?.id ? (
         <p className="text-[10px] text-amber-800">
           Obteniendo enlace del borrador en el servidor…
         </p>
