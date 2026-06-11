@@ -815,6 +815,33 @@ function ChatView({
   ]);
 
   const [conversationDraftRows, setConversationDraftRows] = useState([]);
+  /** Vista agregada del carrito global (aprobado + complemento/pendiente). */
+  const [conversationCart, setConversationCart] = useState(null);
+
+  const refreshConversationCart = useCallback(
+    async (signal) => {
+      if (!selectedConvId || !apiBaseUrl) {
+        setConversationCart(null);
+        return;
+      }
+      try {
+        const r = await apiFetchWebhook(
+          `/conversations/${selectedConvId}/cart`,
+          signal ? { signal } : {},
+        );
+        if (!r.ok) {
+          setConversationCart(null);
+          return;
+        }
+        const data = await r.json().catch(() => null);
+        setConversationCart(data && typeof data === 'object' ? data : null);
+      } catch (e) {
+        if (signal?.aborted || e?.name === 'AbortError') return;
+        setConversationCart(null);
+      }
+    },
+    [selectedConvId, apiBaseUrl],
+  );
 
   const latestDraftQuote = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
@@ -869,20 +896,85 @@ function ChatView({
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
 
-  /** Borrador de sesión: prioriza fila cuyo messageId coincide con el mensaje que muestra la cotización; si no, el más reciente del API. */
+  /** Borrador editable del carrito (solo PENDING / complemento). */
   const activeDraftForPanel = useMemo(() => {
+    const pending = conversationCart?.pendingDraft;
+    if (pending?.id) {
+      return pending;
+    }
     if (!Array.isArray(conversationDraftRows) || conversationDraftRows.length === 0) {
       return null;
     }
+    const pendingRow = conversationDraftRows.find(
+      (r) => String(r.status ?? '').toUpperCase() === 'PENDING_APPROVAL',
+    );
+    if (pendingRow) return pendingRow;
     if (!latestDraftQuote?.messageId) {
-      return conversationDraftRows[0] ?? null;
+      return null;
     }
     return (
-      conversationDraftRows.find((r) => r.messageId === latestDraftQuote.messageId) ??
-      conversationDraftRows[0] ??
-      null
+      conversationDraftRows.find(
+        (r) =>
+          r.messageId === latestDraftQuote.messageId &&
+          String(r.status ?? '').toUpperCase() === 'PENDING_APPROVAL',
+      ) ?? null
     );
-  }, [conversationDraftRows, latestDraftQuote?.messageId]);
+  }, [
+    conversationCart?.pendingDraft,
+    conversationDraftRows,
+    latestDraftQuote?.messageId,
+  ]);
+
+  /** Referencia de cotización aprobada (solo lectura en panel). */
+  const approvedDraftReference = useMemo(() => {
+    if (
+      Array.isArray(conversationCart?.approvedDrafts) &&
+      conversationCart.approvedDrafts.length > 0
+    ) {
+      return conversationCart.approvedDrafts[
+        conversationCart.approvedDrafts.length - 1
+      ];
+    }
+    return (
+      conversationDraftRows.find(
+        (r) => String(r.status ?? '').toUpperCase() === 'APPROVED',
+      ) ?? null
+    );
+  }, [conversationCart?.approvedDrafts, conversationDraftRows]);
+
+  const cartEstado = conversationCart?.estadoCarrito ?? null;
+  const isComplementCart = cartEstado === 'complemento_pendiente';
+  const isCartApprovedOnly =
+    cartEstado === 'aprobado' && !conversationCart?.pendingDraft?.id;
+  const cartTotalGlobal = Math.max(
+    0,
+    Math.round(Number(conversationCart?.totalGlobal) || 0),
+  );
+  const cartTotalAprobado = Math.max(
+    0,
+    Math.round(Number(conversationCart?.totalAprobado) || 0),
+  );
+  const cartTotalComplemento = Math.max(
+    0,
+    Math.round(Number(conversationCart?.totalComplemento) || 0),
+  );
+
+  const approvedCartDisplayLines = useMemo(() => {
+    const drafts = conversationCart?.approvedDrafts;
+    if (!Array.isArray(drafts) || !drafts.length) return [];
+    const out = [];
+    for (const draft of drafts) {
+      const items = Array.isArray(draft.items) ? draft.items : [];
+      for (const it of items) {
+        out.push({
+          key: `${draft.id}-${it.id ?? it.pieza}`,
+          pieza: getPiezaClienteDisplayName(String(it.pieza ?? '')),
+          precioMx: Math.max(0, Math.round(Number(it.precioMx) || 0)),
+        });
+      }
+    }
+    return out;
+  }, [conversationCart?.approvedDrafts]);
 
   useEffect(() => {
     setClientePreviewLocalFallback('');
@@ -892,7 +984,11 @@ function ChatView({
 
   const isPanelReadOnly = Boolean(panelQuoteFrozen) && !quoteFormDirty;
 
-  const panelDisplayQuote = panelQuoteFrozen?.quote ?? latestDraftQuote?.quote;
+  const panelDisplayQuote =
+    panelQuoteFrozen?.quote ??
+    latestDraftQuote?.quote ??
+    activeDraftForPanel?.quotePayload ??
+    approvedDraftReference?.quotePayload;
 
   const isAwaitingVehicleBanioDraft =
     activeDraftForPanel?.status === 'AWAITING_VEHICLE' ||
@@ -904,7 +1000,10 @@ function ChatView({
     !isAwaitingVehicleBanioDraft &&
     Boolean(
       panelQuoteFrozen ||
-        (panelDisplayQuote && Number(panelDisplayQuote.total ?? 0) > 0),
+        isCartApprovedOnly ||
+        isComplementCart ||
+        (panelDisplayQuote && Number(panelDisplayQuote.total ?? 0) > 0) ||
+        cartTotalGlobal > 0,
     );
 
   const hasPanelPeritajeOnly =
@@ -932,6 +1031,16 @@ function ChatView({
     [selectedConvId, apiBaseUrl],
   );
 
+  const refreshConversationQuoteData = useCallback(
+    async (signal) => {
+      await Promise.all([
+        refreshConversationDraftQuotes(signal),
+        refreshConversationCart(signal),
+      ]);
+    },
+    [refreshConversationDraftQuotes, refreshConversationCart],
+  );
+
   const banioGateRefreshKey = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
     return list
@@ -946,7 +1055,7 @@ function ChatView({
       return;
     }
     const ac = new AbortController();
-    void refreshConversationDraftQuotes(ac.signal);
+    void refreshConversationQuoteData(ac.signal);
     return () => ac.abort();
   }, [
     selectedConvId,
@@ -955,7 +1064,7 @@ function ChatView({
     latestDraftQuote?.quote?.total,
     latestDraftQuote?.quote?.subtotal,
     banioGateRefreshKey,
-    refreshConversationDraftQuotes,
+    refreshConversationQuoteData,
   ]);
 
   const quoteSyncKey = useMemo(() => {
@@ -1148,6 +1257,18 @@ function ChatView({
     () => panelRowsForDisplay.reduce((acc, r) => acc + rowAmountForPanelTotal(r), 0),
     [panelRowsForDisplay],
   );
+
+  const granTotalDisplay = useMemo(() => {
+    if (isComplementCart && cartTotalGlobal > 0) return cartTotalGlobal;
+    if (isCartApprovedOnly && cartTotalAprobado > 0) return cartTotalAprobado;
+    return granTotalPanel;
+  }, [
+    isComplementCart,
+    isCartApprovedOnly,
+    cartTotalGlobal,
+    cartTotalAprobado,
+    granTotalPanel,
+  ]);
 
   const panelHasInternalDamageRange = useMemo(
     () => panelRowsForDisplay.some((r) => isInternalDamageRangePieza(r.pieza)),
@@ -1483,7 +1604,7 @@ function ChatView({
             draftQuote: data.quotePayload,
           });
         }
-        await refreshConversationDraftQuotes();
+        await refreshConversationQuoteData();
         setQuoteSaveError('');
       } else {
         throw new Error(`HTTP ${res.status}`);
@@ -1503,7 +1624,7 @@ function ChatView({
     previewNarrativeFromQuoteRows,
     latestDraftQuote?.messageId,
     onDraftQuotePatched,
-    refreshConversationDraftQuotes,
+    refreshConversationQuoteData,
   ]);
 
   const freezePanelQuoteSnapshot = useCallback(
@@ -1519,9 +1640,9 @@ function ChatView({
   );
 
   const persistDraftQuotePatch = useCallback(async () => {
-    if (!apiBaseUrl || !activeDraftForPanel?.id) {
+    if (!apiBaseUrl || !selectedConvId) {
       const msg =
-        'Aún no se puede guardar: espera a cargar el borrador o recarga la conversación.';
+        'Aún no se puede guardar: espera a cargar la conversación o recarga.';
       setQuoteSaveError(msg);
       throw new Error(msg);
     }
@@ -1597,10 +1718,13 @@ function ChatView({
       }
     }
     setQuoteSaveError('');
-    const res = await apiFetchWebhook(`/quote/${activeDraftForPanel.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ inventoryLines: linesPayload }),
-    });
+    const res = await apiFetchWebhook(
+      `/conversations/${selectedConvId}/cart`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ inventoryLines: linesPayload }),
+      },
+    );
     if (!res.ok) {
       const t = await res.text().catch(() => '');
       throw new Error(t || `HTTP ${res.status}`);
@@ -1611,7 +1735,7 @@ function ChatView({
       draftQuote: entity.quotePayload,
       damageAnalysis: entity.damageAnalysis,
     });
-    await refreshConversationDraftQuotes();
+    await refreshConversationQuoteData();
     setQuoteFormDirty(false);
     setClientePreviewLocalFallback('');
     setDirtyPreviewNarrative('');
@@ -1626,7 +1750,7 @@ function ChatView({
     quoteRows,
     onDraftQuotePatched,
     selectedConvId,
-    refreshConversationDraftQuotes,
+    refreshConversationQuoteData,
     freezePanelQuoteSnapshot,
   ]);
 
@@ -1899,6 +2023,16 @@ function ChatView({
 
   const renderQuoteStatusBadges = () => (
     <div className="flex flex-wrap items-center gap-2">
+      {cartEstado === 'complemento_pendiente' ? (
+        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-900">
+          Complemento pendiente
+        </span>
+      ) : null}
+      {cartEstado === 'aprobado' ? (
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-900">
+          Cotización aprobada
+        </span>
+      ) : null}
       <span
         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
           isPanelReadOnly
@@ -1908,9 +2042,11 @@ function ChatView({
       >
         {isPanelReadOnly
           ? 'Referencia (solo lectura)'
-          : panelDisplayQuote?.status === 'PENDING_APPROVAL'
-            ? 'Pendiente de aprobación'
-            : panelDisplayQuote?.status ?? 'Cotización'}
+          : isComplementCart
+            ? 'Editando complemento'
+            : panelDisplayQuote?.status === 'PENDING_APPROVAL'
+              ? 'Pendiente de aprobación'
+              : panelDisplayQuote?.status ?? 'Cotización'}
       </span>
       {panelDisplayQuote?.reference ? (
         <span className="text-[10px] text-gray-500">
@@ -1934,10 +2070,52 @@ function ChatView({
     </div>
   );
 
+  const renderApprovedCartSection = () => {
+    if (!approvedCartDisplayLines.length) return null;
+    return (
+      <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 shadow-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
+          Ya aprobado —{' '}
+          {cartTotalAprobado.toLocaleString('es-MX', {
+            style: 'currency',
+            currency: 'MXN',
+            maximumFractionDigits: 0,
+          })}
+        </p>
+        <ul className="mt-2 space-y-1">
+          {approvedCartDisplayLines.map((line) => (
+            <li
+              key={line.key}
+              className="flex items-center justify-between gap-2 text-[11px] text-emerald-950"
+            >
+              <span className="min-w-0 truncate">{line.pieza}</span>
+              <span className="shrink-0 font-medium tabular-nums">
+                {line.precioMx.toLocaleString('es-MX', {
+                  style: 'currency',
+                  currency: 'MXN',
+                  maximumFractionDigits: 0,
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {isComplementCart ? (
+          <p className="mt-2 text-[9px] leading-snug text-indigo-900">
+            Los servicios editables abajo son complemento nuevo (chat o panel).
+          </p>
+        ) : isCartApprovedOnly ? (
+          <p className="mt-2 text-[9px] leading-snug text-emerald-900/90">
+            Puedes añadir servicios manuales para abrir un complemento pendiente.
+          </p>
+        ) : null}
+      </section>
+    );
+  };
+
   const renderQuoteDamagesSection = () => (
     <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-        Daños detectados (
+        {isComplementCart ? 'Complemento (editable)' : 'Daños detectados'} (
         {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
           ? panelQuoteFrozen.quoteRows
           : quoteRows
@@ -2230,21 +2408,42 @@ function ChatView({
           Gran total
         </p>
         <p className="text-xl font-bold tabular-nums text-emerald-950">
-          {granTotalPanel.toLocaleString('es-MX', {
+          {granTotalDisplay.toLocaleString('es-MX', {
             style: 'currency',
             currency: 'MXN',
             maximumFractionDigits: 0,
           })}
         </p>
-        <p className="text-[9px] text-emerald-800/90">
-          Suma de todos los precios de la lista
-          {panelHasInternalDamageRange
-            ? ' (usa el mínimo de daños internos; el máximo es referencia)'
-            : ''}
-        </p>
+        {isComplementCart ? (
+          <p className="mt-1 text-[9px] leading-snug text-emerald-900/90">
+            Aprobado:{' '}
+            {cartTotalAprobado.toLocaleString('es-MX', {
+              style: 'currency',
+              currency: 'MXN',
+              maximumFractionDigits: 0,
+            })}{' '}
+            + complemento:{' '}
+            {cartTotalComplemento.toLocaleString('es-MX', {
+              style: 'currency',
+              currency: 'MXN',
+              maximumFractionDigits: 0,
+            })}
+          </p>
+        ) : (
+          <p className="text-[9px] text-emerald-800/90">
+            Suma de todos los precios de la lista
+            {panelHasInternalDamageRange
+              ? ' (usa el mínimo de daños internos; el máximo es referencia)'
+              : ''}
+          </p>
+        )}
       </div>
 
-      {!activeDraftForPanel?.id ? (
+      {isCartApprovedOnly && !activeDraftForPanel?.id ? (
+        <p className="text-[10px] text-emerald-900">
+          Cotización aprobada. Añade servicios abajo para registrar un complemento.
+        </p>
+      ) : !activeDraftForPanel?.id ? (
         <p className="text-[10px] text-amber-800">
           Obteniendo enlace del borrador en el servidor…
         </p>
@@ -2384,6 +2583,7 @@ function ChatView({
           ) : null}
           {showCarousel ? renderQuoteEvidenceCarousel() : null}
           {hasPanelQuote ? renderQuoteStatusBadges() : null}
+          {renderApprovedCartSection()}
           {renderQuoteDamagesSection()}
           {hasPanelQuote && panelConceptLinesFromRows.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white text-[11px] shadow-sm">
@@ -2419,12 +2619,22 @@ function ChatView({
               </table>
               <div className="border-t border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-xs font-bold text-gray-900">
                 Total (base):{' '}
-                {granTotalPanel.toLocaleString('es-MX', {
+                {granTotalDisplay.toLocaleString('es-MX', {
                   style: 'currency',
                   currency: 'MXN',
                   maximumFractionDigits: 0,
                 })}
               </div>
+              {isComplementCart ? (
+                <p className="border-t border-indigo-100 bg-indigo-50/50 px-2 py-1.5 text-[9px] leading-snug text-indigo-950">
+                  Gran total conversación (aprobado + complemento):{' '}
+                  {cartTotalGlobal.toLocaleString('es-MX', {
+                    style: 'currency',
+                    currency: 'MXN',
+                    maximumFractionDigits: 0,
+                  })}
+                </p>
+              ) : null}
               {panelHasInternalDamageRange ? (
                 <p className="border-t border-amber-100 bg-amber-50/60 px-2 py-1.5 text-[9px] leading-snug text-amber-950">
                   Los posibles daños internos se cotizan por rango; el gran total
