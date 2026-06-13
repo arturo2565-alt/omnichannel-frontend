@@ -61,7 +61,8 @@ export default function CatalogAdminPage() {
   const [integralSeedSubmitting, setIntegralSeedSubmitting] = useState(false);
   const [seedMessage, setSeedMessage] = useState(null);
 
-  const [simPiece, setSimPiece] = useState('');
+  const [simKind, setSimKind] = useState('piece');
+  const [simItem, setSimItem] = useState('');
   const [simBase, setSimBase] = useState(2900);
   const [simSize, setSimSize] = useState('Mediano');
   const [simPremium, setSimPremium] = useState(false);
@@ -98,16 +99,23 @@ export default function CatalogAdminPage() {
       }
       setIntegralBaseline(ibMap);
 
-      if (bases.length && !simPiece) {
-        setSimPiece(bases[0].servicio);
-        setSimBase(bases[0].basePrice ?? 2900);
+      if (!simItem) {
+        if (bases.length) {
+          setSimKind('piece');
+          setSimItem(bases[0].servicio);
+          setSimBase(bases[0].basePrice ?? 2900);
+        } else if (integrals.length) {
+          setSimKind('integral');
+          setSimItem(integrals[0].servicio);
+          setSimBase(integrals[0].basePrice ?? 7000);
+        }
       }
     } catch (e) {
       setError(e?.message ?? 'No se pudo cargar el catálogo');
     } finally {
       setLoading(false);
     }
-  }, [simPiece]);
+  }, [simItem]);
 
   useEffect(() => {
     void load();
@@ -229,17 +237,28 @@ export default function CatalogAdminPage() {
     }
   };
 
-  const simResult = useMemo(
-    () =>
-      computePiecePrice({
+  const simCatalogOptions = useMemo(
+    () => (simKind === 'integral' ? integralBases : pieceBases),
+    [simKind, integralBases, pieceBases],
+  );
+
+  const simResult = useMemo(() => {
+    if (simKind === 'integral') {
+      return computeIntegralPrice({
         basePrice: simBase,
         sizeTier: simSize,
         isPremium: simPremium,
-        damageMagnitude: simSeverity,
         rules,
-      }),
-    [simBase, simSize, simPremium, simSeverity, rules],
-  );
+      });
+    }
+    return computePiecePrice({
+      basePrice: simBase,
+      sizeTier: simSize,
+      isPremium: simPremium,
+      damageMagnitude: simSeverity,
+      rules,
+    });
+  }, [simKind, simBase, simSize, simPremium, simSeverity, rules]);
 
   const simBreakdown = useMemo(() => {
     const r = mergeRules(rules);
@@ -248,9 +267,12 @@ export default function CatalogAdminPage() {
     const afterPrem = simPremium
       ? Math.round(afterSize * r.premiumFactor)
       : afterSize;
+    if (simKind === 'integral') {
+      return { base, afterSize, afterPrem, afterSev: afterPrem };
+    }
     const afterSev = Math.round(afterPrem * (r.severityFactors[simSeverity] ?? 1));
     return { base, afterSize, afterPrem, afterSev };
-  }, [simBase, simSize, simPremium, simSeverity, rules]);
+  }, [simKind, simBase, simSize, simPremium, simSeverity, rules]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
@@ -615,18 +637,43 @@ export default function CatalogAdminPage() {
                 <h2 className="text-lg font-bold">Simulador</h2>
                 <div className="mt-4 space-y-3">
                   <label className="block">
-                    <span className="text-sm font-semibold text-gray-700">Pieza</span>
+                    <span className="text-sm font-semibold text-gray-700">Tipo</span>
                     <select
-                      value={simPiece}
+                      value={simKind}
+                      onChange={(e) => {
+                        const kind = e.target.value;
+                        setSimKind(kind);
+                        const list = kind === 'integral' ? integralBases : pieceBases;
+                        const first = list[0];
+                        if (first) {
+                          setSimItem(first.servicio);
+                          setSimBase(first.basePrice ?? 0);
+                        } else {
+                          setSimItem('');
+                          setSimBase(0);
+                        }
+                      }}
+                      className="mt-1 w-full rounded-lg border px-3 py-2"
+                    >
+                      <option value="piece">Pieza (hojalatería)</option>
+                      <option value="integral">Servicio integral</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-700">
+                      {simKind === 'integral' ? 'Servicio' : 'Pieza'}
+                    </span>
+                    <select
+                      value={simItem}
                       onChange={(e) => {
                         const svc = e.target.value;
-                        setSimPiece(svc);
-                        const hit = pieceBases.find((p) => p.servicio === svc);
+                        setSimItem(svc);
+                        const hit = simCatalogOptions.find((p) => p.servicio === svc);
                         if (hit) setSimBase(hit.basePrice);
                       }}
                       className="mt-1 w-full rounded-lg border px-3 py-2"
                     >
-                      {pieceBases.map((p) => (
+                      {simCatalogOptions.map((p) => (
                         <option key={p.servicio} value={p.servicio}>
                           {p.servicio}
                         </option>
@@ -665,24 +712,31 @@ export default function CatalogAdminPage() {
                     />
                     <span className="text-sm font-semibold">Marca premium</span>
                   </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-gray-700">Severidad</span>
-                    <select
-                      value={simSeverity}
-                      onChange={(e) => setSimSeverity(e.target.value)}
-                      className="mt-1 w-full rounded-lg border px-3 py-2"
-                    >
-                      {DAMAGE_MAGNITUDES.map((m) => (
-                        <option key={m} value={m}>
-                          {DAMAGE_MAGNITUDE_LABELS[m]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {simKind === 'piece' ? (
+                    <label className="block">
+                      <span className="text-sm font-semibold text-gray-700">Severidad</span>
+                      <select
+                        value={simSeverity}
+                        onChange={(e) => setSimSeverity(e.target.value)}
+                        className="mt-1 w-full rounded-lg border px-3 py-2"
+                      >
+                        {DAMAGE_MAGNITUDES.map((m) => (
+                          <option key={m} value={m}>
+                            {DAMAGE_MAGNITUDE_LABELS[m]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
               </div>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5">
                 <h3 className="font-bold text-emerald-900">Desglose</h3>
+                <p className="mt-1 text-xs text-emerald-800">
+                  {simKind === 'integral'
+                    ? 'Servicios integrales: base × tamaño × premium (sin severidad de daño).'
+                    : 'Piezas: base × tamaño × premium × severidad.'}
+                </p>
                 <ul className="mt-3 space-y-2 text-sm text-emerald-950">
                   <li>Base: {formatMx(simBreakdown.base)}</li>
                   <li>
@@ -691,9 +745,11 @@ export default function CatalogAdminPage() {
                   {simPremium ? (
                     <li>× Premium: {formatMx(simBreakdown.afterPrem)}</li>
                   ) : null}
-                  <li>
-                    × {DAMAGE_MAGNITUDE_LABELS[simSeverity]}: {formatMx(simBreakdown.afterSev)}
-                  </li>
+                  {simKind === 'piece' ? (
+                    <li>
+                      × {DAMAGE_MAGNITUDE_LABELS[simSeverity]}: {formatMx(simBreakdown.afterSev)}
+                    </li>
+                  ) : null}
                   <li className="border-t border-emerald-200 pt-2 text-lg font-bold">
                     Total: {formatMx(simResult)}
                   </li>

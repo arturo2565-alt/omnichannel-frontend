@@ -1301,11 +1301,9 @@ export default function AiSettingsPage() {
             </section>
 
             <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-gray-900">
-                Prompt de chat y citas
-              </h2>
+              <h2 className="text-lg font-bold text-gray-900">SystemPrompt</h2>
               <p className="mt-1 text-sm text-gray-500">
-                Tono, reglas de agendamiento y uso de la herramienta{' '}
+                Tono del asistente, reglas de agendamiento y uso de la herramienta{' '}
                 <code className="rounded bg-gray-100 px-1 text-xs">createAppointment</code>. Si
                 describes aquí cómo hablar con el cliente, incluye que, cuando el sistema envíe una
                 autorización de cotización (mensaje interno que comienza por{' '}
@@ -1313,7 +1311,7 @@ export default function AiSettingsPage() {
                 cliente debe ser clara pero conversacional.
               </p>
               <label className="mt-4 block">
-                <span className="sr-only">Prompt de chat</span>
+                <span className="sr-only">SystemPrompt</span>
                 <textarea
                   value={form.chatAppointmentPrompt}
                   onChange={(e) => update('chatAppointmentPrompt', e.target.value)}
