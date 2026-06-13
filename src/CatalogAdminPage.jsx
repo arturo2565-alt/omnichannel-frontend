@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetchOrigin } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
+  computeIntegralPrice,
   computePiecePrice,
   DAMAGE_MAGNITUDES,
   DAMAGE_MAGNITUDE_LABELS,
   formatMx,
+  INTEGRAL_PREVIEW_SCENARIOS,
   mergeRules,
   PREVIEW_SCENARIOS,
   SIZE_TIER_LABELS,
@@ -14,9 +16,8 @@ import {
 const TABS = [
   { id: 'rules', label: 'Reglas globales' },
   { id: 'pieces', label: 'Piezas (base)' },
-  { id: 'instant', label: 'Baño e InstantQuote' },
+  { id: 'integral', label: 'Servicios integrales' },
   { id: 'simulator', label: 'Simulador' },
-  { id: 'advanced', label: 'Avanzado' },
 ];
 
 function parsePositiveInt(raw) {
@@ -51,17 +52,13 @@ export default function CatalogAdminPage() {
   const [pieceBases, setPieceBases] = useState([]);
   const [pieceBaseline, setPieceBaseline] = useState(() => new Map());
 
-  const [instantRows, setInstantRows] = useState([]);
-  const [instantBaseline, setInstantBaseline] = useState(() => new Map());
-
-  const [allRows, setAllRows] = useState([]);
-  const [allBaseline, setAllBaseline] = useState(() => new Map());
+  const [integralBases, setIntegralBases] = useState([]);
+  const [integralBaseline, setIntegralBaseline] = useState(() => new Map());
 
   const [savingRules, setSavingRules] = useState(false);
   const [savingPieces, setSavingPieces] = useState(false);
-  const [savingInstant, setSavingInstant] = useState(false);
-  const [importLegacySubmitting, setImportLegacySubmitting] = useState(false);
-  const [instantSeedSubmitting, setInstantSeedSubmitting] = useState(false);
+  const [savingIntegral, setSavingIntegral] = useState(false);
+  const [integralSeedSubmitting, setIntegralSeedSubmitting] = useState(false);
   const [seedMessage, setSeedMessage] = useState(null);
 
   const [simPiece, setSimPiece] = useState('');
@@ -75,14 +72,9 @@ export default function CatalogAdminPage() {
     setSaveOk(false);
     setLoading(true);
     try {
-      const [viewRes, matrixRes] = await Promise.all([
-        apiFetchOrigin('/catalog/catalog-view'),
-        apiFetchOrigin('/catalog/price-matrix'),
-      ]);
+      const viewRes = await apiFetchOrigin('/catalog/catalog-view');
       if (!viewRes.ok) throw new Error(await parseJsonError(viewRes));
-      if (!matrixRes.ok) throw new Error(await parseJsonError(matrixRes));
       const view = await viewRes.json();
-      const matrix = await matrixRes.json();
 
       const mergedRules = mergeRules(view.rules);
       setRules(mergedRules);
@@ -96,29 +88,15 @@ export default function CatalogAdminPage() {
       }
       setPieceBaseline(pbMap);
 
-      const instant = Array.isArray(view.instantRows) ? view.instantRows : [];
-      setInstantRows(instant);
-      const iMap = new Map();
-      for (const r of instant) {
-        iMap.set(r.id, {
-          precio: r.precio,
-          diasEntrega: r.diasEntrega,
-          isInstantService: !!r.isInstantService,
-        });
+      const integrals = Array.isArray(view.integralBases) ? view.integralBases : [];
+      setIntegralBases(
+        integrals.map((p) => ({ ...p, basePrice: p.basePrice ?? 0 })),
+      );
+      const ibMap = new Map();
+      for (const p of integrals) {
+        ibMap.set(p.servicio, { basePrice: p.basePrice, diasEntrega: p.diasEntrega });
       }
-      setInstantBaseline(iMap);
-
-      const list = Array.isArray(matrix?.rows) ? matrix.rows : [];
-      setAllRows(list);
-      const m = new Map();
-      for (const row of list) {
-        m.set(row.id, {
-          precio: row.precio,
-          diasEntrega: row.diasEntrega,
-          isInstantService: !!row.isInstantService,
-        });
-      }
-      setAllBaseline(m);
+      setIntegralBaseline(ibMap);
 
       if (bases.length && !simPiece) {
         setSimPiece(bases[0].servicio);
@@ -149,20 +127,14 @@ export default function CatalogAdminPage() {
     return false;
   }, [pieceBases, pieceBaseline]);
 
-  const instantDirty = useMemo(() => {
-    for (const r of instantRows) {
-      const b = instantBaseline.get(r.id);
-      if (!b) continue;
-      if (
-        b.precio !== r.precio ||
-        b.diasEntrega !== r.diasEntrega ||
-        !!b.isInstantService !== !!r.isInstantService
-      ) {
-        return true;
-      }
+  const integralDirty = useMemo(() => {
+    for (const p of integralBases) {
+      const b = integralBaseline.get(p.servicio);
+      if (!b) return true;
+      if (b.basePrice !== p.basePrice || b.diasEntrega !== p.diasEntrega) return true;
     }
     return false;
-  }, [instantRows, instantBaseline]);
+  }, [integralBases, integralBaseline]);
 
   const handleSaveRules = async () => {
     setSavingRules(true);
@@ -211,28 +183,17 @@ export default function CatalogAdminPage() {
     }
   };
 
-  const handleSaveInstant = async () => {
-    setSavingInstant(true);
+  const handleSaveIntegral = async () => {
+    setSavingIntegral(true);
     setError(null);
     try {
-      const updates = instantRows
-        .filter((r) => {
-          const b = instantBaseline.get(r.id);
-          return (
-            b &&
-            (b.precio !== r.precio ||
-              b.diasEntrega !== r.diasEntrega ||
-              !!b.isInstantService !== !!r.isInstantService)
-          );
-        })
-        .map((r) => ({
-          id: r.id,
-          precio: r.precio,
-          diasEntrega: r.diasEntrega,
-          isInstantService: !!r.isInstantService,
-        }));
-      if (!updates.length) return;
-      const r = await apiFetchOrigin('/catalog/price-matrix', {
+      const updates = integralBases.map((p) => ({
+        servicio: p.servicio,
+        basePrice: p.basePrice,
+        diasEntrega: p.diasEntrega,
+        matrixRowId: p.matrixRowId,
+      }));
+      const r = await apiFetchOrigin('/catalog/integral-bases', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
@@ -241,32 +202,14 @@ export default function CatalogAdminPage() {
       await load();
       setSaveOk(true);
     } catch (e) {
-      setError(e?.message ?? 'Error al guardar InstantQuote');
+      setError(e?.message ?? 'Error al guardar servicios integrales');
     } finally {
-      setSavingInstant(false);
+      setSavingIntegral(false);
     }
   };
 
-  const handleImportLegacyJs = async () => {
-    setImportLegacySubmitting(true);
-    setError(null);
-    try {
-      const r = await apiFetchOrigin('/catalog/import-legacy-js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ diasEntrega: 3 }),
-      });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      await load();
-    } catch (err) {
-      setError(err?.message ?? 'No se pudo importar');
-    } finally {
-      setImportLegacySubmitting(false);
-    }
-  };
-
-  const handleImportInstantQuote = async () => {
-    setInstantSeedSubmitting(true);
+  const handleSeedIntegralServices = async () => {
+    setIntegralSeedSubmitting(true);
     setError(null);
     try {
       const r = await apiFetchOrigin('/catalog/seed-instant-quote-matrix', {
@@ -276,13 +219,13 @@ export default function CatalogAdminPage() {
       if (!r.ok) throw new Error(await parseJsonError(r));
       const data = await r.json();
       setSeedMessage(
-        `InstantQuote: ${data?.upserted ?? 0} fila(s). Total: ${data?.totalInDb ?? ''}.`,
+        `Servicios integrales: ${data?.upserted ?? 0} fila(s). Total en BD: ${data?.totalInDb ?? ''}.`,
       );
       await load();
     } catch (err) {
-      setError(err?.message ?? 'No se pudo cargar InstantQuote');
+      setError(err?.message ?? 'No se pudo cargar el seed');
     } finally {
-      setInstantSeedSubmitting(false);
+      setIntegralSeedSubmitting(false);
     }
   };
 
@@ -320,8 +263,8 @@ export default function CatalogAdminPage() {
             </p>
             <h1 className="text-xl font-bold text-gray-900">Catálogo de precios</h1>
             <p className="mt-0.5 text-sm text-gray-500">
-              Base por pieza + multiplicadores (tamaño, premium, severidad). Baños e InstantQuote
-              aparte.
+              Base por pieza o servicio integral + multiplicadores (tamaño, premium; severidad solo
+              en piezas).
             </p>
             <nav className="mt-4 flex flex-wrap gap-2">
               {TABS.map((t) => (
@@ -556,58 +499,71 @@ export default function CatalogAdminPage() {
                 </table>
                 {pieceBases.length === 0 ? (
                   <p className="px-4 py-8 text-center text-gray-500">
-                    Sin piezas base. Importa la matriz legacy en Avanzado.
+                    Sin piezas base en catálogo.
                   </p>
                 ) : null}
               </div>
             </section>
-          ) : tab === 'instant' ? (
+          ) : tab === 'integral' ? (
             <section>
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleImportInstantQuote()}
-                  disabled={instantSeedSubmitting}
-                  className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-950"
-                >
-                  {instantSeedSubmitting ? 'Cargando…' : 'Cargar InstantQuote'}
-                </button>
-                <button
-                  type="button"
-                  disabled={!instantDirty || savingInstant}
-                  onClick={() => void handleSaveInstant()}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  {savingInstant ? 'Guardando…' : 'Guardar cambios'}
-                </button>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-gray-600">
+                  Baño de pintura, estética y cerámico. Una base (Compacto · estándar); el motor
+                  aplica tamaño y premium. Sin severidad de daño.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSeedIntegralServices()}
+                    disabled={integralSeedSubmitting}
+                    className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-950"
+                  >
+                    {integralSeedSubmitting ? 'Cargando…' : 'Cargar seed'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!integralDirty || savingIntegral}
+                    onClick={() => void handleSaveIntegral()}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {savingIntegral ? 'Guardando…' : 'Guardar bases'}
+                  </button>
+                </div>
               </div>
+              {seedMessage ? (
+                <p className="mb-3 text-sm text-sky-800">{seedMessage}</p>
+              ) : null}
               <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 py-2 text-left">Servicio</th>
-                      <th className="px-3 py-2 text-left">Severidad / tamaño</th>
-                      <th className="px-3 py-2 text-left">Precio</th>
+                      <th className="px-3 py-2 text-left">Base (MXN)</th>
                       <th className="px-3 py-2 text-left">Días</th>
-                      <th className="px-3 py-2 text-left">Instant</th>
+                      {INTEGRAL_PREVIEW_SCENARIOS.map((sc) => (
+                        <th key={sc.key} className="px-3 py-2 text-left text-xs">
+                          {sc.label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {instantRows.map((row) => (
-                      <tr key={row.id}>
+                    {integralBases.map((row) => (
+                      <tr key={row.servicio}>
                         <td className="px-3 py-2 font-medium">{row.servicio}</td>
-                        <td className="px-3 py-2">{row.severidad}</td>
                         <td className="px-3 py-2">
                           <input
                             type="number"
                             min={0}
-                            className="w-24 rounded border px-2 py-1"
-                            value={row.precio}
+                            className="w-28 rounded border px-2 py-1"
+                            value={row.basePrice}
                             onChange={(e) => {
                               const n = parsePositiveInt(e.target.value);
                               if (Number.isNaN(n)) return;
-                              setInstantRows((prev) =>
-                                prev.map((r) => (r.id === row.id ? { ...r, precio: n } : r)),
+                              setIntegralBases((prev) =>
+                                prev.map((r) =>
+                                  r.servicio === row.servicio ? { ...r, basePrice: n } : r,
+                                ),
                               );
                             }}
                           />
@@ -621,33 +577,36 @@ export default function CatalogAdminPage() {
                             onChange={(e) => {
                               const n = parsePositiveInt(e.target.value);
                               if (Number.isNaN(n)) return;
-                              setInstantRows((prev) =>
+                              setIntegralBases((prev) =>
                                 prev.map((r) =>
-                                  r.id === row.id ? { ...r, diasEntrega: n } : r,
+                                  r.servicio === row.servicio ? { ...r, diasEntrega: n } : r,
                                 ),
                               );
                             }}
                           />
                         </td>
-                        <td className="px-3 py-2">
-                          <input
-                            type="checkbox"
-                            checked={!!row.isInstantService}
-                            onChange={(e) =>
-                              setInstantRows((prev) =>
-                                prev.map((r) =>
-                                  r.id === row.id
-                                    ? { ...r, isInstantService: e.target.checked }
-                                    : r,
-                                ),
-                              )
-                            }
-                          />
-                        </td>
+                        {INTEGRAL_PREVIEW_SCENARIOS.map((sc) => (
+                          <td key={sc.key} className="px-3 py-2 text-gray-700">
+                            {formatMx(
+                              computeIntegralPrice({
+                                basePrice: row.basePrice,
+                                sizeTier: sc.sizeTier,
+                                isPremium: sc.isPremium,
+                                rules,
+                              }),
+                            )}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {integralBases.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-gray-500">
+                    Sin servicios integrales. Usa &quot;Cargar seed&quot; para baño, estética y
+                    cerámico.
+                  </p>
+                ) : null}
               </div>
             </section>
           ) : tab === 'simulator' ? (
@@ -741,51 +700,7 @@ export default function CatalogAdminPage() {
                 </ul>
               </div>
             </section>
-          ) : (
-            <section>
-              <div className="mb-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleImportLegacyJs()}
-                  disabled={importLegacySubmitting}
-                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold"
-                >
-                  {importLegacySubmitting ? 'Importando…' : 'Importar matriz legacy (JS)'}
-                </button>
-              </div>
-              <p className="mb-3 text-sm text-amber-800">
-                Vista cruda de <code className="rounded bg-amber-100 px-1">price_matrix</code>.
-                Preferir pestañas Reglas y Piezas.
-              </p>
-              <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Servicio</th>
-                      <th className="px-3 py-2 text-left">Severidad</th>
-                      <th className="px-3 py-2 text-left">Precio</th>
-                      <th className="px-3 py-2 text-left">Días</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allRows.slice(0, 200).map((row) => (
-                      <tr key={row.id} className="border-t border-gray-100">
-                        <td className="px-3 py-1">{row.servicio}</td>
-                        <td className="px-3 py-1">{row.severidad}</td>
-                        <td className="px-3 py-1">{row.precio}</td>
-                        <td className="px-3 py-1">{row.diasEntrega}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {allRows.length > 200 ? (
-                  <p className="px-3 py-2 text-xs text-gray-500">
-                    Mostrando 200 de {allRows.length} filas.
-                  </p>
-                ) : null}
-              </div>
-            </section>
-          )}
+          ) : null}
         </main>
       </div>
     </div>

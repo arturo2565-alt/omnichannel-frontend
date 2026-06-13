@@ -77,6 +77,22 @@ export function computePiecePrice({
   return roundCatalogPrice(price, r.roundToMx);
 }
 
+/** Servicio integral: base × tamaño × premium (sin severidad). */
+export function computeIntegralPrice({
+  basePrice,
+  sizeTier = 'Compacto',
+  isPremium = false,
+  rules,
+}) {
+  const r = mergeRules(rules);
+  const base = Math.max(0, Math.round(Number(basePrice) || 0));
+  if (base <= 0) return 0;
+  let price = base;
+  price *= r.sizeTierFactors[sizeTier] ?? 1;
+  if (isPremium) price *= r.premiumFactor;
+  return roundCatalogPrice(price, r.roundToMx);
+}
+
 export function formatMx(n) {
   return `$${Math.round(Number(n) || 0).toLocaleString('es-MX')}`;
 }
@@ -86,4 +102,11 @@ export const PREVIEW_SCENARIOS = [
   { key: 'compacto', label: 'Compacto std · Leve', sizeTier: 'Compacto', isPremium: false, magnitude: 'LEVE' },
   { key: 'medianoPrem', label: 'Mediano prem · Leve', sizeTier: 'Mediano', isPremium: true, magnitude: 'LEVE' },
   { key: 'xlFuerte', label: 'XL prem · Fuerte', sizeTier: 'XL', isPremium: true, magnitude: 'FUERTE' },
+];
+
+/** Escenarios de vista previa para servicios integrales (sin severidad). */
+export const INTEGRAL_PREVIEW_SCENARIOS = [
+  { key: 'compacto', label: 'Compacto std', sizeTier: 'Compacto', isPremium: false },
+  { key: 'medianoPrem', label: 'Mediano prem', sizeTier: 'Mediano', isPremium: true },
+  { key: 'xlPrem', label: 'XL prem', sizeTier: 'XL', isPremium: true },
 ];
