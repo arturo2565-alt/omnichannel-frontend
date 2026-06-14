@@ -436,6 +436,23 @@ function pickBackendClienteNarrative(...candidates) {
   return '';
 }
 
+/** Narrativa al cliente desde borrador/cart/mensaje (todas las fuentes del panel). */
+function collectPanelBackendClienteNarrative({
+  latestDraftQuote,
+  activeDraftForPanel,
+  latestQuoteMessage,
+  panelDisplayQuote,
+}) {
+  return pickBackendClienteNarrative(
+    ...draftQuoteClienteMessageFields(latestDraftQuote?.quote),
+    ...draftQuoteClienteMessageFields(activeDraftForPanel?.quotePayload),
+    ...draftQuoteClienteMessageFields(activeDraftForPanel),
+    ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote),
+    ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote?.quotePayload),
+    ...draftQuoteClienteMessageFields(panelDisplayQuote),
+  );
+}
+
 /** Campos del borrador que pueden traer el mensaje al cliente (BPC y reparaciones comunes). */
 function draftQuoteClienteMessageFields(draft) {
   if (!draft || typeof draft !== 'object') return [];
@@ -886,6 +903,7 @@ function ChatView({
   const [panelQuoteFrozen, setPanelQuoteFrozen] = useState(null);
   const [isRegeneratingClientePreview, setIsRegeneratingClientePreview] =
     useState(false);
+  const clienteNarrativeHydratedRef = useRef('');
   const [quoteSaveError, setQuoteSaveError] = useState('');
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [isSendingFinalQuote, setIsSendingFinalQuote] = useState(false);
@@ -991,6 +1009,7 @@ function ChatView({
     setClientePreviewLocalFallback('');
     setDirtyPreviewNarrative('');
     setPanelQuoteFrozen(null);
+    clienteNarrativeHydratedRef.current = '';
   }, [selectedConvId]);
 
   const isPanelReadOnly = Boolean(panelQuoteFrozen) && !quoteFormDirty;
@@ -1255,9 +1274,20 @@ function ChatView({
       formalNarrativePreview: String(q.formalNarrative ?? '').slice(0, 100),
       isLegalDoc: String(q.formalNarrative ?? '').includes('PROPUESTA DE COTIZACIÓN'),
     });
+    const syncedNarrative = collectPanelBackendClienteNarrative({
+      latestDraftQuote: { quote: q },
+      activeDraftForPanel,
+      latestQuoteMessage,
+      panelDisplayQuote: q,
+    });
+    if (syncedNarrative) {
+      setClientePreviewLocalFallback(syncedNarrative);
+      setDirtyPreviewNarrative('');
+      setIsRegeneratingClientePreview(false);
+    }
     setQuoteFormDirty(false);
     setQuoteSaveError('');
-  }, [quoteSyncKey, panelQuoteFrozen]);
+  }, [quoteSyncKey, panelQuoteFrozen, activeDraftForPanel, latestQuoteMessage]);
 
   const quoteRowsEditKey = useMemo(
     () =>
@@ -1421,18 +1451,35 @@ function ChatView({
     return () => ac.abort();
   }, [selectedConvId, apiBaseUrl, leadStatusForQuote]);
 
+  const panelBackendClienteNarrative = useMemo(
+    () =>
+      collectPanelBackendClienteNarrative({
+        latestDraftQuote,
+        activeDraftForPanel,
+        latestQuoteMessage,
+        panelDisplayQuote,
+      }),
+    [
+      latestDraftQuote?.quote,
+      activeDraftForPanel?.quotePayload,
+      activeDraftForPanel?.id,
+      latestQuoteMessage?.draftQuote,
+      panelDisplayQuote,
+    ],
+  );
+
   const mensajeClientePreview = useMemo(() => {
     if (panelQuoteFrozen?.mensajeCliente?.trim()) {
       return panelQuoteFrozen.mensajeCliente.trim();
     }
 
-    if (quoteFormDirty) {
-      const dirty = String(dirtyPreviewNarrative ?? '').trim();
-      if (dirty) return dirty;
-      if (isRegeneratingClientePreview) {
-        return 'Generando mensaje al cliente con IA…';
-      }
-      return 'Preparando vista previa con IA…';
+    const dirty = String(dirtyPreviewNarrative ?? '').trim();
+    if (quoteFormDirty && dirty) {
+      return dirty;
+    }
+
+    if (panelBackendClienteNarrative) {
+      return panelBackendClienteNarrative;
     }
 
     const fallbackTrim = String(clientePreviewLocalFallback ?? '').trim();
@@ -1440,14 +1487,11 @@ function ChatView({
       return fallbackTrim;
     }
 
-    const backendNarrative = pickBackendClienteNarrative(
-      ...draftQuoteClienteMessageFields(latestDraftQuote?.quote),
-      ...draftQuoteClienteMessageFields(activeDraftForPanel?.quotePayload),
-      ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote),
-      ...draftQuoteClienteMessageFields(panelDisplayQuote),
-    );
-    if (backendNarrative) {
-      return backendNarrative;
+    if (quoteFormDirty) {
+      if (isRegeneratingClientePreview) {
+        return 'Generando mensaje al cliente con IA…';
+      }
+      return 'Preparando vista previa con IA…';
     }
 
     const rowsForPreview =
@@ -1490,11 +1534,7 @@ function ChatView({
     dirtyPreviewNarrative,
     isRegeneratingClientePreview,
     clientePreviewLocalFallback,
-    latestDraftQuote?.quote?.formalNarrative,
-    activeDraftForPanel?.quotePayload?.formalNarrative,
-    latestQuoteMessage?.draftQuote?.formalNarrative,
-    latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
-    panelDisplayQuote?.formalNarrative,
+    panelBackendClienteNarrative,
     quoteRows,
     hasPanelQuote,
     granTotalPanel,
@@ -1614,20 +1654,14 @@ function ChatView({
   );
 
   useEffect(() => {
-    const backendNarrative = pickBackendClienteNarrative(
-      ...draftQuoteClienteMessageFields(latestDraftQuote?.quote),
-      ...draftQuoteClienteMessageFields(activeDraftForPanel?.quotePayload),
-      ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote),
-      ...draftQuoteClienteMessageFields(panelDisplayQuote),
-    );
+    const backendNarrative = panelBackendClienteNarrative;
     let branch = 'default';
     if (panelQuoteFrozen?.mensajeCliente?.trim()) branch = 'frozen';
-    else if (quoteFormDirty) {
-      if (dirtyPreviewNarrative?.trim()) branch = 'dirtyPreview';
-      else if (isRegeneratingClientePreview) branch = 'generating';
-      else branch = 'dirtyWaitingPreview';
-    } else if (clientePreviewLocalFallback?.trim()) branch = 'localFallback';
+    else if (quoteFormDirty && dirtyPreviewNarrative?.trim()) branch = 'dirtyPreview';
     else if (backendNarrative) branch = 'backend';
+    else if (quoteFormDirty && isRegeneratingClientePreview) branch = 'generating';
+    else if (quoteFormDirty) branch = 'dirtyWaitingPreview';
+    else if (clientePreviewLocalFallback?.trim()) branch = 'localFallback';
     else branch = 'assembledOrEmpty';
 
     logPanelClienteMessageDebug('estado mensaje al cliente', {
@@ -1640,17 +1674,23 @@ function ChatView({
       dirtyPreviewChars: String(dirtyPreviewNarrative ?? '').length,
       draftId: activeDraftForPanel?.id ?? null,
     });
+
+    if (!backendNarrative) return;
+    const hydrateKey = `${activeDraftForPanel?.id ?? ''}:${backendNarrative.length}:${backendNarrative.slice(0, 48)}`;
+    if (clienteNarrativeHydratedRef.current === hydrateKey) return;
+    clienteNarrativeHydratedRef.current = hydrateKey;
+    setIsRegeneratingClientePreview(false);
+    if (!String(dirtyPreviewNarrative ?? '').trim()) {
+      setClientePreviewLocalFallback(backendNarrative);
+    }
   }, [
+    panelBackendClienteNarrative,
     panelQuoteFrozen,
     quoteFormDirty,
     dirtyPreviewNarrative,
     isRegeneratingClientePreview,
     clientePreviewLocalFallback,
-    latestDraftQuote?.quote,
-    activeDraftForPanel?.quotePayload,
     activeDraftForPanel?.id,
-    latestQuoteMessage?.draftQuote,
-    panelDisplayQuote,
     quoteRows,
   ]);
 
@@ -1673,51 +1713,61 @@ function ChatView({
     if (!apiBaseUrl || quoteRows.length === 0) {
       return;
     }
+    if (activeDraftForPanel?.id) {
+      setIsRegeneratingClientePreview(true);
+      try {
+        const res = await apiFetchWebhook(
+          `/draft-quote/${activeDraftForPanel.id}/regenerate-narrative`,
+          { method: 'POST' },
+        );
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          const rawNarrative = String(
+            data?.narrative ??
+              data?.clientMessage ??
+              data?.generatedMessage ??
+              '',
+          ).trim();
+          const freshNarrative =
+            pickBackendClienteNarrative(
+              rawNarrative,
+              data?.clientMessage,
+              data?.generatedMessage,
+              data?.narrative,
+              ...draftQuoteClienteMessageFields(data?.quotePayload),
+            ) || rawNarrative;
+          if (freshNarrative) {
+            setClientePreviewLocalFallback(freshNarrative);
+            setDirtyPreviewNarrative('');
+            setQuoteFormDirty(false);
+          }
+          const msgId = data?.messageId ?? latestDraftQuote?.messageId ?? null;
+          if (data?.quotePayload && msgId) {
+            onDraftQuotePatched?.({
+              messageId: msgId,
+              draftQuote: data.quotePayload,
+            });
+          }
+          await refreshConversationQuoteData();
+          setQuoteSaveError('');
+        } else {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (e) {
+        if (quoteFormDirty) {
+          await previewNarrativeFromQuoteRows(quoteRows);
+        } else {
+          setQuoteSaveError(
+            e?.message || 'No se pudo regenerar la redacción con IA.',
+          );
+        }
+      } finally {
+        setIsRegeneratingClientePreview(false);
+      }
+      return;
+    }
     if (quoteFormDirty) {
       await previewNarrativeFromQuoteRows(quoteRows);
-      return;
-    }
-    if (!activeDraftForPanel?.id) {
-      return;
-    }
-    setIsRegeneratingClientePreview(true);
-    try {
-      const res = await apiFetchWebhook(
-        `/draft-quote/${activeDraftForPanel.id}/regenerate-narrative`,
-        { method: 'POST' },
-      );
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const freshNarrative = pickBackendClienteNarrative(
-          data?.clientMessage,
-          data?.generatedMessage,
-          data?.narrative,
-          ...draftQuoteClienteMessageFields(data?.quotePayload),
-        );
-        if (freshNarrative) {
-          setClientePreviewLocalFallback(freshNarrative);
-        } else {
-          setClientePreviewLocalFallback('');
-        }
-        setDirtyPreviewNarrative('');
-        const msgId = data?.messageId ?? latestDraftQuote?.messageId ?? null;
-        if (data?.quotePayload && msgId) {
-          onDraftQuotePatched?.({
-            messageId: msgId,
-            draftQuote: data.quotePayload,
-          });
-        }
-        await refreshConversationQuoteData();
-        setQuoteSaveError('');
-      } else {
-        throw new Error(`HTTP ${res.status}`);
-      }
-    } catch (e) {
-      setQuoteSaveError(
-        e?.message || 'No se pudo regenerar la redacción con IA.',
-      );
-    } finally {
-      setIsRegeneratingClientePreview(false);
     }
   }, [
     apiBaseUrl,
