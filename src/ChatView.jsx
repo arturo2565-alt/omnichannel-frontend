@@ -481,6 +481,15 @@ function totalFromQuoteRows(rows) {
   return (rows ?? []).reduce((acc, r) => acc + rowAmountForPanelTotal(r), 0);
 }
 
+function pickPremiumQuoteVariant(conversationId, variantSalt = '') {
+  const id = `${String(conversationId ?? '')}${String(variantSalt ?? '')}`;
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h + id.charCodeAt(i)) % 3;
+  }
+  return ['A', 'B', 'C'][h];
+}
+
 function formatAppointmentCitaWhen(scheduledAtIso) {
   const d = new Date(scheduledAtIso);
   if (Number.isNaN(d.getTime())) return null;
@@ -574,6 +583,86 @@ function quoteRowsValidForNarrativeRegen(rows) {
     if (!Number.isFinite(n) || n < 0) return false;
   }
   return true;
+}
+
+function assembleDynamicClienteQuoteMessage(rows, options = {}) {
+  const {
+    leadStatus = 'nuevo',
+    contactName = 'cliente',
+    appointmentWhen = null,
+    conversationId = '',
+    mapsUrl = WORKSHOP_MAPS_URL,
+    variantSalt = '',
+  } = options;
+
+  const name = String(contactName ?? '').trim() || 'cliente';
+  const list = quoteRowsToToolEmojiLines(rows);
+  const totalFmt = formatMoneyClienteQuoteMxAmount(totalFromQuoteRows(rows));
+  const isAgendado = normalizeConversationLeadStatus(leadStatus) === 'agendado';
+  const mapLink = String(mapsUrl ?? '').trim();
+
+  if (isAgendado) {
+    const when =
+      String(appointmentWhen ?? '').trim() ||
+      'el día acordado para tu visita';
+    return [
+      `👋 ¡Listo, ${name}! Aquí tienes el desglose del costo extra para tu visita:`,
+      '',
+      list,
+      '',
+      `💰 *Inversión Extra Estimada: $${totalFmt} MXN*`,
+      '_(Sujeto a revisión física. Incluye materiales premium Sikkens y garantía por escrito.)_',
+      '',
+      `Anotamos estos conceptos como un **extra en tu orden de servicio**. **Los realizaremos este mismo ${when} que ingresas tu vehículo al taller.**`,
+      '',
+      '¿Tienes alguna duda con las piezas o prefieres que lo sumemos al presupuesto inicial? 😊✨',
+    ].join('\n');
+  }
+
+  const variant = pickPremiumQuoteVariant(conversationId, variantSalt);
+  const mapBlock = mapLink
+    ? [`📍 Estamos aquí, fácil de llegar: ${mapLink}`, '']
+    : [];
+
+  if (variant === 'B') {
+    return [
+      `👋 ¡Perfecto, ${name}! Te comparto la estimación para dejar tu unidad impecable:`,
+      '',
+      list,
+      '',
+      `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+      'Materiales premium **Sikkens**, acabado espejo y **garantía por escrito** *(sujeto a revisión física en planta)*.',
+      '',
+      ...mapBlock,
+      '📅 ¿Qué día de la semana te queda mejor para ingresar tu unidad?',
+    ].join('\n');
+  }
+
+  if (variant === 'C') {
+    return [
+      `👋 Con gusto, ${name}, este es el resumen de tu cotización:`,
+      '',
+      list,
+      '',
+      `💰 *Inversión estimada: $${totalFmt} MXN*`,
+      '_(Sujeto a revisión física. Incluye materiales premium Sikkens, acabado espejo y garantía por escrito.)_',
+      '',
+      ...mapBlock,
+      'Para agendar tu ingreso al taller, dime qué día de la semana te funciona mejor. ✨',
+    ].join('\n');
+  }
+
+  return [
+    `👋 ¡Listo, ${name}! Aquí tienes el desglose de tu cotización:`,
+    '',
+    list,
+    '',
+    `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+    '_(Sujeto a revisión física. Incluye garantía y materiales premium Sikkens.)_',
+    '',
+    ...mapBlock,
+    '📅 Tenemos espacios esta semana. ¿Qué día te queda mejor para ingresar tu unidad?',
+  ].join('\n');
 }
 
 function ChatView({ 
@@ -1359,20 +1448,37 @@ function ChatView({
       return backendNarrative;
     }
 
-    if (isRegeneratingClientePreview) {
-      return 'Generando mensaje al cliente con IA…';
-    }
-
     const rowsForPreview =
       panelQuoteFrozen?.quoteRows?.length
         ? panelQuoteFrozen.quoteRows
         : quoteRows;
     if (quoteRowsValidForNarrativeRegen(rowsForPreview)) {
-      return 'Generando mensaje al cliente con IA…';
+      const assembled = assembleDynamicClienteQuoteMessage(rowsForPreview, {
+        leadStatus: leadStatusForQuote,
+        contactName: selectedContact?.contactName ?? 'cliente',
+        appointmentWhen: conversationAppointmentWhen,
+        conversationId: selectedConvId ?? '',
+        mapsUrl: WORKSHOP_MAPS_URL,
+      });
+      if (assembled?.trim()) {
+        return assembled.trim();
+      }
     }
 
     if (hasPanelQuote && granTotalPanel > 0 && rowsForPreview.length > 0) {
-      return 'Generando mensaje al cliente con IA…';
+      const linesOnly = quoteRowsToToolEmojiLines(rowsForPreview);
+      const totalFmt = formatMoneyClienteQuoteMxAmount(
+        totalFromQuoteRows(rowsForPreview),
+      );
+      if (linesOnly.trim()) {
+        return [
+          `👋 Estimado cliente, aquí tienes el desglose de tu cotización:`,
+          '',
+          linesOnly,
+          '',
+          `💰 *Inversión Total Estimada: $${totalFmt} MXN*`,
+        ].join('\n');
+      }
     }
 
     return 'Añade servicios al borrador para ver el mensaje al cliente.';
@@ -1383,8 +1489,6 @@ function ChatView({
     isRegeneratingClientePreview,
     clientePreviewLocalFallback,
     latestDraftQuote?.quote?.formalNarrative,
-    latestDraftQuote?.quote?.clientMessage,
-    latestDraftQuote?.quote?.generatedMessage,
     activeDraftForPanel?.quotePayload?.formalNarrative,
     latestQuoteMessage?.draftQuote?.formalNarrative,
     latestQuoteMessage?.draftQuote?.quotePayload?.formalNarrative,
