@@ -422,6 +422,11 @@ function isClienteFormalNarrative(text) {
   return true;
 }
 
+function logPanelClienteMessageDebug(label, payload) {
+  if (typeof console === 'undefined') return;
+  console.log(`[PanelClienteMsg] ${label}`, payload);
+}
+
 function pickBackendClienteNarrative(...candidates) {
   for (const raw of candidates) {
     const t = String(raw ?? '').trim();
@@ -1242,6 +1247,14 @@ function ChatView({
         },
       ]);
     }
+    logPanelClienteMessageDebug('filas sincronizadas desde borrador', {
+      hasBackendItems: Array.isArray(backendItems) && backendItems.length > 0,
+      invCount: inv?.length ?? 0,
+      lineCount: lines.length,
+      analysisPieza: basis.pieza ?? damage.pieza ?? '',
+      formalNarrativePreview: String(q.formalNarrative ?? '').slice(0, 100),
+      isLegalDoc: String(q.formalNarrative ?? '').includes('PROPUESTA DE COTIZACIÓN'),
+    });
     setQuoteFormDirty(false);
     setQuoteSaveError('');
   }, [quoteSyncKey, panelQuoteFrozen]);
@@ -1417,7 +1430,7 @@ function ChatView({
       const dirty = String(dirtyPreviewNarrative ?? '').trim();
       if (dirty) return dirty;
       if (isRegeneratingClientePreview) {
-        return 'Actualizando redacción premium con IA…';
+        return 'Generando mensaje al cliente con IA…';
       }
       return 'Preparando vista previa con IA…';
     }
@@ -1494,7 +1507,20 @@ function ChatView({
   const previewNarrativeFromQuoteRows = useCallback(
     async (rows) => {
       if (!apiBaseUrl) return null;
-      if (!quoteRowsValidForNarrativeRegen(rows)) return null;
+      if (!quoteRowsValidForNarrativeRegen(rows)) {
+        logPanelClienteMessageDebug('preview omitido: filas inválidas', {
+          rowCount: rows?.length ?? 0,
+          piezas: (rows ?? []).map((r) => r.pieza),
+        });
+        return null;
+      }
+
+      const started = Date.now();
+      logPanelClienteMessageDebug('preview-narrative inicio', {
+        conversationId: selectedConvId,
+        rowCount: rows.length,
+        piezas: rows.map((r) => r.pieza),
+      });
 
       setIsRegeneratingClientePreview(true);
       try {
@@ -1516,21 +1542,57 @@ function ChatView({
           throw new Error(t || `HTTP ${res.status}`);
         }
         const data = await res.json().catch(() => ({}));
-        const narrative = pickBackendClienteNarrative(
-          data?.narrative,
-          data?.generatedMessage,
-          data?.clientMessage,
-          data?.quotePayload?.generatedMessage,
-          data?.quotePayload?.clientMessage,
-          data?.quotePayload?.formalNarrative,
-        );
+        const rawNarrative = String(data?.narrative ?? '').trim();
+        const narrative =
+          pickBackendClienteNarrative(
+            rawNarrative,
+            data?.generatedMessage,
+            data?.clientMessage,
+            data?.quotePayload?.generatedMessage,
+            data?.quotePayload?.clientMessage,
+            data?.quotePayload?.formalNarrative,
+          ) || rawNarrative;
+        logPanelClienteMessageDebug('preview-narrative respuesta', {
+          ms: Date.now() - started,
+          ok: Boolean(narrative),
+          rawChars: rawNarrative.length,
+          narrativeChars: narrative?.length ?? 0,
+        });
         if (narrative) {
           setDirtyPreviewNarrative(narrative);
           setClientePreviewLocalFallback('');
+        } else {
+          const assembled = assembleDynamicClienteQuoteMessage(rows, {
+            leadStatus: leadStatusForQuote,
+            contactName: selectedContact?.contactName ?? 'cliente',
+            appointmentWhen: conversationAppointmentWhen,
+            conversationId: selectedConvId ?? '',
+            mapsUrl: WORKSHOP_MAPS_URL,
+          });
+          if (assembled?.trim()) {
+            logPanelClienteMessageDebug('preview fallback local armado', {
+              chars: assembled.length,
+            });
+            setDirtyPreviewNarrative(assembled.trim());
+          }
         }
         setQuoteSaveError('');
         return narrative;
       } catch (e) {
+        logPanelClienteMessageDebug('preview-narrative error', {
+          ms: Date.now() - started,
+          message: e?.message ?? String(e),
+        });
+        const assembled = assembleDynamicClienteQuoteMessage(rows, {
+          leadStatus: leadStatusForQuote,
+          contactName: selectedContact?.contactName ?? 'cliente',
+          appointmentWhen: conversationAppointmentWhen,
+          conversationId: selectedConvId ?? '',
+          mapsUrl: WORKSHOP_MAPS_URL,
+        });
+        if (assembled?.trim()) {
+          setDirtyPreviewNarrative(assembled.trim());
+        }
         setQuoteSaveError(
           e?.message || 'No se pudo actualizar la vista previa con IA.',
         );
@@ -1547,8 +1609,50 @@ function ChatView({
       leadStatusForQuote,
       selectedContact?.contactName,
       selectedConvId,
+      conversationAppointmentWhen,
     ],
   );
+
+  useEffect(() => {
+    const backendNarrative = pickBackendClienteNarrative(
+      ...draftQuoteClienteMessageFields(latestDraftQuote?.quote),
+      ...draftQuoteClienteMessageFields(activeDraftForPanel?.quotePayload),
+      ...draftQuoteClienteMessageFields(latestQuoteMessage?.draftQuote),
+      ...draftQuoteClienteMessageFields(panelDisplayQuote),
+    );
+    let branch = 'default';
+    if (panelQuoteFrozen?.mensajeCliente?.trim()) branch = 'frozen';
+    else if (quoteFormDirty) {
+      if (dirtyPreviewNarrative?.trim()) branch = 'dirtyPreview';
+      else if (isRegeneratingClientePreview) branch = 'generating';
+      else branch = 'dirtyWaitingPreview';
+    } else if (clientePreviewLocalFallback?.trim()) branch = 'localFallback';
+    else if (backendNarrative) branch = 'backend';
+    else branch = 'assembledOrEmpty';
+
+    logPanelClienteMessageDebug('estado mensaje al cliente', {
+      branch,
+      quoteFormDirty,
+      isRegeneratingClientePreview,
+      rowCount: quoteRows.length,
+      piezas: quoteRows.map((r) => r.pieza),
+      backendNarrativeChars: backendNarrative.length,
+      dirtyPreviewChars: String(dirtyPreviewNarrative ?? '').length,
+      draftId: activeDraftForPanel?.id ?? null,
+    });
+  }, [
+    panelQuoteFrozen,
+    quoteFormDirty,
+    dirtyPreviewNarrative,
+    isRegeneratingClientePreview,
+    clientePreviewLocalFallback,
+    latestDraftQuote?.quote,
+    activeDraftForPanel?.quotePayload,
+    activeDraftForPanel?.id,
+    latestQuoteMessage?.draftQuote,
+    panelDisplayQuote,
+    quoteRows,
+  ]);
 
   useEffect(() => {
     if (!quoteFormDirty || isPanelReadOnly) return;
