@@ -419,18 +419,7 @@ function isClienteFormalNarrative(text) {
   ) {
     return false;
   }
-  if (s.startsWith('👋') || s.includes('🛠️') || s.startsWith('🎨')) {
-    return true;
-  }
-  if (
-    /ba[nñ]o de pintura/i.test(s) &&
-    (s.includes('💰') ||
-      /total estimado/i.test(s) ||
-      s.includes('Inversión'))
-  ) {
-    return true;
-  }
-  return false;
+  return true;
 }
 
 function pickBackendClienteNarrative(...candidates) {
@@ -2467,7 +2456,7 @@ function ChatView({
           title={
             isPanelReadOnly
               ? 'Modo referencia: vuelve a editar para regenerar'
-              : 'Regenerar redacción (variante A/B/C)'
+              : 'Regenerar redacción con ChatAppointmentPrompt'
           }
           disabled={
             isPanelReadOnly ||
