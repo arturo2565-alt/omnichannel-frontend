@@ -91,12 +91,20 @@ export const PANEL_PIEZA_OPTIONS = [
   { code: 'POD', label: 'POD', fullName: 'Poste derecho', catalogPieza: 'Poste', group: 'Postes' },
   { code: 'Cofre', label: 'Cofre', fullName: 'Cofre', catalogPieza: 'Cofre', group: 'Otros' },
   {
-    code: 'Tapa Cajuela',
-    label: 'Tapa Cajuela',
-    fullName: 'Tapa de cajuela',
-    catalogPieza: 'Tapa Cajuela',
+    code: 'BiCO',
+    label: 'BiCO',
+    fullName: 'Bigote Cofre',
+    catalogPieza: 'BiCO',
     group: 'Otros',
   },
+  {
+    code: 'Parilla',
+    label: 'Parilla',
+    fullName: 'Parilla',
+    catalogPieza: 'Parilla',
+    group: 'Otros',
+  },
+  { code: 'Tapa Cajuela', label: 'Tapa Cajuela', fullName: 'Tapa de cajuela', catalogPieza: 'Tapa Cajuela', group: 'Otros' },
   { code: 'Toldo', label: 'Toldo', fullName: 'Toldo', catalogPieza: 'Toldo', group: 'Otros' },
   { code: 'Espejo', label: 'Espejo', fullName: 'Espejo', catalogPieza: 'Espejo', group: 'Otros' },
   {
@@ -195,6 +203,9 @@ aliasNormToCode.set(
 aliasNormToCode.set(normalizePiezaText('refaccion'), PANEL_PIEZA_REFACCION_CODE);
 aliasNormToCode.set(normalizePiezaText('refacción'), PANEL_PIEZA_REFACCION_CODE);
 aliasNormToCode.set(normalizePiezaText('bpc'), PANEL_PIEZA_BPC_CODE);
+aliasNormToCode.set(normalizePiezaText('bigote cofre'), 'BiCO');
+aliasNormToCode.set(normalizePiezaText('bico'), 'BiCO');
+aliasNormToCode.set(normalizePiezaText('parilla'), 'Parilla');
 aliasNormToCode.set(
   normalizePiezaText('bano de pintura completo'),
   PANEL_PIEZA_BPC_CODE,

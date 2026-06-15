@@ -4,12 +4,14 @@ import { Calendar, LogOut } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest } from './apiClient.js';
 import {
-  DAMAGE_LEVEL_KEYS,
-  calculateEstimate,
-  coerceDamageLevelCode,
-} from './autofix-pricing';
-import { apiFetchWebhook, markClienteAtendidoRequest } from './apiClient.js';
+  PANEL_DAMAGE_MAGNITUDES,
+  PANEL_SEVERITY_LABELS,
+  coercePanelDamageMagnitude,
+  computePanelPiecePrice,
+  createPanelPricingContext,
+} from './panel-quote-pricing.js';
 import {
   PANEL_PIEZA_OPTION_GROUPS,
   findPanelPiezaOption,
@@ -153,34 +155,26 @@ const LeadStatusBadge = ({ status }) => {
   );
 };
 
-const SEVERIDAD_LABELS = {
-  DL: 'DL — Leve',
-  DML: 'DML — Menor',
-  DM: 'DM — Moderado',
-  DMF: 'DMF',
-  DF: 'DF — Grave',
-  DMFuerte: 'DMFuerte — Muy grave',
-};
+const BPC_SIZE_TIER_OPTIONS = ['Chico', 'Mediano', 'Grande', 'XL'];
 
-/** Valor inicial de pieza en filas añadidas manualmente hasta elegir una de la matriz. */
-const MANUAL_ROW_PLACEHOLDER_PIEZA = 'Seleccionar';
-
-function isPlaceholderPieza(pieza) {
-  return String(pieza ?? '')
-    .trim()
-    .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
+/** Parsea `draft.imageUrl` (URL única o JSON array). */
+function parseDraftImageUrlField(imageUrl) {
+  const s = String(imageUrl ?? '').trim();
+  if (!s) return [];
+  if (s.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(s);
+      return Array.isArray(parsed)
+        ? parsed.map(String).filter((u) => u.trim())
+        : [s];
+    } catch {
+      return [s];
+    }
+  }
+  return [s];
 }
 
-/** Alinea texto IA / backend al código del panel (PDI, SI, …) cuando hay match. */
-function normalizePiezaForPanel(raw) {
-  const t = String(raw ?? '').trim();
-  if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
-  const code = normalizePiezaCodeForPanel(t);
-  if (isKnownPanelPiezaCode(code)) return code;
-  return t;
-}
-
-function recalcRowPriceFromMatrix(row) {
+function recalcRowPriceFromMatrix(row, pricingCtx) {
   if (
     isInternalDamageRangePieza(row.pieza) ||
     isRefaccionPieza(row.pieza) ||
@@ -188,7 +182,7 @@ function recalcRowPriceFromMatrix(row) {
   ) {
     return row;
   }
-  const n = calculateEstimate(row.pieza, row.severidad);
+  const n = computePanelPiecePrice(row.pieza, row.severidad, pricingCtx);
   if (n <= 0) return row;
   return { ...row, precioInput: String(Math.round(n)) };
 }
@@ -250,6 +244,35 @@ function parseInternalDamageMaxFromDescription(text, fallbackMin) {
   return fallbackMin;
 }
 
+/** Valor inicial de pieza en filas añadidas manualmente hasta elegir una de la matriz. */
+const MANUAL_ROW_PLACEHOLDER_PIEZA = 'Seleccionar';
+
+function isPlaceholderPieza(pieza) {
+  return String(pieza ?? '')
+    .trim()
+    .toLowerCase() === MANUAL_ROW_PLACEHOLDER_PIEZA.toLowerCase();
+}
+
+/** Alinea texto IA / backend al código del panel (PDI, SI, …) cuando hay match. */
+function normalizePiezaForPanel(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t || isPlaceholderPieza(t)) return MANUAL_ROW_PLACEHOLDER_PIEZA;
+  const code = normalizePiezaCodeForPanel(t);
+  if (isKnownPanelPiezaCode(code)) return code;
+  return t;
+}
+
+function normalizePanelSeverityForRow(severidadRaw, pieza) {
+  if (isBanioPinturaCompletoPieza(pieza)) {
+    return String(severidadRaw ?? '').trim() || 'Mediano';
+  }
+  if (isInternalDamageRangePieza(pieza) || isRefaccionPieza(pieza)) {
+    return 'N/A';
+  }
+  const mag = coercePanelDamageMagnitude(severidadRaw);
+  return mag === 'N/A' ? 'LEVE' : mag;
+}
+
 function buildQuoteRowFromSource({
   id,
   piezaRaw,
@@ -259,10 +282,8 @@ function buildQuoteRowFromSource({
   lineDescription,
   descripcionTecnica,
 }) {
-  const code = DAMAGE_LEVEL_KEYS.includes(severidadRaw)
-    ? severidadRaw
-    : coerceDamageLevelCode(severidadRaw);
   const pieza = normalizePiezaForPanel(piezaRaw ?? '');
+  const code = normalizePanelSeverityForRow(severidadRaw, pieza);
   const base = {
     id,
     pieza,
@@ -309,7 +330,7 @@ function buildQuoteRowFromSource({
   };
 }
 
-function applyPiezaSelectionToRow(row, piezaCode) {
+function applyPiezaSelectionToRow(row, piezaCode, pricingCtx) {
   if (isInternalDamageRangePieza(piezaCode)) {
     return {
       ...row,
@@ -332,11 +353,30 @@ function applyPiezaSelectionToRow(row, piezaCode) {
       precioMaxInput: undefined,
     };
   }
-  const next = { ...row, pieza: piezaCode };
+  if (isBanioPinturaCompletoPieza(piezaCode)) {
+    const next = {
+      ...row,
+      pieza: piezaCode,
+      severidad: row.severidad && BPC_SIZE_TIER_OPTIONS.includes(row.severidad)
+        ? row.severidad
+        : 'Mediano',
+    };
+    delete next.precioMinInput;
+    delete next.precioMaxInput;
+    delete next.refaccionDetalle;
+    return next;
+  }
+  const next = {
+    ...row,
+    pieza: piezaCode,
+    severidad: coercePanelDamageMagnitude(row.severidad) === 'N/A'
+      ? 'LEVE'
+      : coercePanelDamageMagnitude(row.severidad),
+  };
   delete next.precioMinInput;
   delete next.precioMaxInput;
   delete next.refaccionDetalle;
-  return recalcRowPriceFromMatrix(next);
+  return recalcRowPriceFromMatrix(next, pricingCtx);
 }
 
 function piezaSelectShowsUnmappedFallback(pieza) {
@@ -713,6 +753,8 @@ function ChatView({
   const [quoteDrawerOpen, setQuoteDrawerOpen] = useState(false);
   /** Índice en `quoteEvidenceImageUrls` del visor fullscreen; null = cerrado */
   const [activeImageIndex, setActiveImageIndex] = useState(null);
+  const [catalogPieceBases, setCatalogPieceBases] = useState([]);
+  const [catalogPricingRules, setCatalogPricingRules] = useState(null);
 
   const filteredContacts = useMemo(() => {
     if (platformFilter === 'all') return contacts;
@@ -939,6 +981,46 @@ function ChatView({
     latestDraftQuote?.messageId,
   ]);
 
+  const panelVehicleProfile = useMemo(
+    () =>
+      activeDraftForPanel?.damageAnalysis?.quoteCartMeta
+        ?.vehiclePricingProfile ?? null,
+    [activeDraftForPanel?.damageAnalysis?.quoteCartMeta?.vehiclePricingProfile],
+  );
+
+  const panelPricingContext = useMemo(
+    () =>
+      createPanelPricingContext({
+        pieceBases: catalogPieceBases,
+        rules: catalogPricingRules,
+        vehicleProfile: panelVehicleProfile,
+      }),
+    [catalogPieceBases, catalogPricingRules, panelVehicleProfile],
+  );
+
+  useEffect(() => {
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const r = await apiFetchOrigin('/catalog/catalog-view', {
+          signal: ac.signal,
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        setCatalogPieceBases(
+          Array.isArray(data.pieceBases) ? data.pieceBases : [],
+        );
+        setCatalogPricingRules(data.rules ?? null);
+      } catch (e) {
+        if (e?.name !== 'AbortError') {
+          setCatalogPieceBases([]);
+          setCatalogPricingRules(null);
+        }
+      }
+    })();
+    return () => ac.abort();
+  }, []);
+
   /** Referencia de cotización aprobada (solo lectura en panel). */
   const approvedDraftReference = useMemo(() => {
     if (
@@ -1144,10 +1226,7 @@ function ChatView({
         ? [latestQuoteMessage.content]
         : [];
     const rows = inv.map((it, idx) => {
-      const rawSev = String(it.severidad ?? 'DM');
-      const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
-        ? rawSev
-        : coerceDamageLevelCode(rawSev);
+      const rawSev = String(it.severidad ?? 'LEVE');
       let urls = urlsFromInventoryItem(it);
       if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
       return buildQuoteRowFromSource({
@@ -1197,7 +1276,7 @@ function ChatView({
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
       );
       const rows = sorted.map((it, idx) => {
-        const rawSev = String(it.severidad ?? 'DM');
+        const rawSev = String(it.severidad ?? 'LEVE');
         let precio = Number(it.precioMx ?? 0);
         const lineAt = lines[idx];
         if (
@@ -1225,11 +1304,8 @@ function ChatView({
       setQuoteRows(rows);
     } else if (inv?.length) {
       const rows = inv.map((it, idx) => {
-        const rawSev = String(it.severidad ?? 'DM');
-        const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
-          ? rawSev
-          : coerceDamageLevelCode(rawSev);
-        let precio = calculateEstimate(it.pieza, code);
+        const rawSev = String(it.severidad ?? 'LEVE');
+        let precio = 0;
         const lineAt = lines[idx];
         if (
           lineAt &&
@@ -1250,10 +1326,11 @@ function ChatView({
       });
       setQuoteRows(rows);
     } else {
-      const rawSev = String(basis.severidad ?? 'DM');
-      const code = DAMAGE_LEVEL_KEYS.includes(rawSev)
-        ? rawSev
-        : coerceDamageLevelCode(rawSev);
+      const rawSev = String(basis.severidad ?? 'LEVE');
+      const code = normalizePanelSeverityForRow(
+        rawSev,
+        normalizePiezaForPanel(basis.pieza ?? ''),
+      );
       setQuoteRows([
         {
           id: 'row-0-single',
@@ -1380,7 +1457,7 @@ function ChatView({
     [panelRowsForDisplay],
   );
 
-  /** Miniaturas de evidencia para carrusel del panel (filas + borrador + mensaje). */
+  /** Miniaturas de evidencia para carrusel del panel (filas + borrador + mensajes). */
   const quoteEvidenceImageUrls = useMemo(() => {
     const urls = new Set();
     for (const r of panelRowsForDisplay) {
@@ -1389,15 +1466,21 @@ function ChatView({
         if (s && isImage(s)) urls.add(s);
       }
     }
-    const draftImg = String(activeDraftForPanel?.imageUrl ?? '').trim();
-    if (draftImg && isImage(draftImg)) urls.add(draftImg);
+    for (const u of parseDraftImageUrlField(activeDraftForPanel?.imageUrl)) {
+      if (isImage(u)) urls.add(u);
+    }
     const msgContent = String(latestQuoteMessage?.content ?? '').trim();
     if (msgContent && isImage(msgContent)) urls.add(msgContent);
+    for (const m of messages ?? []) {
+      const c = String(m?.content ?? '').trim();
+      if (c && isImage(c)) urls.add(c);
+    }
     return [...urls];
   }, [
     panelRowsForDisplay,
     activeDraftForPanel?.imageUrl,
     latestQuoteMessage?.content,
+    messages,
   ]);
 
   const leadStatusForQuote = normalizeConversationLeadStatus(
@@ -1989,7 +2072,7 @@ function ChatView({
       {
         id: `row-manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         pieza: MANUAL_ROW_PLACEHOLDER_PIEZA,
-        severidad: 'DL',
+        severidad: 'LEVE',
         precioInput: '0',
         urls_origen: [],
       },
@@ -2073,28 +2156,49 @@ function ChatView({
   const quotePanelPendingApproval =
     panelDisplayQuote?.status === 'PENDING_APPROVAL';
 
-  const renderQuoteEvidenceCarousel = () => {
+  const renderQuoteEvidenceThumbnailStrip = () => {
     if (!quoteEvidenceImageUrls.length) return null;
+    const count = quoteEvidenceImageUrls.length;
     return (
-      <div
-        className="flex gap-2 overflow-x-auto py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        aria-label="Fotos de evidencia de la cotización"
-      >
-        {quoteEvidenceImageUrls.map((imgUrl, idx) => (
+      <div className="shrink-0 border-b border-slate-200 bg-slate-200/60 p-2">
+        <p className="mb-1.5 text-center text-[9px] font-medium text-slate-600">
+          {count === 1
+            ? 'Toca para ampliar'
+            : `${count} evidencias · toca una miniatura para ampliar`}
+        </p>
+        {count === 1 ? (
           <button
-            key={`${imgUrl}-${idx}`}
             type="button"
-            title="Ver imagen en grande"
-            onClick={() => setActiveImageIndex(idx)}
-            className="shrink-0 overflow-hidden rounded-lg border border-gray-200 shadow-sm transition active:scale-95"
+            onClick={() => setActiveImageIndex(0)}
+            className="group block w-full text-center transition hover:opacity-95"
           >
             <img
-              src={imgUrl}
-              alt="Evidencia"
-              className="h-16 w-16 cursor-pointer object-cover transition-transform"
+              src={quoteEvidenceImageUrls[0]}
+              alt="Evidencia 1"
+              className="mx-auto h-24 max-w-full rounded-lg object-cover shadow ring-1 ring-slate-300/80"
             />
           </button>
-        ))}
+        ) : (
+          <div className="grid max-h-36 grid-cols-3 gap-2 overflow-y-auto pr-0.5">
+            {quoteEvidenceImageUrls.map((imgUrl, idx) => (
+              <button
+                key={`${idx}-${imgUrl.slice(0, 48)}`}
+                type="button"
+                onClick={() => setActiveImageIndex(idx)}
+                className="group relative aspect-square overflow-hidden rounded-lg ring-1 ring-slate-300/80 transition hover:ring-2 hover:ring-indigo-400"
+              >
+                <img
+                  src={imgUrl}
+                  alt={`Evidencia ${idx + 1}`}
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-0 left-0 right-0 bg-black/50 py-0.5 text-[8px] font-semibold text-white">
+                  {idx + 1}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -2356,7 +2460,9 @@ function ChatView({
                       setQuoteFormDirty(true);
                       setQuoteRows((prev) =>
                         prev.map((r) =>
-                          r.id === row.id ? applyPiezaSelectionToRow(r, v) : r,
+                          r.id === row.id
+                            ? applyPiezaSelectionToRow(r, v, panelPricingContext)
+                            : r,
                         ),
                       );
                     }}
@@ -2408,32 +2514,58 @@ function ChatView({
               </div>
               {!isInternalDamageRangePieza(row.pieza) &&
               !isRefaccionPieza(row.pieza) ? (
+                isBanioPinturaCompletoPieza(row.pieza) ? (
+                  <label className="mt-2 block text-[10px] font-medium text-gray-700">
+                    Tamaño de carrocería
+                    <select
+                      value={row.severidad}
+                      onChange={(e) => {
+                        setQuoteFormDirty(true);
+                        setQuoteRows((prev) =>
+                          prev.map((r) =>
+                            r.id === row.id
+                              ? { ...r, severidad: e.target.value }
+                              : r,
+                          ),
+                        );
+                      }}
+                      className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      {BPC_SIZE_TIER_OPTIONS.map((tier) => (
+                        <option key={tier} value={tier}>
+                          {tier}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
                 <label className="mt-2 block text-[10px] font-medium text-gray-700">
                   Severidad
                   <select
-                    value={row.severidad}
+                    value={coercePanelDamageMagnitude(row.severidad)}
                     onChange={(e) => {
                       const v = e.target.value;
                       setQuoteFormDirty(true);
                       setQuoteRows((prev) =>
                         prev.map((r) => {
                           if (r.id !== row.id) return r;
-                          return recalcRowPriceFromMatrix({
-                            ...r,
-                            severidad: v,
-                          });
+                          return recalcRowPriceFromMatrix(
+                            { ...r, severidad: v },
+                            panelPricingContext,
+                          );
                         }),
                       );
                     }}
                     className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   >
-                    {DAMAGE_LEVEL_KEYS.map((k) => (
+                    {PANEL_DAMAGE_MAGNITUDES.map((k) => (
                       <option key={k} value={k}>
-                        {SEVERIDAD_LABELS[k] ?? k}
+                        {PANEL_SEVERITY_LABELS[k] ?? k}
                       </option>
                     ))}
                   </select>
                 </label>
+                )
               ) : null}
               {isInternalDamageRangePieza(row.pieza) ? (
                 <div className="mt-2">
@@ -2695,7 +2827,7 @@ function ChatView({
     </div>
   );
 
-  const renderDraftQuotePanelScrollContent = ({ showCarousel = false } = {}) => (
+  const renderDraftQuotePanelScrollContent = () => (
     <>
       {!selectedConvId ? (
         <p className="text-center text-xs text-gray-500">
@@ -2726,7 +2858,6 @@ function ChatView({
               ) : null}
             </div>
           ) : null}
-          {showCarousel ? renderQuoteEvidenceCarousel() : null}
           {hasPanelQuote ? renderQuoteStatusBadges() : null}
           {renderApprovedCartSection()}
           {renderQuoteDamagesSection()}
@@ -2796,7 +2927,7 @@ function ChatView({
 
   const renderDraftQuotePanelBody = () => (
     <>
-      {renderDraftQuotePanelScrollContent({ showCarousel: true })}
+      {renderDraftQuotePanelScrollContent()}
       {hasPanelQuote && selectedConvId ? (
         <div className="mt-3 flex flex-col gap-2 border-t border-gray-200 pt-3">
           {renderQuoteActionButtons()}
@@ -3231,6 +3362,7 @@ function ChatView({
             Borrador generado por IA · requiere tu validación
           </p>
         </div>
+        {renderQuoteEvidenceThumbnailStrip()}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
           {renderDraftQuotePanelBody()}
         </div>
@@ -3270,7 +3402,7 @@ function ChatView({
                   ✕
                 </button>
               </div>
-              {renderQuoteEvidenceCarousel()}
+              {renderQuoteEvidenceThumbnailStrip()}
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">

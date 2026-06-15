@@ -30,15 +30,9 @@ export const PIEZA_DANO_PRICE_MATRIX = [
   { pieza: 'Toldo', DL: 4500, DML: 5400, DM: 6500, DMF: 7500, DF: 8000, DMFuerte: 9800 },
   { pieza: 'Espejo', DL: 900, DML: 1050, DM: 1225, DMF: 1450, DF: 1650, DMFuerte: 2300 },
   { pieza: 'Estribo', DL: 2500, DML: 3200, DM: 3400, DMF: 3900, DF: 4500, DMFuerte: 5500 },
-  {
-    pieza: 'Estetica Exterior',
-    DL: 3500,
-    DML: 3500,
-    DM: 3500,
-    DMF: 3500,
-    DF: 3500,
-    DMFuerte: 3500,
-  },
+  { pieza: 'Estetica Exterior', DL: 3500, DML: 3500, DM: 3500, DMF: 3500, DF: 3500, DMFuerte: 3500 },
+  { pieza: 'BiCO', DL: 2400, DML: 2400, DM: 2688, DMF: 3120, DF: 3120, DMFuerte: 3720 },
+  { pieza: 'Parilla', DL: 2400, DML: 2400, DM: 2688, DMF: 3120, DF: 3120, DMFuerte: 3720 },
 ];
 
 /** Misma tabla bajo el nombre que usa el negocio en el panel. */
@@ -101,6 +95,15 @@ export function coerceDamageLevelCode(raw) {
   const t = String(raw ?? '').trim();
   if (!t) return 'DM';
   if (/\bn\s*\/\s*a\b|^n\/a$/i.test(t)) return 'N/A';
+  const normalized = t
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, '_');
+  if (normalized === 'LEVE') return 'DL';
+  if (normalized === 'MEDIO') return 'DM';
+  if (normalized === 'FUERTE') return 'DF';
+  if (normalized === 'MUY_FUERTE' || normalized === 'MUYFUERTE') return 'DMFuerte';
   const order = ['DMFuerte', 'DF', 'DMF', 'DM', 'DML', 'DL'];
   for (const level of order) {
     const escaped = level.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
