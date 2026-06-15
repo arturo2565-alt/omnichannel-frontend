@@ -751,8 +751,22 @@ function ChatView({
   const [showChatWindow, setShowChatWindow] = useState(false);
   /** En móvil: panel de cotización en bottom drawer */
   const [quoteDrawerOpen, setQuoteDrawerOpen] = useState(false);
-  /** Índice en `quoteEvidenceImageUrls` del visor fullscreen; null = cerrado */
-  const [activeImageIndex, setActiveImageIndex] = useState(null);
+  /** Visor fullscreen de evidencias: `{ urls, index }` o null */
+  const [evidenceLightbox, setEvidenceLightbox] = useState(null);
+
+  const openEvidenceLightbox = useCallback((urls, index = 0) => {
+    const list = [...new Set((urls ?? []).map(String).filter(Boolean))];
+    if (!list.length) return;
+    const safeIndex = Math.min(
+      Math.max(0, Number(index) || 0),
+      list.length - 1,
+    );
+    setEvidenceLightbox({ urls: list, index: safeIndex });
+  }, []);
+
+  const closeEvidenceLightbox = useCallback(() => {
+    setEvidenceLightbox(null);
+  }, []);
   const [catalogPieceBases, setCatalogPieceBases] = useState([]);
   const [catalogPricingRules, setCatalogPricingRules] = useState(null);
 
@@ -2096,42 +2110,40 @@ function ChatView({
 
   useEffect(() => {
     setQuoteDrawerOpen(false);
-    setActiveImageIndex(null);
-  }, [selectedConvId]);
+    closeEvidenceLightbox();
+  }, [selectedConvId, closeEvidenceLightbox]);
 
   useEffect(() => {
-    if (!quoteDrawerOpen) setActiveImageIndex(null);
-  }, [quoteDrawerOpen]);
+    if (!quoteDrawerOpen) closeEvidenceLightbox();
+  }, [quoteDrawerOpen, closeEvidenceLightbox]);
 
   useEffect(() => {
-    if (!quoteDrawerOpen && activeImageIndex === null) return;
+    if (!quoteDrawerOpen && !evidenceLightbox) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = prevOverflow;
     };
-  }, [quoteDrawerOpen, activeImageIndex]);
+  }, [quoteDrawerOpen, evidenceLightbox]);
 
   useEffect(() => {
-    if (activeImageIndex === null) return;
+    if (!evidenceLightbox) return;
+    const { urls, index } = evidenceLightbox;
     const onKeyDown = (e) => {
       if (e.key === 'Escape') {
-        setActiveImageIndex(null);
+        closeEvidenceLightbox();
         return;
       }
-      if (e.key === 'ArrowLeft' && activeImageIndex > 0) {
-        setActiveImageIndex((i) => (i !== null ? i - 1 : null));
+      if (e.key === 'ArrowLeft' && index > 0) {
+        setEvidenceLightbox({ urls, index: index - 1 });
       }
-      if (
-        e.key === 'ArrowRight' &&
-        activeImageIndex < quoteEvidenceImageUrls.length - 1
-      ) {
-        setActiveImageIndex((i) => (i !== null ? i + 1 : null));
+      if (e.key === 'ArrowRight' && index < urls.length - 1) {
+        setEvidenceLightbox({ urls, index: index + 1 });
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeImageIndex, quoteEvidenceImageUrls.length]);
+  }, [evidenceLightbox, closeEvidenceLightbox]);
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
@@ -2160,7 +2172,7 @@ function ChatView({
     if (!quoteEvidenceImageUrls.length) return null;
     const count = quoteEvidenceImageUrls.length;
     return (
-      <div className="shrink-0 border-b border-slate-200 bg-slate-200/60 p-2">
+      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-200/60 p-2">
         <p className="mb-1.5 text-center text-[9px] font-medium text-slate-600">
           {count === 1
             ? 'Toca para ampliar'
@@ -2169,7 +2181,7 @@ function ChatView({
         {count === 1 ? (
           <button
             type="button"
-            onClick={() => setActiveImageIndex(0)}
+            onClick={() => openEvidenceLightbox(quoteEvidenceImageUrls, 0)}
             className="group block w-full text-center transition hover:opacity-95"
           >
             <img
@@ -2184,7 +2196,7 @@ function ChatView({
               <button
                 key={`${idx}-${imgUrl.slice(0, 48)}`}
                 type="button"
-                onClick={() => setActiveImageIndex(idx)}
+                onClick={() => openEvidenceLightbox(quoteEvidenceImageUrls, idx)}
                 className="group relative aspect-square overflow-hidden rounded-lg ring-1 ring-slate-300/80 transition hover:ring-2 hover:ring-indigo-400"
               >
                 <img
@@ -2204,8 +2216,8 @@ function ChatView({
   };
 
   const renderQuoteEvidenceLightbox = () => {
-    if (activeImageIndex === null) return null;
-    const urls = quoteEvidenceImageUrls;
+    if (!evidenceLightbox) return null;
+    const { urls, index: activeImageIndex } = evidenceLightbox;
     const current = urls[activeImageIndex];
     if (!current) return null;
 
@@ -2220,13 +2232,13 @@ function ChatView({
         role="dialog"
         aria-modal="true"
         aria-label="Visor de evidencia fotográfica"
-        onClick={() => setActiveImageIndex(null)}
+        onClick={closeEvidenceLightbox}
       >
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setActiveImageIndex(null);
+            closeEvidenceLightbox();
           }}
           className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 z-10 inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-2xl text-white backdrop-blur-sm transition hover:bg-white/20"
           aria-label="Cerrar visor"
@@ -2239,7 +2251,7 @@ function ChatView({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setActiveImageIndex((i) => (i !== null && i > 0 ? i - 1 : i));
+              setEvidenceLightbox({ urls, index: activeImageIndex - 1 });
             }}
             className={`absolute left-3 top-1/2 z-10 -translate-y-1/2 sm:left-6 ${navBtnClass}`}
             aria-label="Foto anterior"
@@ -2260,9 +2272,7 @@ function ChatView({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setActiveImageIndex((i) =>
-                i !== null && i < urls.length - 1 ? i + 1 : i,
-              );
+              setEvidenceLightbox({ urls, index: activeImageIndex + 1 });
             }}
             className={`absolute right-3 top-1/2 z-10 -translate-y-1/2 sm:right-6 ${navBtnClass}`}
             aria-label="Foto siguiente"
@@ -2653,15 +2663,13 @@ function ChatView({
                 </p>
                 {thumbs.length > 0 ? (
                   <div className="mt-1 flex flex-wrap gap-1">
-                    {thumbs.map((url) => (
+                    {thumbs.map((url, thumbIdx) => (
                       <button
                         key={url}
                         type="button"
-                        title="Abrir imagen"
-                        onClick={() =>
-                          window.open(url, '_blank', 'noopener,noreferrer')
-                        }
-                        className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90"
+                        title="Ver imagen en grande"
+                        onClick={() => openEvidenceLightbox(thumbs, thumbIdx)}
+                        className="overflow-hidden rounded-md border border-gray-200 shadow-sm transition hover:opacity-90 hover:ring-2 hover:ring-indigo-400"
                       >
                         <img
                           src={url}
@@ -2858,6 +2866,7 @@ function ChatView({
               ) : null}
             </div>
           ) : null}
+          {renderQuoteEvidenceThumbnailStrip()}
           {hasPanelQuote ? renderQuoteStatusBadges() : null}
           {renderApprovedCartSection()}
           {renderQuoteDamagesSection()}
@@ -3362,7 +3371,6 @@ function ChatView({
             Borrador generado por IA · requiere tu validación
           </p>
         </div>
-        {renderQuoteEvidenceThumbnailStrip()}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
           {renderDraftQuotePanelBody()}
         </div>
@@ -3402,7 +3410,6 @@ function ChatView({
                   ✕
                 </button>
               </div>
-              {renderQuoteEvidenceThumbnailStrip()}
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
