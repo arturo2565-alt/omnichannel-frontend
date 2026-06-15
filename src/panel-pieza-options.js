@@ -16,6 +16,12 @@ export const PANEL_PIEZA_REFACCION_CODE = 'REFACCION';
 /** Baño de pintura completo (visión / catálogo por tamaño, no por código de golpe). */
 export const PANEL_PIEZA_BPC_CODE = 'BPC';
 
+/** Cerámico automotriz (servicio integral por tamaño). */
+export const PANEL_PIEZA_CERAMICO_CODE = 'CERAMICO';
+
+/** Estética automotriz integral (no confundir con Estética exterior / moldura). */
+export const PANEL_PIEZA_ESTETICA_AUTO_CODE = 'ESTETICA_AUTO';
+
 /**
  * Opciones del panel: `code` (valor guardado / select), `label` (visible corto),
  * `fullName` (cliente / narrativa), `catalogPieza` (matriz de precios).
@@ -127,8 +133,27 @@ export const PANEL_PIEZA_OPTIONS = [
     menuLabel: 'BPC — Baño de pintura completo',
     fullName: 'Baño de Pintura Completo',
     catalogPieza: 'Baño de Pintura Exterior',
-    group: 'Especiales',
+    group: 'Servicios integrales',
     banioCompleto: true,
+    integralService: true,
+  },
+  {
+    code: PANEL_PIEZA_CERAMICO_CODE,
+    label: 'Cerámico',
+    menuLabel: 'Cerámico — Cerámico Automotriz',
+    fullName: 'Cerámico Automotriz',
+    catalogPieza: 'Cerámico Automotriz',
+    group: 'Servicios integrales',
+    integralService: true,
+  },
+  {
+    code: PANEL_PIEZA_ESTETICA_AUTO_CODE,
+    label: 'Estética Auto.',
+    menuLabel: 'Estética — Estética Automotriz',
+    fullName: 'Estética Automotriz',
+    catalogPieza: 'Estética Automotriz',
+    group: 'Servicios integrales',
+    integralService: true,
   },
 ];
 
@@ -222,6 +247,22 @@ aliasNormToCode.set(
   normalizePiezaText('baño de pintura exterior'),
   PANEL_PIEZA_BPC_CODE,
 );
+aliasNormToCode.set(
+  normalizePiezaText('ceramico automotriz'),
+  PANEL_PIEZA_CERAMICO_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('cerámico automotriz'),
+  PANEL_PIEZA_CERAMICO_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('estetica automotriz'),
+  PANEL_PIEZA_ESTETICA_AUTO_CODE,
+);
+aliasNormToCode.set(
+  normalizePiezaText('estética automotriz'),
+  PANEL_PIEZA_ESTETICA_AUTO_CODE,
+);
 
 const catalogNamesByLengthDesc = [
   ...new Set(PANEL_PIEZA_OPTIONS.map((o) => o.catalogPieza)),
@@ -243,6 +284,7 @@ function matchCatalogPiezaFromFreeText(parteLibre) {
 /** Grupos ordenados para `<optgroup>`. */
 export const PANEL_PIEZA_OPTION_GROUPS = [
   'Especiales',
+  'Servicios integrales',
   'Salpicaderas',
   'Puertas',
   'Estribos',
@@ -359,12 +401,51 @@ export function isBanioPinturaCompletoPieza(raw) {
   );
 }
 
+/** Cerámico, estética automotriz o baño de pintura (precio por tamaño, sin severidad de golpe). */
+export function isIntegralPanelPieza(raw) {
+  const t = String(raw ?? '').trim();
+  if (
+    t === PANEL_PIEZA_BPC_CODE ||
+    t === PANEL_PIEZA_CERAMICO_CODE ||
+    t === PANEL_PIEZA_ESTETICA_AUTO_CODE
+  ) {
+    return true;
+  }
+  const opt = findPanelPiezaOption(raw);
+  if (opt?.integralService || opt?.banioCompleto) return true;
+  const n = normalizePiezaText(t);
+  if (n.includes('ceramico') && n.includes('automotriz')) return true;
+  if (n.includes('estetica') && n.includes('automotriz')) return true;
+  return isBanioPinturaCompletoPieza(raw);
+}
+
 export function isSpecialPanelPieza(raw) {
-  return (
-    isInternalDamageRangePieza(raw) ||
-    isRefaccionPieza(raw) ||
-    isBanioPinturaCompletoPieza(raw)
-  );
+  return isInternalDamageRangePieza(raw) || isRefaccionPieza(raw);
+}
+
+/** Etiqueta panel (Chico…) → tier del motor de catálogo (Compacto…). */
+export function panelSizeTierLabelToVehicleSizeTier(label) {
+  const t = String(label ?? '').trim();
+  const map = {
+    Chico: 'Compacto',
+    Compacto: 'Compacto',
+    Mediano: 'Mediano',
+    Grande: 'Grande',
+    XL: 'XL',
+  };
+  return map[t] ?? 'Compacto';
+}
+
+/** Tier del motor → etiqueta del selector del panel. */
+export function vehicleSizeTierToPanelSizeTierLabel(tier) {
+  const t = String(tier ?? '').trim();
+  const map = {
+    Compacto: 'Chico',
+    Mediano: 'Mediano',
+    Grande: 'Grande',
+    XL: 'XL',
+  };
+  return map[t] ?? 'Mediano';
 }
 
 /** Nombre completo para cliente / narrativa / API. */
@@ -379,7 +460,7 @@ export function getPiezaClienteDisplayName(raw) {
 
 /** Clave de fila en `PIEZA_DANO_PRICE_MATRIX`. */
 export function resolveCatalogPiezaForEstimate(raw) {
-  if (isSpecialPanelPieza(raw)) return '';
+  if (isInternalDamageRangePieza(raw) || isRefaccionPieza(raw)) return '';
   const opt = findPanelPiezaOption(raw);
   if (opt?.catalogPieza) return opt.catalogPieza;
   const canon = matchCatalogPiezaFromFreeText(raw);

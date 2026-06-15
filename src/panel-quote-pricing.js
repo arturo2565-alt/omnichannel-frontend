@@ -1,10 +1,15 @@
 import {
   computePiecePrice,
+  computeIntegralPrice,
   mergeRules,
   DAMAGE_MAGNITUDES,
   DAMAGE_MAGNITUDE_LABELS,
 } from './catalog-pricing.js';
-import { resolveCatalogPiezaForEstimate } from './panel-pieza-options.js';
+import {
+  resolveCatalogPiezaForEstimate,
+  isIntegralPanelPieza,
+  panelSizeTierLabelToVehicleSizeTier,
+} from './panel-pieza-options.js';
 import {
   calculateEstimate,
   coerceDamageLevelCode,
@@ -70,6 +75,16 @@ function pieceBaseMapFromCatalog(pieceBases) {
   return map;
 }
 
+function integralBaseMapFromCatalog(integralBases) {
+  const map = new Map();
+  for (const row of integralBases ?? []) {
+    const key = String(row?.servicio ?? '').trim();
+    if (!key) continue;
+    map.set(key, Math.max(0, Math.round(Number(row.basePrice) || 0)));
+  }
+  return map;
+}
+
 function lookupCatalogBasePrice(catalogPieza, pieceBasesMap) {
   const key = String(catalogPieza ?? '').trim();
   if (!key) return 0;
@@ -84,6 +99,37 @@ function lookupCatalogBasePrice(catalogPieza, pieceBasesMap) {
     }
   }
   return 0;
+}
+
+/**
+ * Precio sugerido para servicios integrales (cerámico, estética, baño) por tamaño de carrocería.
+ */
+export function computePanelIntegralPrice(pieza, sizeTierLabel, pricingCtx = {}) {
+  const catalogPieza = resolveCatalogPiezaForEstimate(pieza);
+  if (!catalogPieza) return 0;
+
+  const integralBasesMap = integralBaseMapFromCatalog(pricingCtx.integralBases);
+  const basePrice = lookupCatalogBasePrice(catalogPieza, integralBasesMap);
+  if (basePrice <= 0) return 0;
+
+  const profile = pricingCtx.vehicleProfile ?? {};
+  const sizeTier = panelSizeTierLabelToVehicleSizeTier(
+    sizeTierLabel ?? profile.sizeTier ?? 'Mediano',
+  );
+  return computeIntegralPrice({
+    basePrice,
+    sizeTier,
+    isPremium: Boolean(profile.isPremium),
+    rules: mergeRules(pricingCtx.rules),
+  });
+}
+
+/** Precio sugerido: integral por tamaño o pieza por severidad. */
+export function computePanelServicePrice(pieza, severidad, pricingCtx = {}) {
+  if (isIntegralPanelPieza(pieza)) {
+    return computePanelIntegralPrice(pieza, severidad, pricingCtx);
+  }
+  return computePanelPiecePrice(pieza, severidad, pricingCtx);
 }
 
 /**
@@ -121,8 +167,9 @@ export function computePanelPiecePrice(
 
 export function createPanelPricingContext({
   pieceBases,
+  integralBases,
   rules,
   vehicleProfile,
 } = {}) {
-  return { pieceBases, rules, vehicleProfile };
+  return { pieceBases, integralBases, rules, vehicleProfile };
 }

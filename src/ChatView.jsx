@@ -9,6 +9,7 @@ import {
   PANEL_DAMAGE_MAGNITUDES,
   PANEL_SEVERITY_LABELS,
   coercePanelDamageMagnitude,
+  computePanelIntegralPrice,
   computePanelPiecePrice,
   createPanelPricingContext,
 } from './panel-quote-pricing.js';
@@ -20,9 +21,10 @@ import {
   getPiezaSelectLabel,
   isInternalDamageRangePieza,
   isRefaccionPieza,
-  isBanioPinturaCompletoPieza,
+  isIntegralPanelPieza,
   isKnownPanelPiezaCode,
   normalizePiezaCodeForPanel,
+  vehicleSizeTierToPanelSizeTierLabel,
 } from './panel-pieza-options';
 
 // --- FUNCIONES DE UTILIDAD (Fuera del componente) ---
@@ -175,12 +177,13 @@ function parseDraftImageUrlField(imageUrl) {
 }
 
 function recalcRowPriceFromMatrix(row, pricingCtx) {
-  if (
-    isInternalDamageRangePieza(row.pieza) ||
-    isRefaccionPieza(row.pieza) ||
-    isBanioPinturaCompletoPieza(row.pieza)
-  ) {
+  if (isInternalDamageRangePieza(row.pieza) || isRefaccionPieza(row.pieza)) {
     return row;
+  }
+  if (isIntegralPanelPieza(row.pieza)) {
+    const n = computePanelIntegralPrice(row.pieza, row.severidad, pricingCtx);
+    if (n <= 0) return row;
+    return { ...row, precioInput: String(Math.round(n)) };
   }
   const n = computePanelPiecePrice(row.pieza, row.severidad, pricingCtx);
   if (n <= 0) return row;
@@ -263,8 +266,10 @@ function normalizePiezaForPanel(raw) {
 }
 
 function normalizePanelSeverityForRow(severidadRaw, pieza) {
-  if (isBanioPinturaCompletoPieza(pieza)) {
-    return String(severidadRaw ?? '').trim() || 'Mediano';
+  if (isIntegralPanelPieza(pieza)) {
+    const raw = String(severidadRaw ?? '').trim();
+    if (raw && BPC_SIZE_TIER_OPTIONS.includes(raw)) return raw;
+    return vehicleSizeTierToPanelSizeTierLabel(raw) || 'Mediano';
   }
   if (isInternalDamageRangePieza(pieza) || isRefaccionPieza(pieza)) {
     return 'N/A';
@@ -315,8 +320,8 @@ function buildQuoteRowFromSource({
       precioInput: String(Math.max(0, Math.round(Number(precio) || 0))),
     };
   }
-  if (isBanioPinturaCompletoPieza(pieza)) {
-    const tier = String(severidadRaw ?? '').trim() || 'Mediano';
+  if (isIntegralPanelPieza(pieza)) {
+    const tier = normalizePanelSeverityForRow(severidadRaw, pieza);
     return {
       ...base,
       severidad: tier,
@@ -353,18 +358,21 @@ function applyPiezaSelectionToRow(row, piezaCode, pricingCtx) {
       precioMaxInput: undefined,
     };
   }
-  if (isBanioPinturaCompletoPieza(piezaCode)) {
+  if (isIntegralPanelPieza(piezaCode)) {
     const next = {
       ...row,
       pieza: piezaCode,
-      severidad: row.severidad && BPC_SIZE_TIER_OPTIONS.includes(row.severidad)
-        ? row.severidad
-        : 'Mediano',
+      severidad:
+        row.severidad && BPC_SIZE_TIER_OPTIONS.includes(row.severidad)
+          ? row.severidad
+          : vehicleSizeTierToPanelSizeTierLabel(
+              pricingCtx?.vehicleProfile?.sizeTier,
+            ) || 'Mediano',
     };
     delete next.precioMinInput;
     delete next.precioMaxInput;
     delete next.refaccionDetalle;
-    return next;
+    return recalcRowPriceFromMatrix(next, pricingCtx);
   }
   const next = {
     ...row,
@@ -522,7 +530,7 @@ function quoteRowsToToolEmojiLines(rows) {
       }
       const piezaNombre = getPiezaClienteDisplayName(r.pieza);
       const price = rowAmountForPanelTotal(r);
-      const emoji = isBanioPinturaCompletoPieza(r.pieza) ? '🎨' : '🛠️';
+      const emoji = isIntegralPanelPieza(r.pieza) ? '🎨' : '🛠️';
       return `${emoji} ${piezaNombre}: $${formatMoneyClienteQuoteMxAmount(price)} MXN`;
     })
     .join('\n');
@@ -575,7 +583,7 @@ function buildPreviewNarrativePiecesFromQuoteRows(rows) {
         descripcionTecnica: detalle,
       };
     }
-    if (isBanioPinturaCompletoPieza(r.pieza)) {
+    if (isIntegralPanelPieza(r.pieza)) {
       const price = rowAmountForPanelTotal(r);
       return {
         pieza: getPiezaClienteDisplayName(r.pieza),
@@ -625,7 +633,7 @@ function quoteRowsValidForNarrativeRegen(rows) {
       if (!Number.isFinite(n) || n < 0) return false;
       continue;
     }
-    if (isBanioPinturaCompletoPieza(pieza)) {
+    if (isIntegralPanelPieza(pieza)) {
       const n = parsePrecioInput(r.precioInput);
       if (!Number.isFinite(n) || n < 0) return false;
       continue;
@@ -768,6 +776,7 @@ function ChatView({
     setEvidenceLightbox(null);
   }, []);
   const [catalogPieceBases, setCatalogPieceBases] = useState([]);
+  const [catalogIntegralBases, setCatalogIntegralBases] = useState([]);
   const [catalogPricingRules, setCatalogPricingRules] = useState(null);
 
   const filteredContacts = useMemo(() => {
@@ -1006,10 +1015,16 @@ function ChatView({
     () =>
       createPanelPricingContext({
         pieceBases: catalogPieceBases,
+        integralBases: catalogIntegralBases,
         rules: catalogPricingRules,
         vehicleProfile: panelVehicleProfile,
       }),
-    [catalogPieceBases, catalogPricingRules, panelVehicleProfile],
+    [
+      catalogPieceBases,
+      catalogIntegralBases,
+      catalogPricingRules,
+      panelVehicleProfile,
+    ],
   );
 
   useEffect(() => {
@@ -1024,10 +1039,14 @@ function ChatView({
         setCatalogPieceBases(
           Array.isArray(data.pieceBases) ? data.pieceBases : [],
         );
+        setCatalogIntegralBases(
+          Array.isArray(data.integralBases) ? data.integralBases : [],
+        );
         setCatalogPricingRules(data.rules ?? null);
       } catch (e) {
         if (e?.name !== 'AbortError') {
           setCatalogPieceBases([]);
+          setCatalogIntegralBases([]);
           setCatalogPricingRules(null);
         }
       }
@@ -1438,7 +1457,7 @@ function ChatView({
             isRange: false,
           };
         }
-        if (isBanioPinturaCompletoPieza(r.pieza)) {
+        if (isIntegralPanelPieza(r.pieza)) {
           const sub = rowAmountForPanelTotal(r);
           const tier = String(r.severidad ?? '').trim();
           return {
@@ -2411,7 +2430,7 @@ function ChatView({
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
                 <div className="flex min-w-0 flex-1 items-baseline gap-2">
                   <span className="shrink-0 text-[11px] font-bold text-slate-800">
-                    Daño {idx + 1}
+                    Servicio {idx + 1}
                   </span>
                         {row.pieza && !isPlaceholderPieza(row.pieza) ? (
                           <span
@@ -2524,7 +2543,7 @@ function ChatView({
               </div>
               {!isInternalDamageRangePieza(row.pieza) &&
               !isRefaccionPieza(row.pieza) ? (
-                isBanioPinturaCompletoPieza(row.pieza) ? (
+                isIntegralPanelPieza(row.pieza) ? (
                   <label className="mt-2 block text-[10px] font-medium text-gray-700">
                     Tamaño de carrocería
                     <select
@@ -2532,11 +2551,13 @@ function ChatView({
                       onChange={(e) => {
                         setQuoteFormDirty(true);
                         setQuoteRows((prev) =>
-                          prev.map((r) =>
-                            r.id === row.id
-                              ? { ...r, severidad: e.target.value }
-                              : r,
-                          ),
+                          prev.map((r) => {
+                            if (r.id !== row.id) return r;
+                            return recalcRowPriceFromMatrix(
+                              { ...r, severidad: e.target.value },
+                              panelPricingContext,
+                            );
+                          }),
                         );
                       }}
                       className="mt-0.5 w-full min-h-11 rounded-md border border-gray-200 bg-white px-2 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
