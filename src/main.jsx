@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import CalendarPage from './CalendarPage.jsx'
+import DashboardView from './DashboardView.jsx'
 import AiSettingsPage from './AiSettingsPage.jsx'
 import CatalogAdminPage from './CatalogAdminPage.jsx'
 import LoginPage from './LoginPage.jsx'
@@ -21,6 +22,14 @@ createRoot(document.getElementById('root')).render(
             element={
               <ProtectedRoute>
                 <App />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardView />
               </ProtectedRoute>
             }
           />

@@ -93,6 +93,24 @@ export function apiFetchOrigin(path, options) {
  * Kill switch: apaga alarma Twilio de cliente esperando afuera.
  * @param {string} conversationId
  */
+export async function fetchKpis() {
+  const res = await apiFetchOrigin('/api/dashboard/kpis');
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  return res.json();
+}
+
+export async function fetchHotLeads(limit = 10) {
+  const n = Math.min(100, Math.max(1, Math.floor(Number(limit) || 10)));
+  const res = await apiFetchOrigin(`/api/dashboard/hot-leads?limit=${n}`);
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
 export async function markClienteAtendidoRequest(conversationId) {
   const id = String(conversationId ?? '').trim();
   if (!id) {

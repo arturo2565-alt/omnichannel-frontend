@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, LogOut } from 'lucide-react';
+import { Calendar, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -119,21 +119,31 @@ const getPreviewText = (content) => {
   return content;
 };
 
-/** Alinea con backend `Conversation.status` (compat. `open` legado). */
+/** Alinea con backend `Conversation.status` (compat. `open` / `por_cotizar` legado). */
 function normalizeConversationLeadStatus(raw) {
   const s = String(raw ?? '').toLowerCase().trim();
-  if (['nuevo', 'por_cotizar', 'cotizado', 'agendado'].includes(s)) return s;
-  if (s === 'open' || s === 'closed') return 'nuevo';
+  if (
+    [
+      'nuevo',
+      'cotizado',
+      'agendado',
+      'recordatorio_enviado',
+      'atendido',
+      'en_taller',
+      'no_asistio',
+      'completado',
+      'transferido',
+    ].includes(s)
+  ) {
+    return s;
+  }
+  if (s === 'open' || s === 'closed' || s === 'por_cotizar') return 'nuevo';
   return 'nuevo';
 }
 
 const LeadStatusBadge = ({ status }) => {
   const st = normalizeConversationLeadStatus(status);
   const map = {
-    por_cotizar: {
-      label: 'Por cotizar',
-      className: 'bg-red-100 text-red-800 border-red-200',
-    },
     cotizado: {
       label: 'Cotizado',
       className: 'bg-blue-100 text-blue-800 border-blue-200',
@@ -141,6 +151,30 @@ const LeadStatusBadge = ({ status }) => {
     agendado: {
       label: 'Agendado',
       className: 'bg-green-100 text-green-800 border-green-200',
+    },
+    recordatorio_enviado: {
+      label: 'Recordatorio',
+      className: 'bg-amber-100 text-amber-800 border-amber-200',
+    },
+    atendido: {
+      label: 'Atendido',
+      className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    },
+    en_taller: {
+      label: 'En taller',
+      className: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    },
+    no_asistio: {
+      label: 'No asistió',
+      className: 'bg-orange-100 text-orange-800 border-orange-200',
+    },
+    completado: {
+      label: 'Completado',
+      className: 'bg-green-100 text-green-900 border-green-200',
+    },
+    transferido: {
+      label: 'Transferido',
+      className: 'bg-purple-100 text-purple-800 border-purple-200',
     },
     nuevo: {
       label: 'Nuevo',
@@ -3040,6 +3074,14 @@ function ChatView({
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2 lg:hidden">
+              <Link
+                to="/dashboard"
+                title="Dashboard"
+                aria-label="Ir al dashboard"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-sky-200/90 bg-gradient-to-br from-sky-50 via-white to-blue-50 text-sky-700 shadow-md ring-1 ring-sky-100/80 transition active:scale-95 hover:border-sky-300 hover:shadow-lg"
+              >
+                <LayoutDashboard className="h-5 w-5" strokeWidth={2} aria-hidden />
+              </Link>
               <Link
                 to="/calendar"
                 title="Citas y agenda"

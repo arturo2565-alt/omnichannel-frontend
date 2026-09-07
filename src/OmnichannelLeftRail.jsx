@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, LogOut, MessageCircle, Settings2, Table2 } from 'lucide-react';
+import { Calendar, LayoutDashboard, LogOut, MessageCircle, Settings2, Table2 } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 
 const railBtn =
@@ -22,6 +22,19 @@ export function OmnichannelLeftRail({ platformSlot }) {
         className="flex flex-col items-center space-y-4"
         aria-label="Navegación"
       >
+        <NavLink
+          to="/dashboard"
+          title="Dashboard"
+          className={({ isActive }) =>
+            `${railBtn} ${
+              isActive
+                ? 'scale-105 bg-sky-600 text-white ring-2 ring-white ring-offset-2 ring-offset-gray-900 border-sky-400'
+                : 'border-gray-600 bg-gray-800/90 text-gray-200 hover:bg-gray-700'
+            }`
+          }
+        >
+          <LayoutDashboard className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </NavLink>
         <NavLink
           to="/"
           end
