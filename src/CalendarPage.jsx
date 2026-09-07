@@ -122,7 +122,12 @@ export default function CalendarPage() {
                 >
                   <div className="mb-3 flex items-start justify-between gap-2">
                     <h2 className="font-semibold text-gray-900">
-                      {a.clientName || 'Cliente'}
+                      {a.clientName &&
+                      String(a.clientName).trim() &&
+                      String(a.clientName).trim().toLowerCase() !==
+                        'cliente desconocido'
+                        ? a.clientName
+                        : 'Cliente'}
                     </h2>
                     <span
                       className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(a.status)}`}
@@ -147,6 +152,20 @@ export default function CalendarPage() {
                       Vehículo no indicado
                     </p>
                   )}
+                  {a.quoteSummary ? (
+                    <p className="mt-1 text-sm text-gray-600">
+                      <span className="font-medium text-gray-700">
+                        Cotización:
+                      </span>{' '}
+                      {a.quoteSummary}
+                    </p>
+                  ) : null}
+                  {a.phone ? (
+                    <p className="mt-1 text-sm text-gray-600">
+                      <span className="font-medium text-gray-700">Tel:</span>{' '}
+                      {a.phone}
+                    </p>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
                     {canCall ? (
