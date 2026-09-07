@@ -364,6 +364,22 @@ function App() {
     );
   };
 
+  const handleLeadStatusChange = (conversationId, patch) => {
+    setContacts((prev) =>
+      prev.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              ...(patch?.status ? { status: patch.status } : {}),
+              ...(patch?.isAutoPilotActive !== undefined
+                ? { isAutoPilotActive: patch.isAutoPilotActive }
+                : {}),
+            }
+          : c,
+      ),
+    );
+  };
+
   const handleClienteEsperandoAtendido = (conversationId) => {
     setContacts((prev) =>
       prev.map((c) =>
@@ -407,6 +423,7 @@ function App() {
       onDraftQuotePatched={handleDraftQuotePatched}
       onDeleteConversation={handleDeleteConversation}
       onClienteEsperandoAtendido={handleClienteEsperandoAtendido}
+      onLeadStatusChange={handleLeadStatusChange}
     />
     </>
   );

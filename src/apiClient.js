@@ -90,9 +90,37 @@ export function apiFetchOrigin(path, options) {
 }
 
 /**
- * Kill switch: apaga alarma Twilio de cliente esperando afuera.
+ * Transición manual de patio (`lead_events` + `conversation.status`).
  * @param {string} conversationId
+ * @param {string} newStatus
+ * @param {Record<string, unknown>} [metadata]
  */
+export async function transitionConversationStatus(
+  conversationId,
+  newStatus,
+  metadata,
+) {
+  const id = String(conversationId ?? '').trim();
+  const status = String(newStatus ?? '').trim();
+  if (!id) {
+    throw new Error('Falta el id de la conversación.');
+  }
+  if (!status) {
+    throw new Error('Falta el nuevo status.');
+  }
+  const res = await apiFetchOrigin(`/api/conversations/${id}/transition`, {
+    method: 'POST',
+    body: JSON.stringify({
+      newStatus: status,
+      ...(metadata && typeof metadata === 'object' ? { metadata } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  return res.json();
+}
+
 export async function fetchKpis() {
   const res = await apiFetchOrigin('/api/dashboard/kpis');
   if (!res.ok) {

@@ -4,7 +4,7 @@ import { Calendar, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
-import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest } from './apiClient.js';
+import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
 import {
   PANEL_DAMAGE_MAGNITUDES,
   PANEL_SEVERITY_LABELS,
@@ -783,6 +783,7 @@ function ChatView({
   onDraftQuotePatched,
   onDeleteConversation,
   onClienteEsperandoAtendido,
+  onLeadStatusChange,
 }) {
 
   const { logout } = useAuth();
@@ -843,8 +844,12 @@ function ChatView({
   );
 
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
+  const selectedLeadStatus = normalizeConversationLeadStatus(
+    selectedContact?.status,
+  );
 
   const [autoPilotToggleBusy, setAutoPilotToggleBusy] = useState(false);
+  const [patioTransitionBusy, setPatioTransitionBusy] = useState(null);
   const [deleteConversationBusy, setDeleteConversationBusy] = useState(false);
   const [arrivalAlarmBusy, setArrivalAlarmBusy] = useState(false);
   const [arrivalAlarmDismissedLocal, setArrivalAlarmDismissedLocal] =
@@ -923,6 +928,46 @@ function ChatView({
     autoPilotToggleBusy,
     onRefresh,
   ]);
+
+  const handlePatioTransition = useCallback(
+    async (newStatus, confirmText, options = {}) => {
+      if (!selectedConvId || patioTransitionBusy) return;
+      if (confirmText && !window.confirm(confirmText)) return;
+
+      let metadata;
+      if (options.askPrecioFinal) {
+        const raw = window.prompt(
+          'Precio final cobrado (MXN). Déjalo vacío si no aplica.',
+          '',
+        );
+        if (raw === null) return;
+        const n = Number(String(raw).replace(/[^\d.]/g, ''));
+        if (Number.isFinite(n) && n > 0) {
+          metadata = { total: Math.round(n), precioFinal: Math.round(n) };
+        }
+      }
+
+      setPatioTransitionBusy(newStatus);
+      try {
+        const result = await transitionConversationStatus(
+          selectedConvId,
+          newStatus,
+          metadata,
+        );
+        onLeadStatusChange?.(selectedConvId, {
+          status: result?.status ?? newStatus,
+          isAutoPilotActive: result?.isAutoPilotActive,
+        });
+        onRefresh?.();
+      } catch (e) {
+        console.error('Patio transition:', e);
+        window.alert(e?.message || 'No se pudo actualizar el estado');
+      } finally {
+        setPatioTransitionBusy(null);
+      }
+    },
+    [selectedConvId, patioTransitionBusy, onLeadStatusChange, onRefresh],
+  );
 
   const [conversationDraftRows, setConversationDraftRows] = useState([]);
   /** Vista agregada del carrito global (aprobado + complemento/pendiente). */
@@ -3206,9 +3251,7 @@ function ChatView({
                 </div>
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm">{selectedUserName}</span>
-                  <span className="hidden truncate text-[10px] font-normal text-gray-400 sm:inline">
-                    ID: {selectedConvId}
-                  </span>
+                  <LeadStatusBadge status={selectedLeadStatus} />
                 </div>
               </div>
               {showMobileQuoteCta ? (
@@ -3285,6 +3328,82 @@ function ChatView({
                   {isConnected ? 'Online' : 'Desconectado'}
                 </span>
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-slate-50/90 px-3 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Patio
+              </span>
+              {selectedLeadStatus === 'agendado' ||
+              selectedLeadStatus === 'atendido' ? (
+                <button
+                  type="button"
+                  disabled={Boolean(patioTransitionBusy)}
+                  onClick={() =>
+                    void handlePatioTransition(
+                      'en_taller',
+                      '¿Confirmas que el vehículo ingresó al taller?',
+                    )
+                  }
+                  className="inline-flex min-h-8 items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-800 transition hover:bg-indigo-100 disabled:opacity-50"
+                >
+                  {patioTransitionBusy === 'en_taller'
+                    ? 'Guardando…'
+                    : 'Ingresó a taller'}
+                </button>
+              ) : null}
+              {selectedLeadStatus === 'agendado' ? (
+                <button
+                  type="button"
+                  disabled={Boolean(patioTransitionBusy)}
+                  onClick={() =>
+                    void handlePatioTransition(
+                      'no_asistio',
+                      '¿Marcar que el cliente no asistió a su cita?',
+                    )
+                  }
+                  className="inline-flex min-h-8 items-center rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-800 transition hover:bg-orange-100 disabled:opacity-50"
+                >
+                  {patioTransitionBusy === 'no_asistio'
+                    ? 'Guardando…'
+                    : 'No asistió'}
+                </button>
+              ) : null}
+              {selectedLeadStatus === 'en_taller' ? (
+                <button
+                  type="button"
+                  disabled={Boolean(patioTransitionBusy)}
+                  onClick={() =>
+                    void handlePatioTransition(
+                      'completado',
+                      '¿Entregar el vehículo y marcar como cobrado?',
+                      { askPrecioFinal: true },
+                    )
+                  }
+                  className="inline-flex min-h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {patioTransitionBusy === 'completado'
+                    ? 'Guardando…'
+                    : 'Entregar y cobrar'}
+                </button>
+              ) : null}
+              {selectedLeadStatus !== 'transferido' &&
+              selectedLeadStatus !== 'completado' ? (
+                <button
+                  type="button"
+                  disabled={Boolean(patioTransitionBusy)}
+                  onClick={() =>
+                    void handlePatioTransition(
+                      'transferido',
+                      '¿Pausar la IA y transferir esta conversación a un asesor?',
+                    )
+                  }
+                  className="inline-flex min-h-8 items-center rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-800 transition hover:bg-purple-100 disabled:opacity-50"
+                >
+                  {patioTransitionBusy === 'transferido'
+                    ? 'Guardando…'
+                    : 'Pausar IA / Humano'}
+                </button>
+              ) : null}
             </div>
             
             {/* Mensajes Chat */}
