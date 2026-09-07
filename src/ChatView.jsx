@@ -219,12 +219,18 @@ const BANDEJA_CHANNEL_FILTERS = [
   { id: 'facebook', label: 'Facebook' },
 ];
 
+function statusFilterDotClass(id) {
+  if (!id || id === 'todos') return 'bg-gray-300';
+  return LEAD_STATUS_STYLE[id]?.dot ?? 'bg-gray-300';
+}
+
 function BandejaFilterSelect({
   label,
   value,
   options,
   onChange,
   counts,
+  showStatusDots = false,
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -251,13 +257,20 @@ function BandejaFilterSelect({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-800 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
       >
-        <span className="truncate">
-          {current?.label}
-          {counts && current ? (
-            <span className="ml-1 text-[10px] font-normal text-gray-400">
-              {counts[current.id] ?? 0}
-            </span>
+        <span className="flex min-w-0 items-center gap-1.5 truncate">
+          {showStatusDots ? (
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusFilterDotClass(current?.id)}`}
+            />
           ) : null}
+          <span className="truncate">
+            {current?.label}
+            {counts && current ? (
+              <span className="ml-1 text-[10px] font-normal text-gray-400">
+                {counts[current.id] ?? 0}
+              </span>
+            ) : null}
+          </span>
         </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" strokeWidth={2} />
       </button>
@@ -283,7 +296,14 @@ function BandejaFilterSelect({
                     active ? 'font-semibold text-gray-900' : 'text-gray-600'
                   }`}
                 >
-                  <span>{opt.label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    {showStatusDots ? (
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusFilterDotClass(opt.id)}`}
+                      />
+                    ) : null}
+                    {opt.label}
+                  </span>
                   {typeof n === 'number' ? (
                     <span className="tabular-nums text-[10px] text-gray-400">{n}</span>
                   ) : null}
@@ -3378,6 +3398,7 @@ function ChatView({
               options={BANDEJA_STATUS_FILTERS}
               onChange={setSelectedStatusFilter}
               counts={statusFilterCounts}
+              showStatusDots
             />
           </div>
         </div>
