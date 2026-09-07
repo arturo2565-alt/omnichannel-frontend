@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, ChevronDown, LayoutDashboard, LogOut } from 'lucide-react';
+import { Calendar, ChevronDown, LayoutDashboard, LogOut, MoreVertical } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -390,6 +390,94 @@ function LeadStatusDropdown({ status, busy, onSelect }) {
             );
           })}
         </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatHeaderActionsMenu({
+  autoPilotOn,
+  autoPilotBusy,
+  autoPilotDisabled,
+  onToggleAutoPilot,
+  deleteBusy,
+  deleteDisabled,
+  onDelete,
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocDown = (ev) => {
+      if (!rootRef.current?.contains(ev.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Más acciones"
+        title="Más acciones"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50"
+      >
+        <MoreVertical className="h-4 w-4" strokeWidth={2} />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+        >
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <span
+              id="autopilot-label"
+              className="text-xs font-medium text-gray-700"
+            >
+              Autopilot
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-labelledby="autopilot-label"
+              aria-checked={autoPilotOn}
+              disabled={autoPilotDisabled || autoPilotBusy}
+              title={
+                autoPilotOn
+                  ? 'Respuestas IA automáticas activadas'
+                  : 'Solo sugerencias en panel; sin respuesta automática'
+              }
+              onClick={() => onToggleAutoPilot?.()}
+              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 disabled:opacity-50 ${
+                autoPilotOn ? 'bg-indigo-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  autoPilotOn ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="my-1 h-px bg-gray-100" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={deleteDisabled || deleteBusy}
+            onClick={() => {
+              setOpen(false);
+              onDelete?.();
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {deleteBusy ? 'Eliminando…' : 'Eliminar conversación'}
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -3518,60 +3606,15 @@ function ChatView({
                   </span>
                 </button>
               ) : null}
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 shadow-sm">
-                  <span
-                    className="text-[11px] font-medium text-slate-700"
-                    id="autopilot-label"
-                  >
-                    Autopilot
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-labelledby="autopilot-label"
-                    aria-checked={
-                      selectedContact?.isAutoPilotActive !== false
-                    }
-                    disabled={!apiBaseUrl || autoPilotToggleBusy}
-                    title={
-                      (selectedContact?.isAutoPilotActive !== false)
-                        ? 'Respuestas IA automáticas activadas'
-                        : 'Solo sugerencias en panel; sin respuesta automática'
-                    }
-                    onClick={handleAutoPilotToggle}
-                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 disabled:opacity-50 ${
-                      selectedContact?.isAutoPilotActive !== false
-                        ? 'bg-indigo-600'
-                        : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        selectedContact?.isAutoPilotActive !== false
-                          ? 'translate-x-5'
-                          : 'translate-x-0.5'
-                      }`}
-                    />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteConversationClick()}
-                  disabled={!selectedConvId || deleteConversationBusy}
-                  title="Eliminar conversación y todo su historial"
-                  aria-label="Eliminar conversación"
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-lg transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <span className="text-red-500 hover:text-red-700" aria-hidden>
-                    🗑️
-                  </span>
-                </button>
-                <span className={`flex shrink-0 items-center text-xs font-normal ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
-                  <span className={`mr-2 h-2 w-2 rounded-full ${isConnected ? 'animate-pulse bg-green-500' : 'bg-red-500'}`} />
-                  {isConnected ? 'Online' : 'Desconectado'}
-                </span>
-              </div>
+              <ChatHeaderActionsMenu
+                autoPilotOn={selectedContact?.isAutoPilotActive !== false}
+                autoPilotBusy={autoPilotToggleBusy}
+                autoPilotDisabled={!apiBaseUrl}
+                onToggleAutoPilot={handleAutoPilotToggle}
+                deleteBusy={deleteConversationBusy}
+                deleteDisabled={!selectedConvId}
+                onDelete={() => void handleDeleteConversationClick()}
+              />
             </div>
             
             {/* Mensajes Chat */}
