@@ -212,6 +212,91 @@ const BANDEJA_STATUS_FILTERS = [
   { id: 'transferido', label: 'Transferidos' },
 ];
 
+const BANDEJA_CHANNEL_FILTERS = [
+  { id: 'all', label: 'Todos' },
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'facebook', label: 'Facebook' },
+];
+
+function BandejaFilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+  counts,
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const current = options.find((o) => o.id === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocDown = (ev) => {
+      if (!rootRef.current?.contains(ev.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative min-w-0 flex-1">
+      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+        {label}
+      </p>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-800 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+      >
+        <span className="truncate">
+          {current?.label}
+          {counts && current ? (
+            <span className="ml-1 text-[10px] font-normal text-gray-400">
+              {counts[current.id] ?? 0}
+            </span>
+          ) : null}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" strokeWidth={2} />
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+        >
+          {options.map((opt) => {
+            const active = opt.id === value;
+            const n = counts?.[opt.id];
+            return (
+              <li key={opt.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => {
+                    setOpen(false);
+                    onChange?.(opt.id);
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-gray-50 ${
+                    active ? 'font-semibold text-gray-900' : 'text-gray-600'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {typeof n === 'number' ? (
+                    <span className="tabular-nums text-[10px] text-gray-400">{n}</span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 const LeadStatusBadge = ({ status }) => {
   const st = normalizeConversationLeadStatus(status);
   const cfg = LEAD_STATUS_STYLE[st] ?? LEAD_STATUS_STYLE.nuevo;
@@ -3249,7 +3334,7 @@ function ChatView({
                 Bandeja
               </h2>
               <p className="mt-1 text-[11px] font-medium text-gray-500">
-                Filtra conversaciones por canal
+                Filtra por canal y estado
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2 lg:hidden">
@@ -3280,61 +3365,20 @@ function ChatView({
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-2">
-            {[
-              { id: 'all', label: 'Todos' },
-              { id: 'whatsapp', label: 'WhatsApp' },
-              { id: 'instagram', label: 'Instagram' },
-              { id: 'facebook', label: 'Facebook' },
-            ].map(({ id, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setPlatformFilter(id)}
-                className={`text-[11px] px-2.5 py-1 rounded-full border transition ${
-                  platformFilter === id
-                    ? 'bg-gray-900 text-white border-gray-900'
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div
-            className="flex items-center gap-1.5 overflow-x-auto px-4 pb-2 text-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            role="tablist"
-            aria-label="Filtrar por estado"
-          >
-            {BANDEJA_STATUS_FILTERS.map(({ id, label }) => {
-              const active = selectedStatusFilter === id;
-              const count = statusFilterCounts[id] ?? 0;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setSelectedStatusFilter(id)}
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
-                    active
-                      ? 'border-gray-900 bg-gray-900 text-white'
-                      : 'border-transparent bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {label}
-                  <span
-                    className={`min-w-[1.1rem] rounded-full px-1 text-[9px] tabular-nums ${
-                      active
-                        ? 'bg-white/20 text-white'
-                        : 'bg-white text-gray-500'
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="flex items-start gap-2 px-4 py-3">
+            <BandejaFilterSelect
+              label="Canal"
+              value={platformFilter}
+              options={BANDEJA_CHANNEL_FILTERS}
+              onChange={setPlatformFilter}
+            />
+            <BandejaFilterSelect
+              label="Estado"
+              value={selectedStatusFilter}
+              options={BANDEJA_STATUS_FILTERS}
+              onChange={setSelectedStatusFilter}
+              counts={statusFilterCounts}
+            />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
