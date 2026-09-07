@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Calendar, LayoutDashboard, LogOut } from 'lucide-react';
+import { Calendar, ChevronDown, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -141,47 +141,68 @@ function normalizeConversationLeadStatus(raw) {
   return 'nuevo';
 }
 
+const LEAD_STATUS_STYLE = {
+  nuevo: {
+    label: 'Nuevo',
+    className: 'bg-gray-100 text-gray-600 border-gray-200',
+    dot: 'bg-gray-400',
+  },
+  cotizado: {
+    label: 'Cotizado',
+    className: 'bg-blue-100 text-blue-800 border-blue-200',
+    dot: 'bg-blue-500',
+  },
+  agendado: {
+    label: 'Agendado',
+    className: 'bg-green-100 text-green-800 border-green-200',
+    dot: 'bg-green-500',
+  },
+  recordatorio_enviado: {
+    label: 'Recordatorio',
+    className: 'bg-amber-100 text-amber-800 border-amber-200',
+    dot: 'bg-amber-500',
+  },
+  atendido: {
+    label: 'Atendido',
+    className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    dot: 'bg-emerald-500',
+  },
+  en_taller: {
+    label: 'En taller',
+    className: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    dot: 'bg-indigo-500',
+  },
+  no_asistio: {
+    label: 'No asistió',
+    className: 'bg-orange-100 text-orange-800 border-orange-200',
+    dot: 'bg-orange-500',
+  },
+  completado: {
+    label: 'Completado',
+    className: 'bg-green-100 text-green-900 border-green-200',
+    dot: 'bg-green-700',
+  },
+  transferido: {
+    label: 'Transferido',
+    className: 'bg-purple-100 text-purple-800 border-purple-200',
+    dot: 'bg-purple-500',
+  },
+};
+
+const LEAD_STATUS_MENU = [
+  'nuevo',
+  'cotizado',
+  'agendado',
+  'atendido',
+  'en_taller',
+  'no_asistio',
+  'completado',
+  'transferido',
+];
+
 const LeadStatusBadge = ({ status }) => {
   const st = normalizeConversationLeadStatus(status);
-  const map = {
-    cotizado: {
-      label: 'Cotizado',
-      className: 'bg-blue-100 text-blue-800 border-blue-200',
-    },
-    agendado: {
-      label: 'Agendado',
-      className: 'bg-green-100 text-green-800 border-green-200',
-    },
-    recordatorio_enviado: {
-      label: 'Recordatorio',
-      className: 'bg-amber-100 text-amber-800 border-amber-200',
-    },
-    atendido: {
-      label: 'Atendido',
-      className: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    },
-    en_taller: {
-      label: 'En taller',
-      className: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-    },
-    no_asistio: {
-      label: 'No asistió',
-      className: 'bg-orange-100 text-orange-800 border-orange-200',
-    },
-    completado: {
-      label: 'Completado',
-      className: 'bg-green-100 text-green-900 border-green-200',
-    },
-    transferido: {
-      label: 'Transferido',
-      className: 'bg-purple-100 text-purple-800 border-purple-200',
-    },
-    nuevo: {
-      label: 'Nuevo',
-      className: 'bg-gray-100 text-gray-600 border-gray-200',
-    },
-  };
-  const cfg = map[st] ?? map.nuevo;
+  const cfg = LEAD_STATUS_STYLE[st] ?? LEAD_STATUS_STYLE.nuevo;
   return (
     <span
       className={`mt-0.5 inline-flex w-fit max-w-full items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${cfg.className}`}
@@ -190,6 +211,72 @@ const LeadStatusBadge = ({ status }) => {
     </span>
   );
 };
+
+function LeadStatusDropdown({ status, busy, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const st = normalizeConversationLeadStatus(status);
+  const cfg = LEAD_STATUS_STYLE[st] ?? LEAD_STATUS_STYLE.nuevo;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocDown = (ev) => {
+      if (!rootRef.current?.contains(ev.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative mt-0.5 w-fit">
+      <button
+        type="button"
+        disabled={busy}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Cambiar estado del lead"
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex max-w-full items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide transition hover:brightness-95 disabled:opacity-60 ${cfg.className}`}
+      >
+        <span className="truncate">{busy ? 'Guardando…' : cfg.label}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-70" strokeWidth={2.5} />
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          className="absolute left-0 z-50 mt-1 min-w-[10.5rem] overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+        >
+          {LEAD_STATUS_MENU.map((value) => {
+            const item = LEAD_STATUS_STYLE[value];
+            const active = value === st;
+            return (
+              <li key={value}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  disabled={busy}
+                  onClick={() => {
+                    setOpen(false);
+                    if (!active) onSelect?.(value);
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-gray-50 disabled:opacity-50 ${
+                    active ? 'font-semibold text-gray-900' : 'text-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.dot}`}
+                  />
+                  {item.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 const BPC_SIZE_TIER_OPTIONS = ['Chico', 'Mediano', 'Grande', 'XL'];
 
@@ -929,44 +1016,51 @@ function ChatView({
     onRefresh,
   ]);
 
-  const handlePatioTransition = useCallback(
-    async (newStatus, confirmText, options = {}) => {
+  const handleLeadStatusSelect = useCallback(
+    async (newStatus) => {
       if (!selectedConvId || patioTransitionBusy) return;
-      if (confirmText && !window.confirm(confirmText)) return;
+      const next = String(newStatus ?? '').trim();
+      if (!next || next === selectedLeadStatus) return;
 
       let metadata;
-      if (options.askPrecioFinal) {
+      if (next === 'completado') {
         const raw = window.prompt(
-          'Precio final cobrado (MXN). Déjalo vacío si no aplica.',
+          'Monto cobrado (MXN). Cancela para no cambiar el estado.',
           '',
         );
         if (raw === null) return;
         const n = Number(String(raw).replace(/[^\d.]/g, ''));
         if (Number.isFinite(n) && n > 0) {
-          metadata = { total: Math.round(n), precioFinal: Math.round(n) };
+          metadata = { total: Math.round(n) };
         }
       }
 
-      setPatioTransitionBusy(newStatus);
+      setPatioTransitionBusy(next);
       try {
         const result = await transitionConversationStatus(
           selectedConvId,
-          newStatus,
+          next,
           metadata,
         );
         onLeadStatusChange?.(selectedConvId, {
-          status: result?.status ?? newStatus,
+          status: result?.status ?? next,
           isAutoPilotActive: result?.isAutoPilotActive,
         });
         onRefresh?.();
       } catch (e) {
-        console.error('Patio transition:', e);
+        console.error('Lead status transition:', e);
         window.alert(e?.message || 'No se pudo actualizar el estado');
       } finally {
         setPatioTransitionBusy(null);
       }
     },
-    [selectedConvId, patioTransitionBusy, onLeadStatusChange, onRefresh],
+    [
+      selectedConvId,
+      selectedLeadStatus,
+      patioTransitionBusy,
+      onLeadStatusChange,
+      onRefresh,
+    ],
   );
 
   const [conversationDraftRows, setConversationDraftRows] = useState([]);
@@ -3251,7 +3345,12 @@ function ChatView({
                 </div>
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm">{selectedUserName}</span>
-                  <LeadStatusBadge status={selectedLeadStatus} />
+                  <LeadStatusDropdown
+                    key={selectedConvId}
+                    status={selectedLeadStatus}
+                    busy={Boolean(patioTransitionBusy)}
+                    onSelect={handleLeadStatusSelect}
+                  />
                 </div>
               </div>
               {showMobileQuoteCta ? (
@@ -3328,82 +3427,6 @@ function ChatView({
                   {isConnected ? 'Online' : 'Desconectado'}
                 </span>
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-slate-50/90 px-3 py-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Patio
-              </span>
-              {selectedLeadStatus === 'agendado' ||
-              selectedLeadStatus === 'atendido' ? (
-                <button
-                  type="button"
-                  disabled={Boolean(patioTransitionBusy)}
-                  onClick={() =>
-                    void handlePatioTransition(
-                      'en_taller',
-                      '¿Confirmas que el vehículo ingresó al taller?',
-                    )
-                  }
-                  className="inline-flex min-h-8 items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-800 transition hover:bg-indigo-100 disabled:opacity-50"
-                >
-                  {patioTransitionBusy === 'en_taller'
-                    ? 'Guardando…'
-                    : 'Ingresó a taller'}
-                </button>
-              ) : null}
-              {selectedLeadStatus === 'agendado' ? (
-                <button
-                  type="button"
-                  disabled={Boolean(patioTransitionBusy)}
-                  onClick={() =>
-                    void handlePatioTransition(
-                      'no_asistio',
-                      '¿Marcar que el cliente no asistió a su cita?',
-                    )
-                  }
-                  className="inline-flex min-h-8 items-center rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-800 transition hover:bg-orange-100 disabled:opacity-50"
-                >
-                  {patioTransitionBusy === 'no_asistio'
-                    ? 'Guardando…'
-                    : 'No asistió'}
-                </button>
-              ) : null}
-              {selectedLeadStatus === 'en_taller' ? (
-                <button
-                  type="button"
-                  disabled={Boolean(patioTransitionBusy)}
-                  onClick={() =>
-                    void handlePatioTransition(
-                      'completado',
-                      '¿Entregar el vehículo y marcar como cobrado?',
-                      { askPrecioFinal: true },
-                    )
-                  }
-                  className="inline-flex min-h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
-                >
-                  {patioTransitionBusy === 'completado'
-                    ? 'Guardando…'
-                    : 'Entregar y cobrar'}
-                </button>
-              ) : null}
-              {selectedLeadStatus !== 'transferido' &&
-              selectedLeadStatus !== 'completado' ? (
-                <button
-                  type="button"
-                  disabled={Boolean(patioTransitionBusy)}
-                  onClick={() =>
-                    void handlePatioTransition(
-                      'transferido',
-                      '¿Pausar la IA y transferir esta conversación a un asesor?',
-                    )
-                  }
-                  className="inline-flex min-h-8 items-center rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-800 transition hover:bg-purple-100 disabled:opacity-50"
-                >
-                  {patioTransitionBusy === 'transferido'
-                    ? 'Guardando…'
-                    : 'Pausar IA / Humano'}
-                </button>
-              ) : null}
             </div>
             
             {/* Mensajes Chat */}
