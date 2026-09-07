@@ -200,6 +200,18 @@ const LEAD_STATUS_MENU = [
   'transferido',
 ];
 
+const BANDEJA_STATUS_FILTERS = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'nuevo', label: 'Nuevos' },
+  { id: 'cotizado', label: 'Cotizados' },
+  { id: 'agendado', label: 'Agendados' },
+  { id: 'en_taller', label: 'En Taller' },
+  { id: 'atendido', label: 'Atendidos' },
+  { id: 'no_asistio', label: 'No Asistió' },
+  { id: 'completado', label: 'Completados' },
+  { id: 'transferido', label: 'Transferidos' },
+];
+
 const LeadStatusBadge = ({ status }) => {
   const st = normalizeConversationLeadStatus(status);
   const cfg = LEAD_STATUS_STYLE[st] ?? LEAD_STATUS_STYLE.nuevo;
@@ -877,6 +889,7 @@ function ChatView({
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
   const [platformFilter, setPlatformFilter] = useState('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('todos');
   /** En móvil: lista vs chat a pantalla completa */
   const [showChatWindow, setShowChatWindow] = useState(false);
   /** En móvil: panel de cotización en bottom drawer */
@@ -902,8 +915,35 @@ function ChatView({
   const [catalogPricingRules, setCatalogPricingRules] = useState(null);
 
   const filteredContacts = useMemo(() => {
-    if (platformFilter === 'all') return contacts;
-    return contacts.filter((c) => classifyPlatform(c.platform) === platformFilter);
+    return contacts.filter((c) => {
+      if (
+        platformFilter !== 'all' &&
+        classifyPlatform(c.platform) !== platformFilter
+      ) {
+        return false;
+      }
+      if (selectedStatusFilter !== 'todos') {
+        return (
+          normalizeConversationLeadStatus(c.status) === selectedStatusFilter
+        );
+      }
+      return true;
+    });
+  }, [contacts, platformFilter, selectedStatusFilter]);
+
+  const statusFilterCounts = useMemo(() => {
+    const byChannel =
+      platformFilter === 'all'
+        ? contacts
+        : contacts.filter((c) => classifyPlatform(c.platform) === platformFilter);
+    const counts = { todos: byChannel.length };
+    for (const { id } of BANDEJA_STATUS_FILTERS) {
+      if (id === 'todos') continue;
+      counts[id] = byChannel.filter(
+        (c) => normalizeConversationLeadStatus(c.status) === id,
+      ).length;
+    }
+    return counts;
   }, [contacts, platformFilter]);
 
   /** Urgencia primero: `por_cotizar`, luego el resto por actividad reciente. */
@@ -3240,7 +3280,7 @@ function ChatView({
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-2">
             {[
               { id: 'all', label: 'Todos' },
               { id: 'whatsapp', label: 'WhatsApp' },
@@ -3261,8 +3301,48 @@ function ChatView({
               </button>
             ))}
           </div>
+          <div
+            className="flex items-center gap-1.5 overflow-x-auto px-4 pb-2 text-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="tablist"
+            aria-label="Filtrar por estado"
+          >
+            {BANDEJA_STATUS_FILTERS.map(({ id, label }) => {
+              const active = selectedStatusFilter === id;
+              const count = statusFilterCounts[id] ?? 0;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setSelectedStatusFilter(id)}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                    active
+                      ? 'border-gray-900 bg-gray-900 text-white'
+                      : 'border-transparent bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {label}
+                  <span
+                    className={`min-w-[1.1rem] rounded-full px-1 text-[9px] tabular-nums ${
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-white text-gray-500'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
+          {sortedBandejaContacts.length === 0 ? (
+            <p className="px-4 py-8 text-center text-xs text-gray-400">
+              No hay conversaciones con este filtro.
+            </p>
+          ) : null}
           {sortedBandejaContacts.map((contact) => {
             const leadSt = normalizeConversationLeadStatus(contact.status);
             const isUrgent = leadSt === 'por_cotizar';
