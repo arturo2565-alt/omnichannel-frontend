@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LayoutDashboard } from 'lucide-react';
+import { ChevronRight, LayoutDashboard } from 'lucide-react';
 import { fetchHotLeads, fetchKpis } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 
@@ -27,32 +27,44 @@ function formatQuoteDate(raw) {
   return DATE_FMT.format(d);
 }
 
-function formatPct(value) {
+function formatRoi(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return '0%';
-  return `${n.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`;
+  if (!Number.isFinite(n) || n <= 0) return '0×';
+  return `${n.toLocaleString('es-MX', {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: n % 1 === 0 ? 0 : 1,
+  })}×`;
+}
+
+function stepRate(current, previous) {
+  const cur = Number(current) || 0;
+  const prev = Number(previous) || 0;
+  if (prev <= 0) return null;
+  return Math.round((cur / prev) * 1000) / 10;
+}
+
+function formatStepPct(rate) {
+  if (rate == null) return '—';
+  return `${rate.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`;
 }
 
 const EMPTY_KPIS = {
-  pipelineActivo: 0,
-  valorEnPatio: 0,
-  tasaConversion: 0,
-  leadsNuevos: 0,
+  leadsAtendidos: 0,
+  cotizaciones: 0,
+  citas: 0,
+  llegaron: 0,
+  trabajosVendidos: 0,
+  ventasGeneradas: 0,
+  roiPegazuz: 0,
 };
 
-function KpiCard({ label, value, hint }) {
-  return (
-    <article className="rounded-lg border border-gray-100 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-        {label}
-      </p>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-gray-900 tabular-nums">
-        {value}
-      </p>
-      {hint ? <p className="mt-1 text-xs text-gray-400">{hint}</p> : null}
-    </article>
-  );
-}
+const FUNNEL_STEPS = [
+  { key: 'leadsAtendidos', label: 'Leads atendidos', hint: 'Conversaciones del taller' },
+  { key: 'cotizaciones', label: 'Cotizaciones', hint: 'Precio enviado' },
+  { key: 'citas', label: 'Citas agendadas', hint: 'Turnos confirmados' },
+  { key: 'llegaron', label: 'Llegaron al taller', hint: 'Clientes que asistieron' },
+  { key: 'trabajosVendidos', label: 'Trabajos vendidos', hint: 'En taller o completados' },
+];
 
 export default function DashboardView() {
   const [kpis, setKpis] = useState(EMPTY_KPIS);
@@ -69,10 +81,13 @@ export default function DashboardView() {
         fetchHotLeads(10),
       ]);
       setKpis({
-        pipelineActivo: Number(kpiData?.pipelineActivo) || 0,
-        valorEnPatio: Number(kpiData?.valorEnPatio) || 0,
-        tasaConversion: Number(kpiData?.tasaConversion) || 0,
-        leadsNuevos: Number(kpiData?.leadsNuevos) || 0,
+        leadsAtendidos: Number(kpiData?.leadsAtendidos) || 0,
+        cotizaciones: Number(kpiData?.cotizaciones) || 0,
+        citas: Number(kpiData?.citas) || 0,
+        llegaron: Number(kpiData?.llegaron) || 0,
+        trabajosVendidos: Number(kpiData?.trabajosVendidos) || 0,
+        ventasGeneradas: Number(kpiData?.ventasGeneradas) || 0,
+        roiPegazuz: Number(kpiData?.roiPegazuz) || 0,
       });
       setHotLeads(Array.isArray(leads) ? leads : []);
     } catch (e) {
@@ -88,6 +103,21 @@ export default function DashboardView() {
     void load();
   }, [load]);
 
+  const funnel = useMemo(
+    () =>
+      FUNNEL_STEPS.map((step, index) => {
+        const value = kpis[step.key] ?? 0;
+        const prevValue =
+          index === 0 ? null : (kpis[FUNNEL_STEPS[index - 1].key] ?? 0);
+        return {
+          ...step,
+          value,
+          rate: index === 0 ? null : stepRate(value, prevValue),
+        };
+      }),
+    [kpis],
+  );
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <OmnichannelLeftRail />
@@ -100,7 +130,7 @@ export default function DashboardView() {
             <div>
               <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
               <p className="mt-0.5 text-sm text-gray-500">
-                Pipeline, conversión y prospectos de mayor valor.
+                Embudo de conversión, ventas y prospectos de mayor valor.
               </p>
             </div>
           </div>
@@ -120,36 +150,80 @@ export default function DashboardView() {
             </div>
           ) : null}
 
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              label="Pipeline activo"
-              value={loading ? '…' : formatMxn(kpis.pipelineActivo)}
-              hint="Cotizado y aún sin agendar"
-            />
-            <KpiCard
-              label="Valor en patio"
-              value={loading ? '…' : formatMxn(kpis.valorEnPatio)}
-              hint="Leads en taller"
-            />
-            <KpiCard
-              label="Tasa de conversión"
-              value={loading ? '…' : formatPct(kpis.tasaConversion)}
-              hint="Agendados / nuevos (30 días)"
-            />
-            <KpiCard
-              label="Leads nuevos"
-              value={loading ? '…' : String(kpis.leadsNuevos)}
-              hint="Pendientes de cotizar"
-            />
+          <section className="overflow-hidden rounded-2xl border border-gray-900 bg-gray-900 px-6 py-6 text-white shadow-sm sm:px-8">
+            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-gray-400">
+              Impacto financiero
+            </p>
+            <div className="mt-3 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-400">Ventas generadas</p>
+                <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums sm:text-5xl">
+                  {loading ? '…' : formatMxn(kpis.ventasGeneradas)}
+                </p>
+              </div>
+              <div className="sm:text-right">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+                  ROI Pegazuz
+                </p>
+                <span className="inline-flex items-center rounded-full bg-emerald-400 px-3.5 py-1.5 text-lg font-bold tabular-nums text-gray-950">
+                  {loading ? '…' : formatRoi(kpis.roiPegazuz)}
+                </span>
+              </div>
+            </div>
+            <p className="mt-4 text-sm text-gray-400">
+              Retorno generado sobre el costo de la plataforma.
+            </p>
           </section>
 
-          <section className="mt-8 overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm">
+          <section className="mt-8">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Embudo de conversión
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Del primer contacto al trabajo vendido. El porcentaje es el paso
+                respecto a la etapa anterior.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {funnel.map((step, index) => (
+                <article
+                  key={step.key}
+                  className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  {index > 0 ? (
+                    <div className="mb-3 flex items-center gap-1.5 text-[11px] font-medium text-gray-500 xl:mb-2">
+                      <ChevronRight
+                        className="hidden h-3.5 w-3.5 text-gray-300 xl:inline"
+                        strokeWidth={2}
+                      />
+                      <span className="rounded-full bg-gray-50 px-2 py-0.5 tabular-nums text-gray-600">
+                        {loading ? '…' : formatStepPct(step.rate)}
+                      </span>
+                      <span className="text-gray-400">del paso anterior</span>
+                    </div>
+                  ) : (
+                    <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-gray-400 xl:mb-2">
+                      Inicio
+                    </p>
+                  )}
+                  <p className="text-xs font-medium text-gray-500">{step.label}</p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums text-gray-900">
+                    {loading ? '…' : step.value.toLocaleString('es-MX')}
+                  </p>
+                  <p className="mt-1 text-[11px] text-gray-400">{step.hint}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-8 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-100 px-5 py-4">
               <h2 className="text-base font-semibold text-gray-900">
                 Prospectos de alto valor
               </h2>
               <p className="mt-0.5 text-sm text-gray-500">
-                Conversaciones en cotizado, ordenadas por monto.
+                Conversaciones cotizadas, ordenadas por monto.
               </p>
             </div>
 
