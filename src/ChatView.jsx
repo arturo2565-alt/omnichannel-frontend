@@ -108,15 +108,57 @@ const PlatformBadge = ({
   );
 };
 
+const IMAGE_EXT_RE = /\.(jpeg|jpg|gif|png|webp)(\?|#|$)/i;
+
+const isFacebookStickerUrl = (url) => {
+  const u = String(url ?? '').trim();
+  if (!u || !/^https?:\/\//i.test(u)) return false;
+  const lower = u.toLowerCase();
+  if (/\bsticker\b/.test(lower) || /\/stickers?\//i.test(u)) return true;
+  if (/[?&]stp=[^&]*s1(?:00|20)x1(?:00|20)/i.test(u)) return true;
+  if (/_s1(?:00|20)x1(?:00|20)/i.test(u)) return true;
+  return /fbcdn\.net|scontent\./i.test(lower) && /s1(?:00|20)x1(?:00|20)/i.test(u);
+};
+
+const extractMediaUrl = (content) => {
+  const s = String(content ?? '').trim();
+  if (!s) return '';
+  if (s.startsWith('blob:') || /^data:image\//i.test(s)) return s;
+  const m = s.match(/https?:\/\/[^\s]+/i);
+  return m ? m[0] : '';
+};
+
 const isImage = (url) => {
   if (!url) return false;
-  // Soporte para URLs reales y para URLs temporales de blob
-  return (url.match(/\.(jpeg|jpg|gif|png|webp)$/) != null) || url.includes('images.unsplash.com') || url.startsWith('blob:');
+  const u = String(url).trim();
+  if (u.startsWith('blob:') || /^data:image\//i.test(u) || u.includes('images.unsplash.com')) {
+    return true;
+  }
+  if (IMAGE_EXT_RE.test(u)) return true;
+  if (/fbcdn\.net|scontent\./i.test(u) && (/[?&]stp=/i.test(u) || IMAGE_EXT_RE.test(u))) {
+    return true;
+  }
+  return false;
+};
+
+const isStickerMessage = (msg) => {
+  const meta = msg?.metadata;
+  if (meta && (meta.isSticker === true || String(meta.type ?? '').toLowerCase() === 'sticker')) {
+    return true;
+  }
+  if (String(msg?.type ?? '').toLowerCase() === 'sticker') return true;
+  const content = String(msg?.content ?? '').trim();
+  if (content === '[Sticker]' || content === 'Sticker') return true;
+  return isFacebookStickerUrl(content) || isFacebookStickerUrl(extractMediaUrl(content));
 };
 
 const getPreviewText = (content) => {
   if (!content) return 'Sin mensajes aún...';
-  if (isImage(content)) return '📷 Imagen';
+  const raw = String(content).trim();
+  if (raw === '[Sticker]' || raw === 'Sticker' || isFacebookStickerUrl(raw)) {
+    return 'Sticker';
+  }
+  if (isImage(raw)) return '📷 Imagen';
   return content;
 };
 
@@ -1664,7 +1706,9 @@ function ChatView({
         : null);
     if (!inv?.length) return;
     const msgImg =
-      latestQuoteMessage?.content && isImage(latestQuoteMessage.content)
+      latestQuoteMessage?.content &&
+      isImage(latestQuoteMessage.content) &&
+      !isStickerMessage(latestQuoteMessage)
         ? [latestQuoteMessage.content]
         : [];
     const rows = inv.map((it, idx) => {
@@ -1705,7 +1749,9 @@ function ChatView({
           : null;
 
     const msgImg =
-      latestQuoteMessage?.content && isImage(latestQuoteMessage.content)
+      latestQuoteMessage?.content &&
+      isImage(latestQuoteMessage.content) &&
+      !isStickerMessage(latestQuoteMessage)
         ? [latestQuoteMessage.content]
         : [];
 
@@ -1912,10 +1958,12 @@ function ChatView({
       if (isImage(u)) urls.add(u);
     }
     const msgContent = String(latestQuoteMessage?.content ?? '').trim();
-    if (msgContent && isImage(msgContent)) urls.add(msgContent);
+    if (msgContent && isImage(msgContent) && !isStickerMessage(latestQuoteMessage)) {
+      urls.add(msgContent);
+    }
     for (const m of messages ?? []) {
       const c = String(m?.content ?? '').trim();
-      if (c && isImage(c)) urls.add(c);
+      if (c && isImage(c) && !isStickerMessage(m)) urls.add(c);
     }
     return [...urls];
   }, [
@@ -3626,20 +3674,41 @@ function ChatView({
               {messages.map((msg) => {
                 const isOut =
                   String(msg.direction ?? '').toLowerCase() === 'outbound';
+                const sticker = isStickerMessage(msg);
+                const mediaUrl = extractMediaUrl(msg.content) || String(msg.content ?? '').trim();
+                const showImage = sticker
+                  ? isImage(mediaUrl) || isFacebookStickerUrl(mediaUrl)
+                  : isImage(msg.content) || isImage(mediaUrl);
                 return (
                 <div
                   key={msg.id}
                   className={`flex w-full shrink-0 ${isOut ? 'justify-end' : 'justify-start'}`}
                 >
-                <div className={`max-w-[80%] rounded-2xl p-3 shadow-sm ${!isOut ? 'rounded-tl-none bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100' : 'rounded-tr-none bg-indigo-600 text-white'}`}>
-                  {isImage(msg.content) ? (
-                    <img src={msg.content} alt="Adjunto" className="rounded-lg max-h-72 object-cover cursor-pointer hover:opacity-95 transition" onClick={() => window.open(msg.content, '_blank')} />
+                <div
+                  className={
+                    sticker
+                      ? 'max-w-[80%] bg-transparent p-0 shadow-none'
+                      : `max-w-[80%] rounded-2xl p-3 shadow-sm ${!isOut ? 'rounded-tl-none bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100' : 'rounded-tr-none bg-indigo-600 text-white'}`
+                  }
+                >
+                  {sticker ? (
+                    showImage ? (
+                      <img
+                        src={mediaUrl}
+                        alt="Sticker"
+                        className="max-h-[140px] max-w-[140px] rounded-lg object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-500">[Sticker]</span>
+                    )
+                  ) : showImage ? (
+                    <img src={mediaUrl} alt="Adjunto" className="max-h-72 cursor-pointer rounded-lg object-cover transition hover:opacity-95" onClick={() => window.open(mediaUrl, '_blank')} />
                   ) : (
                     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                       {msg.content}
                     </p>
                   )}
-                  <div className={`text-[9px] mt-1 text-right opacity-60 ${!isOut ? 'text-gray-500' : 'text-indigo-100'}`}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                  <div className={`mt-1 text-right text-[9px] opacity-60 ${sticker || !isOut ? 'text-gray-500' : 'text-indigo-100'}`}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
                 </div>
                 </div>
               );
