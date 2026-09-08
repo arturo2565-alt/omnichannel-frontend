@@ -1,4 +1,24 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
+@custom-variant dark (&:where(.dark, .dark *));
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #f9fafb;
+  color: #111827;
+}
+
+html.dark body {
+  background-color: #030712;
+  color: #f3f4f6;
+}
 
 @keyframes arrival-alarm-blink {
   0%,

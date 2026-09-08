@@ -10,10 +10,12 @@ import CatalogAdminPage from './CatalogAdminPage.jsx'
 import LoginPage from './LoginPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 import { AuthProvider } from './AuthContext.jsx'
+import { ThemeProvider } from './ThemeContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -60,6 +62,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,
 )

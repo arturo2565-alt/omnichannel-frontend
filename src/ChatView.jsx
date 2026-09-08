@@ -4,6 +4,7 @@ import { Calendar, ChevronDown, LayoutDashboard, LogOut, MoreVertical } from 'lu
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import { ThemeToggle } from './ThemeToggle.jsx';
 import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
 import {
   PANEL_DAMAGE_MAGNITUDES,
@@ -255,7 +256,7 @@ function BandejaFilterSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-800 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
+        className="flex w-full items-center justify-between gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-gray-800 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-700"
       >
         <span className="flex min-w-0 items-center gap-1.5 truncate">
           {showStatusDots ? (
@@ -277,7 +278,7 @@ function BandejaFilterSelect({
       {open ? (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+          className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-100 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
         >
           {options.map((opt) => {
             const active = opt.id === value;
@@ -292,8 +293,10 @@ function BandejaFilterSelect({
                     setOpen(false);
                     onChange?.(opt.id);
                   }}
-                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-gray-50 ${
-                    active ? 'font-semibold text-gray-900' : 'text-gray-600'
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                    active
+                      ? 'font-semibold text-gray-900 dark:text-gray-100'
+                      : 'text-gray-600 dark:text-gray-300'
                   }`}
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -361,7 +364,7 @@ function LeadStatusDropdown({ status, busy, onSelect }) {
       {open ? (
         <ul
           role="listbox"
-          className="absolute left-0 z-50 mt-1 min-w-[10.5rem] overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+          className="absolute left-0 z-50 mt-1 min-w-[10.5rem] overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
         >
           {LEAD_STATUS_MENU.map((value) => {
             const item = LEAD_STATUS_STYLE[value];
@@ -425,19 +428,19 @@ function ChatHeaderActionsMenu({
         aria-label="Más acciones"
         title="Más acciones"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
       >
         <MoreVertical className="h-4 w-4" strokeWidth={2} />
       </button>
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg"
+          className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-md border border-gray-100 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
         >
           <div className="flex items-center justify-between gap-3 px-3 py-2">
             <span
               id="autopilot-label"
-              className="text-xs font-medium text-gray-700"
+              className="text-xs font-medium text-gray-700 dark:text-gray-200"
             >
               Autopilot
             </span>
@@ -2812,7 +2815,7 @@ function ChatView({
   const renderApprovedCartSection = () => renderLastSendSnapshotSection();
 
   const renderQuoteDamagesSection = () => (
-    <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <section className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
         Carrito activo (
         {(isPanelReadOnly && panelQuoteFrozen?.quoteRows?.length
@@ -3374,7 +3377,7 @@ function ChatView({
   const mobileChatOpen = Boolean(showChatWindow && selectedConvId);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gray-100 font-sans text-gray-900">
+    <div className="flex h-screen w-full overflow-hidden bg-gray-100 font-sans text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       
       {/* 1. Rail: canales + navegación */}
       <OmnichannelLeftRail
@@ -3415,11 +3418,11 @@ function ChatView({
       <div className="grid min-h-0 min-w-0 w-full flex-1 grid-cols-1 lg:grid-cols-12">
       {/* 2. LISTA CONTACTOS */}
       <div
-        className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white shadow-inner lg:col-span-3 ${
+        className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white shadow-inner dark:border-gray-800 dark:bg-gray-900 lg:col-span-3 ${
           mobileChatOpen ? 'hidden lg:flex' : 'flex'
         }`}
       >
-        <div className="border-b bg-white sticky top-0 z-10 shadow-sm">
+        <div className="sticky top-0 z-10 border-b border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           {pendingPorCotizarCount > 0 ? (
             <div className="border-b border-red-100 px-4 pt-3 pb-2 bg-red-50/30">
               <p
@@ -3438,14 +3441,15 @@ function ChatView({
             }`}
           >
             <div className="min-w-0 flex-1">
-              <h2 className="text-lg font-bold tracking-tight text-gray-900">
+              <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">
                 Bandeja
               </h2>
-              <p className="mt-1 text-[11px] font-medium text-gray-500">
+              <p className="mt-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
                 Filtra por canal y estado
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2 lg:hidden">
+              <ThemeToggle placement="header" />
               <Link
                 to="/dashboard"
                 title="Dashboard"
@@ -3467,7 +3471,7 @@ function ChatView({
                 onClick={logout}
                 title="Cerrar sesión"
                 aria-label="Cerrar sesión"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 shadow-sm transition active:scale-95 hover:bg-red-50 hover:text-red-700 hover:border-red-200"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 shadow-sm transition active:scale-95 hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
               >
                 <LogOut className="h-5 w-5" strokeWidth={2} aria-hidden />
               </button>
@@ -3504,13 +3508,13 @@ function ChatView({
             <div
               key={contact.id}
               onClick={() => openConversationOnMobile(contact.id)}
-              className={`flex cursor-pointer items-start space-x-3 border-b p-4 transition ${
+              className={`flex cursor-pointer items-start space-x-3 border-b border-gray-100 p-4 transition dark:border-gray-800 ${
                 isSelected
-                  ? 'bg-blue-50 border-r-4 border-r-blue-500'
-                  : 'hover:bg-gray-50'
+                  ? 'border-r-4 border-r-blue-500 bg-blue-50 dark:bg-blue-950/40'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/80'
               } ${
                 isUrgent
-                  ? 'border-l-[3px] border-l-red-500 bg-red-50/55 ring-1 ring-inset ring-red-100'
+                  ? 'border-l-[3px] border-l-red-500 bg-red-50/55 ring-1 ring-inset ring-red-100 dark:bg-red-950/30 dark:ring-red-900/40'
                   : ''
               }`}
             >
@@ -3526,19 +3530,19 @@ function ChatView({
                   {contact.contactName ? contact.contactName.charAt(0).toUpperCase() : '?'}
                 </div>
                 )}
-                <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white">
+                <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white dark:ring-gray-900">
                   <PlatformBadge platform={contact.platform} size="sm" />
                 </div>
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-1">
-                  <p className="truncate font-bold text-gray-800">{contact.contactName}</p>
+                  <p className="truncate font-bold text-gray-800 dark:text-gray-100">{contact.contactName}</p>
                   <span className="ml-2 shrink-0 text-[10px] text-gray-400">
                     {contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                   </span>
                 </div>
                 <LeadStatusBadge status={contact.status} />
-                <p className="mt-1 truncate text-xs italic text-gray-500">
+                <p className="mt-1 truncate text-xs italic text-gray-500 dark:text-gray-400">
                   {contact.direction === 'outbound' ? <span className="font-medium text-blue-500">Tú: </span> : ''}
                   {getPreviewText(contact.lastMessage)}
                 </p>
@@ -3551,19 +3555,19 @@ function ChatView({
 
       {/* 3. VENTANA CHAT */}
       <div
-        className={`min-h-0 min-w-0 flex-col border-r border-gray-200 bg-white lg:col-span-6 ${
+        className={`min-h-0 min-w-0 flex-col border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 lg:col-span-6 ${
           mobileChatOpen ? 'flex' : 'hidden'
         } lg:flex`}
       >
         {selectedConvId ? (
           <>
             {/* Header Chat */}
-            <div className="z-10 flex flex-wrap items-center justify-between gap-2 border-b bg-white p-3 shadow-sm font-semibold sm:gap-3 sm:p-4">
+            <div className="z-10 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 bg-white p-3 font-semibold shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:gap-3 sm:p-4">
               <div className="flex min-w-0 flex-1 items-center gap-2 sm:space-x-3">
                 <button
                   type="button"
                   onClick={() => setShowChatWindow(false)}
-                  className="lg:hidden inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-700 shadow-sm transition hover:bg-gray-100"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-700 shadow-sm transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 lg:hidden"
                   aria-label="Regresar a la bandeja"
                 >
                   ←
@@ -3572,12 +3576,12 @@ function ChatView({
                   <div className="flex h-full w-full items-center justify-center rounded-full border border-blue-200 bg-blue-100 text-sm font-bold text-blue-600">
                     {selectedUserName?.charAt(0).toUpperCase()}
                   </div>
-                  <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white">
+                  <div className="pointer-events-none absolute bottom-[-1px] right-[-1px] z-[1] rounded-full shadow-sm ring-2 ring-white dark:ring-gray-900">
                     <PlatformBadge platform={selectedContact?.platform} size="sm" />
                   </div>
                 </div>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm">{selectedUserName}</span>
+                  <span className="truncate text-sm dark:text-gray-100">{selectedUserName}</span>
                   <LeadStatusDropdown
                     key={selectedConvId}
                     status={selectedLeadStatus}
@@ -3618,7 +3622,7 @@ function ChatView({
             </div>
             
             {/* Mensajes Chat */}
-            <div className="flex-1 overflow-y-auto flex flex-col space-y-3 bg-[#e5ddd5] p-6">
+            <div className="flex flex-1 flex-col space-y-3 overflow-y-auto bg-[#e5ddd5] p-6 dark:bg-gray-950">
               {messages.map((msg) => {
                 const isOut =
                   String(msg.direction ?? '').toLowerCase() === 'outbound';
@@ -3627,7 +3631,7 @@ function ChatView({
                   key={msg.id}
                   className={`flex w-full shrink-0 ${isOut ? 'justify-end' : 'justify-start'}`}
                 >
-                <div className={`p-3 rounded-2xl shadow-sm max-w-[80%] ${!isOut ? 'bg-white text-gray-800 rounded-tl-none' : 'bg-indigo-600 text-white rounded-tr-none'}`}>
+                <div className={`max-w-[80%] rounded-2xl p-3 shadow-sm ${!isOut ? 'rounded-tl-none bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100' : 'rounded-tr-none bg-indigo-600 text-white'}`}>
                   {isImage(msg.content) ? (
                     <img src={msg.content} alt="Adjunto" className="rounded-lg max-h-72 object-cover cursor-pointer hover:opacity-95 transition" onClick={() => window.open(msg.content, '_blank')} />
                   ) : (
@@ -3644,7 +3648,7 @@ function ChatView({
             </div>
 
             {/* --- SECCIÓN DE ENTRADA PRO (Multimedia + IA) --- */}
-            <div className="p-4 border-t bg-gray-50 mt-auto z-10">
+            <div className="z-10 mt-auto border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900">
               {clienteEsperandoAfuera ? (
                 <button
                   type="button"
@@ -3667,7 +3671,7 @@ function ChatView({
 
               {/* --- 🌟 VISTA PREVIA DE LA IMAGEN (Thumbnail) 🌟 --- */}
               {filePreviewUrl && (
-                <div className="mb-3 p-2 bg-white border border-gray-200 rounded-xl shadow-lg flex items-center space-x-3 relative animate-in fade-in slide-in-from-bottom-2">
+                <div className="relative mb-3 flex animate-in fade-in slide-in-from-bottom-2 items-center space-x-3 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
                   <img 
                     src={filePreviewUrl} 
                     alt="Previsualización" 
@@ -3694,7 +3698,7 @@ function ChatView({
                 {/* Botón Clip 📎 (Hidden Input Trigger) */}
                 <button 
                   onClick={() => fileInputRef.current.click()}
-                  className="w-10 h-10 rounded-full flex items-center justify-center transition-all bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 hover:scale-105 active:scale-95 shadow-sm"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all hover:scale-105 hover:bg-gray-100 active:scale-95 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                   title="Adjuntar imagen"
                 >
                   📎
@@ -3725,7 +3729,7 @@ function ChatView({
                   onKeyPress={(e) => e.key === 'Enter' && !filePreviewUrl && onSendMessage()}
                   id="chat-reply-input"
                   disabled={!!filePreviewUrl || isSending}
-                  className={`flex-1 border border-gray-200 rounded-full px-5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-400 transition-all bg-white shadow-inner ${filePreviewUrl ? 'bg-gray-100 text-gray-400 italic' : ''}`} 
+                  className={`flex-1 rounded-full border border-gray-200 bg-white px-5 py-2.5 shadow-inner outline-none transition-all focus:ring-2 focus:ring-indigo-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 ${filePreviewUrl ? 'bg-gray-100 italic text-gray-400 dark:bg-gray-800' : ''}`} 
                   placeholder={filePreviewUrl ? "Imagen lista. Haz clic en Enviar ->" : `Responder a ${selectedUserName}...`} 
                 />
                 
@@ -3748,19 +3752,19 @@ function ChatView({
             </div>
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center bg-gray-50 text-center text-gray-400">
+          <div className="flex flex-1 items-center justify-center bg-gray-50 text-center text-gray-400 dark:bg-gray-950">
             <div><div className="mb-4 text-8xl opacity-10">💬</div><p className="text-xl font-semibold text-gray-400">Bandeja de Entrada</p><p className="text-sm opacity-60">Selecciona un chat para empezar a gestionar</p></div>
           </div>
         )}
       </div>
 
       {/* 4. Panel de Cotización — escritorio */}
-      <aside className="hidden min-h-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner lg:col-span-3 lg:flex">
-        <div className="border-b border-gray-200 bg-white px-4 py-3">
-          <h2 className="text-sm font-bold tracking-tight text-gray-900">
+      <aside className="hidden min-h-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner dark:border-gray-800 dark:bg-gray-950 lg:col-span-3 lg:flex">
+        <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="text-sm font-bold tracking-tight text-gray-900 dark:text-gray-100">
             Panel de Cotización
           </h2>
-          <p className="mt-0.5 text-[10px] text-gray-500">
+          <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
             Borrador generado por IA · requiere tu validación
           </p>
         </div>
@@ -3783,21 +3787,21 @@ function ChatView({
             aria-label="Cerrar cotización"
             onClick={() => setQuoteDrawerOpen(false)}
           />
-          <div className="relative flex h-[min(92dvh,900px)] max-h-[92dvh] w-full min-h-0 flex-col rounded-t-2xl border border-gray-200 bg-slate-50 shadow-2xl">
-            <div className="shrink-0 border-b border-gray-200 bg-white px-4 pt-3 pb-2">
+          <div className="relative flex h-[min(92dvh,900px)] max-h-[92dvh] w-full min-h-0 flex-col rounded-t-2xl border border-gray-200 bg-slate-50 shadow-2xl dark:border-gray-700 dark:bg-gray-950">
+            <div className="shrink-0 border-b border-gray-200 bg-white px-4 pb-2 pt-3 dark:border-gray-800 dark:bg-gray-900">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-sm font-bold tracking-tight text-gray-900">
+                  <h2 className="text-sm font-bold tracking-tight text-gray-900 dark:text-gray-100">
                     Cotización de IA
                   </h2>
-                  <p className="mt-0.5 text-[10px] text-gray-500">
+                  <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
                     Revisa, edita y envía al cliente
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setQuoteDrawerOpen(false)}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-600"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-lg text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
                   aria-label="Cerrar panel"
                 >
                   ✕
@@ -3810,7 +3814,7 @@ function ChatView({
                 {renderDraftQuotePanelScrollContent()}
               </div>
               {hasPanelQuote && selectedConvId ? (
-                <div className="sticky bottom-0 z-10 shrink-0 border-t border-gray-200 bg-white px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-gray-200 bg-white px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] dark:border-gray-800 dark:bg-gray-900">
                   {renderQuoteActionButtons()}
                 </div>
               ) : null}

@@ -10,6 +10,7 @@ import {
 import { apiFetchWebhook, transitionConversationStatus } from './apiClient.js';
 import { API_ORIGIN_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import { ThemeToggle } from './ThemeToggle.jsx';
 
 const WORKSHOP_TZ = 'America/Mexico_City';
 
@@ -194,7 +195,7 @@ function matchesStatusFilter(appointment, statusFilter) {
 function PillGroup({ options, value, onChange, ariaLabel }) {
   return (
     <div
-      className="inline-flex flex-wrap rounded-full border border-gray-200 bg-gray-50 p-0.5"
+      className="inline-flex flex-wrap rounded-full border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-gray-800"
       role="group"
       aria-label={ariaLabel}
     >
@@ -207,8 +208,8 @@ function PillGroup({ options, value, onChange, ariaLabel }) {
             onClick={() => onChange(opt.id)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
               active
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-800'
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
             {opt.label}
@@ -235,9 +236,9 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
   const patio = patioValue(appointment);
 
   return (
-    <article className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:shadow-md lg:flex-row lg:items-center lg:gap-5">
+    <article className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800 lg:flex-row lg:items-center lg:gap-5">
       <div className="flex items-center gap-3 lg:w-36 lg:shrink-0 lg:flex-col lg:items-start lg:gap-1.5">
-        <p className="text-2xl font-semibold tracking-tight text-gray-900 tabular-nums">
+        <p className="text-2xl font-semibold tracking-tight text-gray-900 tabular-nums dark:text-gray-100">
           {timeLabel}
         </p>
         <span
@@ -248,8 +249,8 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
       </div>
 
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-sm font-bold text-gray-900">{name}</h3>
-        <p className="mt-0.5 truncate text-sm text-gray-600">
+        <h3 className="truncate text-sm font-bold text-gray-900 dark:text-gray-100">{name}</h3>
+        <p className="mt-0.5 truncate text-sm text-gray-600 dark:text-gray-300">
           {appointment.vehicle ? (
             appointment.vehicle
           ) : (
@@ -257,7 +258,7 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
           )}
         </p>
         {appointment.quoteSummary ? (
-          <p className="mt-1 line-clamp-2 text-sm text-gray-500">
+          <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
             {appointment.quoteSummary}
           </p>
         ) : (
@@ -271,7 +272,7 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
         {callUrl ? (
           <a
             href={callUrl}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-800 hover:text-emerald-700"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-800 hover:text-emerald-700 dark:text-gray-200 dark:hover:text-emerald-400"
           >
             <Phone className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
             <span className="truncate">{phone}</span>
@@ -311,7 +312,7 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
             value={patio}
             disabled={busy}
             onChange={(e) => onPatioChange(appointment, e.target.value)}
-            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-900 shadow-sm disabled:opacity-60"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-900 shadow-sm disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
           >
             {PATIO_ACTIONS.map((opt) => (
               <option key={opt.id} value={opt.id}>
@@ -499,33 +500,38 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="shrink-0 border-b bg-white px-4 py-4 shadow-sm sm:px-6">
+        <header className="shrink-0 border-b border-gray-100 bg-white px-4 py-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 Calendario de citas
               </h1>
-              <p className="mt-0.5 text-sm text-gray-500">
+              <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                 Agenda operativa del patio, agrupada por día.
               </p>
+              </div>
+              <div className="lg:hidden">
+                <ThemeToggle placement="header" />
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <div className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
                   Citas hoy
                 </p>
-                <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900">
+                <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                   {loading ? '…' : metrics.todayCount}
                 </p>
               </div>
-              <div className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
                   Próximas en la semana
                 </p>
-                <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900">
+                <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                   {loading ? '…' : metrics.weekUpcoming}
                 </p>
               </div>
@@ -540,7 +546,7 @@ export default function CalendarPage() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Buscar cliente, teléfono o vehículo"
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 outline-none ring-sky-500/20 transition placeholder:text-gray-400 focus:border-sky-300 focus:bg-white focus:ring-4"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 outline-none ring-sky-500/20 transition placeholder:text-gray-400 focus:border-sky-300 focus:bg-white focus:ring-4 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:bg-gray-800"
               />
             </label>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -562,7 +568,7 @@ export default function CalendarPage() {
 
         <main className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           {loading ? (
-            <p className="py-16 text-center text-sm text-gray-500">
+            <p className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
               Cargando agenda…
             </p>
           ) : error ? (
@@ -577,14 +583,14 @@ export default function CalendarPage() {
               </button>
             </div>
           ) : visibleCount === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center shadow-sm">
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
                 <CalendarDays className="h-6 w-6" strokeWidth={1.75} />
               </span>
-              <h2 className="mt-4 text-base font-semibold text-gray-900">
+              <h2 className="mt-4 text-base font-semibold text-gray-900 dark:text-gray-100">
                 No hay citas en este recorte
               </h2>
-              <p className="mt-1 max-w-md text-sm text-gray-500">
+              <p className="mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
                 {items.length === 0
                   ? 'Cuando el autopilot o el equipo agenden una visita, aparecerá aquí en orden cronológico.'
                   : 'Prueba otro rango, quita el filtro de estado o ajusta la búsqueda.'}
@@ -596,7 +602,9 @@ export default function CalendarPage() {
                 <section key={group.ymd}>
                   <header
                     className={`mb-3 flex items-center gap-3 ${
-                      group.kind === 'hoy' ? 'text-indigo-800' : 'text-gray-800'
+                      group.kind === 'hoy'
+                        ? 'text-indigo-800 dark:text-indigo-300'
+                        : 'text-gray-800 dark:text-gray-200'
                     }`}
                   >
                     <span

@@ -1237,20 +1237,20 @@ export default function AiSettingsPage() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="shrink-0 border-b bg-white shadow-sm">
+          <header className="shrink-0 border-b border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="mx-auto max-w-5xl px-4 py-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-600">
                   Administración
                 </p>
-                <h1 className="text-xl font-bold text-gray-900">
+                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                   IA y variables de negocio
                 </h1>
-                <p className="mt-0.5 text-sm text-gray-500">
+                <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                   Prompts del modelo y datos que usa el taller en cotizaciones y citas.
                 </p>
               </div>

@@ -253,16 +253,16 @@ export default function CatalogAdminPage() {
   }, [simBase, simSize, simPremium, simSeverity, rules]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="shrink-0 border-b bg-white shadow-sm">
+        <header className="shrink-0 border-b border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="mx-auto max-w-6xl px-4 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
               Administración
             </p>
-            <h1 className="text-xl font-bold text-gray-900">Catálogo de precios</h1>
-            <p className="mt-0.5 text-sm text-gray-500">
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Catálogo de precios</h1>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
               Base por pieza o servicio integral + multiplicadores (tamaño, premium; severidad solo
               en piezas).
             </p>

@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { Calendar, LayoutDashboard, LogOut, MessageCircle, Settings2, Table2 } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
+import { ThemeToggle } from './ThemeToggle.jsx';
 
 const railBtn =
   'flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105 border focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70';
@@ -91,6 +92,7 @@ export function OmnichannelLeftRail({ platformSlot }) {
       </nav>
 
       <div className="mt-auto flex flex-col items-center gap-2 pt-4">
+        <ThemeToggle placement="rail" />
         {(taller?.nombre || user?.email) && (
           <p
             className="max-w-[4.5rem] truncate text-center text-[9px] leading-tight text-gray-500"
