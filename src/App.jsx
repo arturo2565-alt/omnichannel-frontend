@@ -84,7 +84,10 @@ function App() {
     socket.on('disconnect', () => setIsConnected(false));
     socket.on('newMessage', (msg) => {
       if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
-        setMessages((prev) => [...prev, msg]);
+        setMessages((prev) => {
+          if (msg?.id && prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
       }
       fetchConversations();
     });

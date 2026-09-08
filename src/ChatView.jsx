@@ -152,6 +152,41 @@ const isStickerMessage = (msg) => {
   return isFacebookStickerUrl(content) || isFacebookStickerUrl(extractMediaUrl(content));
 };
 
+const mediaUrlPathKey = (url) => {
+  const raw = String(url ?? '').trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    return `${u.origin}${u.pathname}`.toLowerCase();
+  } catch {
+    return raw.split('?')[0].split('#')[0].toLowerCase();
+  }
+};
+
+const stickerDedupeKey = (msg) => {
+  const media = extractMediaUrl(msg?.content) || String(msg?.content ?? '').trim();
+  return mediaUrlPathKey(media) || String(msg?.content ?? '').trim();
+};
+
+const collapseConsecutiveStickers = (list) => {
+  const out = [];
+  for (const msg of list ?? []) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      isStickerMessage(prev) &&
+      isStickerMessage(msg) &&
+      String(prev.direction ?? '') === String(msg.direction ?? '') &&
+      stickerDedupeKey(prev) &&
+      stickerDedupeKey(prev) === stickerDedupeKey(msg)
+    ) {
+      continue;
+    }
+    out.push(msg);
+  }
+  return out;
+};
+
 const getPreviewText = (content) => {
   if (!content) return 'Sin mensajes aún...';
   const raw = String(content).trim();
@@ -1148,6 +1183,11 @@ function ChatView({
   const closeEvidenceLightbox = useCallback(() => {
     setEvidenceLightbox(null);
   }, []);
+  const visibleMessages = useMemo(
+    () => collapseConsecutiveStickers(messages),
+    [messages],
+  );
+
   const [catalogPieceBases, setCatalogPieceBases] = useState([]);
   const [catalogIntegralBases, setCatalogIntegralBases] = useState([]);
   const [catalogPricingRules, setCatalogPricingRules] = useState(null);
@@ -2576,7 +2616,7 @@ function ChatView({
   }, []);
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
-  useEffect(() => { scrollToBottom(); }, [messages]);
+  useEffect(() => { scrollToBottom(); }, [visibleMessages]);
 
   useEffect(() => {
     if (!selectedConvId || platformFilter === 'all') return;
@@ -3671,7 +3711,7 @@ function ChatView({
             
             {/* Mensajes Chat */}
             <div className="flex flex-1 flex-col space-y-3 overflow-y-auto bg-[#e5ddd5] p-6 dark:bg-gray-950">
-              {messages.map((msg) => {
+              {visibleMessages.map((msg) => {
                 const isOut =
                   String(msg.direction ?? '').toLowerCase() === 'outbound';
                 const sticker = isStickerMessage(msg);
