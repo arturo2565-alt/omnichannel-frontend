@@ -12,11 +12,13 @@ import {
   PREVIEW_SCENARIOS,
   SIZE_TIER_LABELS,
 } from './catalog-pricing.js';
+import RefaccionesCatalogTab from './RefaccionesCatalogTab.jsx';
 
 const TABS = [
   { id: 'rules', label: 'Reglas globales' },
   { id: 'pieces', label: 'Piezas (base)' },
   { id: 'integral', label: 'Servicios integrales' },
+  { id: 'refacciones', label: 'Catálogo de Refacciones y Ópticas' },
   { id: 'simulator', label: 'Simulador' },
 ];
 
@@ -303,7 +305,9 @@ export default function CatalogAdminPage() {
             <p className="mb-4 text-sm text-sky-800">{seedMessage}</p>
           ) : null}
 
-          {loading ? (
+          {tab === 'refacciones' ? (
+            <RefaccionesCatalogTab />
+          ) : loading ? (
             <p className="text-center text-gray-500">Cargando catálogo…</p>
           ) : tab === 'rules' ? (
             <section className="space-y-6">
