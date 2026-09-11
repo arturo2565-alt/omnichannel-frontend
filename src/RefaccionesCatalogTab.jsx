@@ -162,7 +162,8 @@ export default function RefaccionesCatalogTab() {
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
             Precio sugerido al cliente = costo de referencia × (1 + margen / 100).
-            Si no hay fila, el peritaje usa mercado MX (+30%, redondeo a $50).
+            Costo 0 no se usa como precio AutoFix (cae a mercado o fallback genérico).
+            Si no hay fila con costo &gt; 0, el peritaje usa mercado MX y luego fallback.
           </p>
         </div>
         <button
