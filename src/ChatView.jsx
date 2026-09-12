@@ -843,6 +843,13 @@ function urlsFromInventoryItem(it) {
   return [];
 }
 
+/** Una sola foto del mensaje puede evidenciar varios daños; no se reserva al primer renglón. */
+function attachSharedMessagePhoto(urls, msgImg) {
+  if (Array.isArray(urls) && urls.length > 0) return urls;
+  if (Array.isArray(msgImg) && msgImg.length === 1) return [...msgImg];
+  return Array.isArray(urls) ? urls : [];
+}
+
 function parsePrecioInput(raw) {
   const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/,/g, '');
   const n = Number(s);
@@ -1823,8 +1830,7 @@ function ChatView({
         : [];
     const rows = inv.map((it, idx) => {
       const rawSev = String(it.severidad ?? 'LEVE');
-      let urls = urlsFromInventoryItem(it);
-      if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
+      let urls = attachSharedMessagePhoto(urlsFromInventoryItem(it), msgImg);
       return buildQuoteRowFromSource({
         id: `row-await-${idx}-${String(it.pieza).slice(0, 24)}`,
         piezaRaw: it.pieza,
@@ -1887,8 +1893,10 @@ function ChatView({
           precio = Number(lineAt.subtotal);
         }
         const urlsRaw = Array.isArray(it.urlsOrigen) ? it.urlsOrigen : [];
-        let urls = urlsRaw.map(String).filter(Boolean);
-        if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
+        let urls = attachSharedMessagePhoto(
+          urlsRaw.map(String).filter(Boolean),
+          msgImg,
+        );
         return buildQuoteRowFromSource({
           id: it.id
             ? String(it.id)
@@ -1916,8 +1924,7 @@ function ChatView({
         if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
           precio = Number(lineAt.subtotal);
         }
-        let urls = urlsFromInventoryItem(it);
-        if (!urls.length && idx === 0 && msgImg.length) urls = [...msgImg];
+        let urls = attachSharedMessagePhoto(urlsFromInventoryItem(it), msgImg);
         return buildQuoteRowFromSource({
           id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
           piezaRaw: it.pieza,
