@@ -843,16 +843,9 @@ function urlsFromInventoryItem(it) {
   return [];
 }
 
-/**
- * Una sola foto de sesión puede evidenciar varios daños.
- * No adivina si el draft o el mensaje traen 2+ URLs.
- */
-function attachSharedMessagePhoto(urls, msgImg, draftImageUrl) {
-  if (Array.isArray(urls) && urls.length > 0) return urls;
-  const draft = parseDraftImageUrlField(draftImageUrl);
-  if (draft.length === 1) return [...draft];
-  if (Array.isArray(msgImg) && msgImg.length === 1) return [...msgImg];
-  return Array.isArray(urls) ? urls : [];
+/** Evidence por daño: solo urls_origen/urlsOrigen del item. No usa imageUrl global. */
+function evidenceUrlsForDamageRow(urls) {
+  return Array.isArray(urls) ? urls.map(String).filter(Boolean) : [];
 }
 
 function parsePrecioInput(raw) {
@@ -1835,11 +1828,7 @@ function ChatView({
         : [];
     const rows = inv.map((it, idx) => {
       const rawSev = String(it.severidad ?? 'LEVE');
-      let urls = attachSharedMessagePhoto(
-        urlsFromInventoryItem(it),
-        msgImg,
-        activeDraftForPanel?.imageUrl,
-      );
+      let urls = evidenceUrlsForDamageRow(urlsFromInventoryItem(it));
       return buildQuoteRowFromSource({
         id: `row-await-${idx}-${String(it.pieza).slice(0, 24)}`,
         piezaRaw: it.pieza,
@@ -1903,11 +1892,7 @@ function ChatView({
           precio = Number(lineAt.subtotal);
         }
         const urlsRaw = Array.isArray(it.urlsOrigen) ? it.urlsOrigen : [];
-        let urls = attachSharedMessagePhoto(
-          urlsRaw.map(String).filter(Boolean),
-          msgImg,
-          activeDraftForPanel?.imageUrl,
-        );
+        let urls = evidenceUrlsForDamageRow(urlsRaw);
         return buildQuoteRowFromSource({
           id: it.id
             ? String(it.id)
@@ -1935,11 +1920,7 @@ function ChatView({
         if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
           precio = Number(lineAt.subtotal);
         }
-        let urls = attachSharedMessagePhoto(
-          urlsFromInventoryItem(it),
-          msgImg,
-          activeDraftForPanel?.imageUrl,
-        );
+        let urls = evidenceUrlsForDamageRow(urlsFromInventoryItem(it));
         return buildQuoteRowFromSource({
           id: `row-${idx}-${String(it.pieza).slice(0, 24)}`,
           piezaRaw: it.pieza,
