@@ -12,16 +12,45 @@ import {
   PREVIEW_SCENARIOS,
   SIZE_TIER_LABELS,
 } from './catalog-pricing.js';
-import RefaccionesCatalogTab from './RefaccionesCatalogTab.jsx';
 
 const TABS = [
   { id: 'rules', label: 'Reglas globales' },
   { id: 'pieces', label: 'Piezas (base)' },
   { id: 'montaje', label: 'Montaje / pintura' },
-  { id: 'refacciones', label: 'Refacciones' },
   { id: 'integral', label: 'Servicios integrales' },
   { id: 'simulator', label: 'Simulador' },
 ];
+
+const BANIO_DEFINITIONS = {
+  BPE: 'Baño de pintura exterior. No incluye cambio de color ni interiores de marcos.',
+  BPEI:
+    'Baño de pintura exterior + interiores/marcos correspondientes. Mantiene el mismo color del vehículo.',
+  BPCC:
+    'Cambio de color. Incluye exterior + interiores/marcos necesarios para que el cambio de color sea coherente y el desmontaje adicional propio del proceso.',
+};
+
+function banioCodeForServicio(servicio) {
+  const n = String(servicio ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (n.includes('cambio de color') || n.includes('bpcc')) return 'BPCC';
+  if (n.includes('interiores') || n.includes('bpei')) return 'BPEI';
+  if (n.includes('bano de pintura') || n.includes('bpe')) return 'BPE';
+  return null;
+}
+
+function integralRowStatus(row) {
+  if (row?.configStatus === 'READY' || row?.configStatus === 'UNCONFIGURED') {
+    return row.configStatus;
+  }
+  return Number(row?.basePrice) > 0 ? 'READY' : 'UNCONFIGURED';
+}
+
+function formatIntegralPreview(amount, configured) {
+  if (!configured) return 'Sin configurar';
+  return formatMx(amount);
+}
 
 function parsePositiveInt(raw) {
   const n = Number.parseInt(String(raw ?? '').trim(), 10);
@@ -319,8 +348,8 @@ export default function CatalogAdminPage() {
             </p>
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Catálogo de precios</h1>
             <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-              Bases de reparación, montaje/pintura al sustituir, refacciones AutoFix y
-              servicios integrales.
+              Bases de reparación, montaje/pintura al sustituir y
+              servicios integrales. Las refacciones se cotizan por mercado, no por tarifa genérica.
             </p>
             <nav className="mt-4 flex flex-wrap gap-2">
               {TABS.map((t) => (
@@ -644,7 +673,9 @@ export default function CatalogAdminPage() {
                           />
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">
-                          {p.precio > 0 ? 'AUTOFIX_CATALOG' : 'sin tarifa'}
+                          {p.precio > 0
+                            ? 'DEDICATED_TARIFF'
+                            : 'UNCONFIGURED (runtime puede usar LEGACY_REPAIR_MATRIX_FALLBACK)'}
                         </td>
                         {INTEGRAL_PREVIEW_SCENARIOS.map((s) => (
                           <td
@@ -674,14 +705,12 @@ export default function CatalogAdminPage() {
                 ) : null}
               </div>
             </section>
-          ) : tab === 'refacciones' ? (
-            <RefaccionesCatalogTab />
           ) : tab === 'integral' ? (
             <section>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-gray-600">
-                  Baño de pintura, estética y cerámico. Una base (Compacto · estándar); el motor
-                  aplica tamaño y premium. Sin severidad de daño.
+                  BPE $28,000 · BPEI $32,000 · BPCC $39,000 (bases Compacto estándar).
+                  El motor aplica tamaño y premium. Sin +15% ni suplementos de color.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -709,7 +738,9 @@ export default function CatalogAdminPage() {
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-3 py-2 text-left">Código</th>
                       <th className="px-3 py-2 text-left">Servicio</th>
+                      <th className="px-3 py-2 text-left">Estado</th>
                       <th className="px-3 py-2 text-left">Base (MXN)</th>
                       <th className="px-3 py-2 text-left">Días</th>
                       {INTEGRAL_PREVIEW_SCENARIOS.map((sc) => (
@@ -722,23 +753,63 @@ export default function CatalogAdminPage() {
                   <tbody className="divide-y divide-gray-100">
                     {integralBases.map((row) => (
                       <tr key={row.servicio}>
-                        <td className="px-3 py-2 font-medium">{row.servicio}</td>
+                        <td className="px-3 py-2 font-mono text-xs font-semibold">
+                          {row.banioCode || banioCodeForServicio(row.servicio) || '—'}
+                        </td>
+                        <td className="px-3 py-2">
+                          <p className="font-medium">{row.servicio}</p>
+                          {(row.commercialDefinition ||
+                            BANIO_DEFINITIONS[
+                              row.banioCode || banioCodeForServicio(row.servicio)
+                            ]) ? (
+                            <p className="mt-1 max-w-xs text-xs text-gray-500">
+                              {row.commercialDefinition ||
+                                BANIO_DEFINITIONS[
+                                  row.banioCode ||
+                                    banioCodeForServicio(row.servicio)
+                                ]}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          {integralRowStatus(row) === 'READY' ? (
+                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                              READY
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                              UNCONFIGURED
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           <input
                             type="number"
                             min={0}
                             className="w-28 rounded border px-2 py-1"
                             value={row.basePrice}
+                            placeholder="Sin configurar"
                             onChange={(e) => {
                               const n = parsePositiveInt(e.target.value);
                               if (Number.isNaN(n)) return;
                               setIntegralBases((prev) =>
                                 prev.map((r) =>
-                                  r.servicio === row.servicio ? { ...r, basePrice: n } : r,
+                                  r.servicio === row.servicio
+                                    ? {
+                                        ...r,
+                                        basePrice: n,
+                                        configStatus: n > 0 ? 'READY' : 'UNCONFIGURED',
+                                      }
+                                    : r,
                                 ),
                               );
                             }}
                           />
+                          {Number(row.basePrice) <= 0 ? (
+                            <p className="mt-1 text-xs text-amber-700">
+                              $0 = sin configurar, no es gratis
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2">
                           <input
@@ -759,13 +830,14 @@ export default function CatalogAdminPage() {
                         </td>
                         {INTEGRAL_PREVIEW_SCENARIOS.map((sc) => (
                           <td key={sc.key} className="px-3 py-2 text-gray-700">
-                            {formatMx(
+                            {formatIntegralPreview(
                               computeIntegralPrice({
                                 basePrice: row.basePrice,
                                 sizeTier: sc.sizeTier,
                                 isPremium: sc.isPremium,
                                 rules,
                               }),
+                              integralRowStatus(row) === 'READY',
                             )}
                           </td>
                         ))}

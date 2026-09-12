@@ -684,6 +684,37 @@ function normalizePanelSeverityForRow(severidadRaw, pieza) {
   return mag === 'N/A' ? 'LEVE' : mag;
 }
 
+function opaqueQuoteIdentity(src = {}) {
+  return {
+    ...(src.damageItemId ? { damageItemId: src.damageItemId } : {}),
+    ...(src.quoteLineId ? { quoteLineId: src.quoteLineId } : {}),
+    ...(src.vehicleId ? { vehicleId: src.vehicleId } : {}),
+    ...(src.serviceType ? { serviceType: src.serviceType } : {}),
+    ...(src.tratamiento ? { tratamiento: src.tratamiento } : {}),
+    ...(typeof src.billable === 'boolean' ? { billable: src.billable } : {}),
+  };
+}
+
+function findLineForQuoteIdentity(lines, item, idx, sameLength) {
+  if (!Array.isArray(lines) || !lines.length) return undefined;
+  if (item?.quoteLineId) {
+    const hit = lines.find((l) => l?.quoteLineId === item.quoteLineId);
+    if (hit) return hit;
+  }
+  if (item?.damageItemId && item?.serviceType) {
+    const hit = lines.find(
+      (l) =>
+        l?.damageItemId === item.damageItemId &&
+        l?.serviceType === item.serviceType,
+    );
+    if (hit) return hit;
+  }
+  if (sameLength && !item?.damageItemId && !lines[idx]?.damageItemId) {
+    return lines[idx];
+  }
+  return undefined;
+}
+
 function buildQuoteRowFromSource({
   id,
   piezaRaw,
@@ -692,6 +723,7 @@ function buildQuoteRowFromSource({
   urls,
   lineDescription,
   descripcionTecnica,
+  identity,
 }) {
   const pieza = normalizePiezaForPanel(piezaRaw ?? '');
   const code = normalizePanelSeverityForRow(severidadRaw, pieza);
@@ -699,6 +731,7 @@ function buildQuoteRowFromSource({
     id,
     pieza,
     urls_origen: urls,
+    ...opaqueQuoteIdentity(identity),
   };
   if (isInternalDamageRangePieza(pieza)) {
     const min = Math.max(0, Math.round(Number(precio) || 0));
@@ -1050,6 +1083,31 @@ function quoteRowsValidForNarrativeRegen(rows) {
   return true;
 }
 
+function modernAssembleOptionsFromDraft(draft, extra = {}) {
+  const payload = draft?.quotePayload ?? {};
+  return {
+    quoteFlowMode: payload.quoteFlowMode,
+    narrativeFlow: payload.narrativeFlow,
+    canonicalQuote: draft?.canonicalQuoteV1 ?? extra.canonicalQuote,
+    persistedFinalMessage:
+      extra.persistedFinalMessage ||
+      payload.clientMessage ||
+      payload.formalNarrative ||
+      extra.backendNarrative ||
+      '',
+    persistedFinancialBlock:
+      extra.persistedFinancialBlock || payload.renderedFinancialBlock || '',
+  };
+}
+
+function isModernCanonicalClientQuote(options = {}) {
+  return (
+    options.quoteFlowMode === 'CANONICAL' ||
+    options.narrativeFlow === 'CANONICAL_NARRATIVE_FLOW' ||
+    Boolean(options.canonicalQuote)
+  );
+}
+
 function assembleDynamicClienteQuoteMessage(rows, options = {}) {
   const {
     leadStatus = 'nuevo',
@@ -1059,6 +1117,18 @@ function assembleDynamicClienteQuoteMessage(rows, options = {}) {
     mapsUrl = WORKSHOP_MAPS_URL,
     variantSalt = '',
   } = options;
+
+  if (isModernCanonicalClientQuote(options)) {
+    console.warn(
+      '[QuoteFlow]',
+      JSON.stringify({ event: 'FRONTEND_FINANCIAL_FALLBACK_ATTEMPT' }),
+    );
+    return String(
+      options.persistedFinalMessage ||
+        options.persistedFinancialBlock ||
+        '',
+    ).trim();
+  }
 
   const name = String(contactName ?? '').trim() || 'cliente';
   const list = quoteRowsToToolEmojiLines(rows);
@@ -1762,6 +1832,7 @@ function ChatView({
         precio: 0,
         urls,
         descripcionTecnica: it.descripcionTecnica,
+        identity: it,
       });
     });
     setQuoteRows(rows);
@@ -1806,12 +1877,13 @@ function ChatView({
       const rows = sorted.map((it, idx) => {
         const rawSev = String(it.severidad ?? 'LEVE');
         let precio = Number(it.precioMx ?? 0);
-        const lineAt = lines[idx];
-        if (
-          lineAt &&
-          Number.isFinite(Number(lineAt.subtotal)) &&
-          sorted.length === lines.length
-        ) {
+        const lineAt = findLineForQuoteIdentity(
+          lines,
+          it,
+          idx,
+          sorted.length === lines.length,
+        );
+        if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
           precio = Number(lineAt.subtotal);
         }
         const urlsRaw = Array.isArray(it.urlsOrigen) ? it.urlsOrigen : [];
@@ -1827,6 +1899,7 @@ function ChatView({
           urls,
           lineDescription: lineAt?.description,
           descripcionTecnica: it.descripcionTecnica,
+          identity: { ...it, ...lineAt },
         });
       });
       setQuoteRows(rows);
@@ -1834,12 +1907,13 @@ function ChatView({
       const rows = inv.map((it, idx) => {
         const rawSev = String(it.severidad ?? 'LEVE');
         let precio = 0;
-        const lineAt = lines[idx];
-        if (
-          lineAt &&
-          Number.isFinite(Number(lineAt.subtotal)) &&
-          inv.length === lines.length
-        ) {
+        const lineAt = findLineForQuoteIdentity(
+          lines,
+          it,
+          idx,
+          inv.length === lines.length,
+        );
+        if (lineAt && Number.isFinite(Number(lineAt.subtotal))) {
           precio = Number(lineAt.subtotal);
         }
         let urls = urlsFromInventoryItem(it);
@@ -1850,6 +1924,7 @@ function ChatView({
           severidadRaw: rawSev,
           precio,
           urls,
+          identity: { ...it, ...lineAt },
         });
       });
       setQuoteRows(rows);
@@ -2111,6 +2186,17 @@ function ChatView({
       panelQuoteFrozen?.quoteRows?.length
         ? panelQuoteFrozen.quoteRows
         : quoteRows;
+    const modernOpts = modernAssembleOptionsFromDraft(activeDraftForPanel, {
+      backendNarrative: panelBackendClienteNarrative,
+    });
+    if (isModernCanonicalClientQuote(modernOpts)) {
+      const persisted = assembleDynamicClienteQuoteMessage(
+        rowsForPreview,
+        modernOpts,
+      );
+      if (persisted) return persisted;
+      return 'No se pudo mostrar el mensaje canónico. Reintenta la vista previa.';
+    }
     if (quoteRowsValidForNarrativeRegen(rowsForPreview)) {
       const assembled = assembleDynamicClienteQuoteMessage(rowsForPreview, {
         leadStatus: leadStatusForQuote,
@@ -2155,6 +2241,7 @@ function ChatView({
     selectedContact?.contactName,
     conversationAppointmentWhen,
     selectedConvId,
+    activeDraftForPanel,
   ]);
 
   const previewNarrativeFromQuoteRows = useCallback(
@@ -2188,6 +2275,12 @@ function ChatView({
             conversationStatus: leadStatusForQuote,
             contactName: selectedContact?.contactName ?? '',
             conversationId: selectedConvId ?? '',
+            ...(activeDraftForPanel?.canonicalQuoteV1
+              ? { canonicalQuote: activeDraftForPanel.canonicalQuoteV1 }
+              : {}),
+            ...(activeDraftForPanel?.canonicalPeritajeV1
+              ? { canonicalPeritaje: activeDraftForPanel.canonicalPeritajeV1 }
+              : {}),
           }),
         });
         if (!res.ok) {
@@ -2221,6 +2314,7 @@ function ChatView({
             appointmentWhen: conversationAppointmentWhen,
             conversationId: selectedConvId ?? '',
             mapsUrl: WORKSHOP_MAPS_URL,
+            ...modernAssembleOptionsFromDraft(activeDraftForPanel),
           });
           if (assembled?.trim()) {
             logPanelClienteMessageDebug('preview fallback local armado', {
@@ -2242,9 +2336,12 @@ function ChatView({
           appointmentWhen: conversationAppointmentWhen,
           conversationId: selectedConvId ?? '',
           mapsUrl: WORKSHOP_MAPS_URL,
+          ...modernAssembleOptionsFromDraft(activeDraftForPanel),
         });
         if (assembled?.trim()) {
           setDirtyPreviewNarrative(assembled.trim());
+        } else if (isModernCanonicalClientQuote(modernAssembleOptionsFromDraft(activeDraftForPanel))) {
+          setDirtyPreviewNarrative('');
         }
         setQuoteSaveError(
           e?.message || 'No se pudo actualizar la vista previa con IA.',
@@ -2263,6 +2360,8 @@ function ChatView({
       selectedContact?.contactName,
       selectedConvId,
       conversationAppointmentWhen,
+      activeDraftForPanel?.canonicalQuoteV1,
+      activeDraftForPanel?.canonicalPeritajeV1,
     ],
   );
 
@@ -2417,6 +2516,7 @@ function ChatView({
       throw new Error('bad pieza');
     }
     const linesPayload = quoteRows.map((r) => {
+      const identity = opaqueQuoteIdentity(r);
       if (isInternalDamageRangePieza(r.pieza)) {
         const { min, max } = parsePrecioMinMaxFromRow(r);
         return {
@@ -2427,6 +2527,7 @@ function ChatView({
           precioMaxMx: max,
           descripcionTecnica: `Rango estimado $${formatMoneyClienteQuoteMxAmount(min)} - $${formatMoneyClienteQuoteMxAmount(max)} MXN (sujeto a desarme)`,
           urls_origen: r.urls_origen ?? [],
+          ...identity,
         };
       }
       if (isRefaccionPieza(r.pieza)) {
@@ -2439,6 +2540,7 @@ function ChatView({
           detallesRefaccion: detalle || undefined,
           descripcionTecnica: detalle || 'Refacción manual desde panel',
           urls_origen: r.urls_origen ?? [],
+          ...identity,
         };
       }
       return {
@@ -2446,6 +2548,7 @@ function ChatView({
         severidad: r.severidad,
         precioMx: parsePrecioInput(r.precioInput),
         urls_origen: r.urls_origen ?? [],
+        ...identity,
       };
     });
     for (let i = 0; i < linesPayload.length; i++) {
