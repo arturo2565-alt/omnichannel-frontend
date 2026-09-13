@@ -18,6 +18,8 @@ import {
   PANEL_PIEZA_OPTION_GROUPS,
   findPanelPiezaOption,
   getPiezaClienteDisplayName,
+  isMolduraPieza,
+  molduraFinishClientLine,
   getPiezaMenuLabel,
   getPiezaSelectLabel,
   isInternalDamageRangePieza,
@@ -732,6 +734,13 @@ function buildQuoteRowFromSource({
     pieza,
     urls_origen: urls,
     ...opaqueQuoteIdentity(identity),
+    ...(isMolduraPieza(pieza)
+      ? {
+          moldingPosition:
+            identity?.moldingPosition ?? undefined,
+          finishType: identity?.finishType ?? undefined,
+        }
+      : {}),
   };
   if (isInternalDamageRangePieza(pieza)) {
     const min = Math.max(0, Math.round(Number(precio) || 0));
@@ -3038,9 +3047,20 @@ function ChatView({
                         {row.pieza && !isPlaceholderPieza(row.pieza) ? (
                           <span
                             className="truncate text-[10px] font-medium text-slate-500"
-                            title={getPiezaClienteDisplayName(row.pieza)}
+                            title={getPiezaClienteDisplayName(
+                              row.pieza,
+                              row.moldingPosition,
+                            )}
                           >
-                            {getPiezaSelectLabel(row.pieza)}
+                            {isMolduraPieza(row.pieza)
+                              ? getPiezaClienteDisplayName(
+                                  row.pieza,
+                                  row.moldingPosition,
+                                )
+                              : getPiezaSelectLabel(row.pieza)}
+                            {isMolduraPieza(row.pieza)
+                              ? ` · ${molduraFinishClientLine(row.finishType)}`
+                              : ''}
                           </span>
                         ) : null}
                 </div>

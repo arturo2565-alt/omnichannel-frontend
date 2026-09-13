@@ -114,10 +114,10 @@ export const PANEL_PIEZA_OPTIONS = [
   { code: 'Toldo', label: 'Toldo', fullName: 'Toldo', catalogPieza: 'Toldo', group: 'Otros' },
   { code: 'Espejo', label: 'Espejo', fullName: 'Espejo', catalogPieza: 'Espejo', group: 'Otros' },
   {
-    code: 'Moldura',
+    code: 'MOLDURA',
     label: 'Moldura',
     fullName: 'Moldura',
-    catalogPieza: 'Estetica Exterior',
+    catalogPieza: 'MOLDURA_PINTADA',
     group: 'Otros',
   },
   {
@@ -184,6 +184,7 @@ const EXPLICIT_PIEZA_ALIASES = {
   'estribos derechos': 'ED',
   'poste izquierdo': 'POI',
   'poste derecho': 'POD',
+  moldura: 'MOLDURA',
 };
 
 const catalogPiezaCodeCounts = new Map();
@@ -448,11 +449,55 @@ export function vehicleSizeTierToPanelSizeTierLabel(tier) {
   return map[t] ?? 'Mediano';
 }
 
+const MOLDURA_POSITION_LABEL = {
+  ARCO_DELANTERO_IZQUIERDO: 'arco delantero izquierdo',
+  ARCO_DELANTERO_DERECHO: 'arco delantero derecho',
+  ARCO_TRASERO_IZQUIERDO: 'arco trasero izquierdo',
+  ARCO_TRASERO_DERECHO: 'arco trasero derecho',
+  PUERTA: 'de puerta',
+  FASCIA: 'de fascia',
+  OTRA: '',
+  UNKNOWN: '',
+};
+
+const MOLDURA_FINISH_LABEL = {
+  PINTADA_CARROCERIA: 'Pintada al color',
+  NEGRA_TEXTURIZADA: 'Negra texturizada',
+  UNKNOWN: 'Por confirmar',
+};
+
+export function isMolduraPieza(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return false;
+  if (t === 'MOLDURA' || t === 'Moldura') return true;
+  if (/^MOLDURA::/i.test(t) || /^Moldura::/.test(t)) return true;
+  const n = normalizePiezaText(t.replace(/::/g, ' '));
+  return n === 'moldura' || n.startsWith('moldura ');
+}
+
+export function humanizeMolduraPieceLabel(position) {
+  const loc = MOLDURA_POSITION_LABEL[String(position ?? '').trim().toUpperCase()] ?? '';
+  return loc ? `Moldura ${loc}` : 'Moldura';
+}
+
+export function molduraFinishClientLine(finish) {
+  const label =
+    MOLDURA_FINISH_LABEL[String(finish ?? '').trim().toUpperCase()] ??
+    'Por confirmar';
+  return `Acabado: ${label}`;
+}
+
 /** Nombre completo para cliente / narrativa / API. */
-export function getPiezaClienteDisplayName(raw) {
+export function getPiezaClienteDisplayName(raw, moldingPosition) {
+  const t = String(raw ?? '').trim();
+  if (isMolduraPieza(t)) {
+    const pos =
+      moldingPosition ||
+      (/::/.test(t) ? t.slice(t.indexOf('::') + 2) : '');
+    return humanizeMolduraPieceLabel(pos);
+  }
   const opt = findPanelPiezaOption(raw);
   if (opt) return opt.fullName;
-  const t = String(raw ?? '').trim();
   if (!t) return 'Servicio';
   const canon = matchCatalogPiezaFromFreeText(t);
   return canon ?? t;
@@ -461,6 +506,7 @@ export function getPiezaClienteDisplayName(raw) {
 /** Clave de fila en `PIEZA_DANO_PRICE_MATRIX`. */
 export function resolveCatalogPiezaForEstimate(raw) {
   if (isInternalDamageRangePieza(raw) || isRefaccionPieza(raw)) return '';
+  if (isMolduraPieza(raw)) return 'MOLDURA_PINTADA';
   const opt = findPanelPiezaOption(raw);
   if (opt?.catalogPieza) return opt.catalogPieza;
   const canon = matchCatalogPiezaFromFreeText(raw);
