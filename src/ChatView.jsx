@@ -18,6 +18,7 @@ import {
   PANEL_PIEZA_OPTION_GROUPS,
   findPanelPiezaOption,
   getPiezaClienteDisplayName,
+  getQuoteServiceTypeLabel,
   isMolduraPieza,
   molduraFinishClientLine,
   getPiezaMenuLabel,
@@ -3044,6 +3045,11 @@ function ChatView({
                   <span className="shrink-0 text-[11px] font-bold text-slate-800">
                     Servicio {idx + 1}
                   </span>
+                        {getQuoteServiceTypeLabel(row.serviceType) ? (
+                          <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-slate-700">
+                            {getQuoteServiceTypeLabel(row.serviceType)}
+                          </span>
+                        ) : null}
                         {row.pieza && !isPlaceholderPieza(row.pieza) ? (
                           <span
                             className="truncate text-[10px] font-medium text-slate-500"

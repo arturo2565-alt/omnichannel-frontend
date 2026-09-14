@@ -487,9 +487,113 @@ export function molduraFinishClientLine(finish) {
   return `Acabado: ${label}`;
 }
 
+const CLIENT_PIECE_LABELS = {
+  Calavera_Izquierda: 'Calavera izquierda',
+  Calavera_Derecha: 'Calavera derecha',
+  Faro_Izquierdo: 'Faro izquierdo',
+  Faro_Derecho: 'Faro derecho',
+  Faro_Niebla_Izquierdo: 'Faro de niebla izquierdo',
+  Faro_Niebla_Derecho: 'Faro de niebla derecho',
+  FD: 'Fascia delantera',
+  FT: 'Fascia trasera',
+  SI: 'Salpicadera delantera izquierda',
+  SD: 'Salpicadera delantera derecha',
+  STI: 'Salpicadera trasera izquierda',
+  STD: 'Salpicadera trasera derecha',
+  PDI: 'Puerta delantera izquierda',
+  PDD: 'Puerta delantera derecha',
+  PTI: 'Puerta trasera izquierda',
+  PTD: 'Puerta trasera derecha',
+  EI: 'Estribo izquierdo',
+  ED: 'Estribo derecho',
+  POI: 'Poste izquierdo',
+  POD: 'Poste derecho',
+  Cofre: 'Cofre',
+  'Tapa Cajuela': 'Tapa de cajuela',
+  Toldo: 'Toldo',
+  Parilla: 'Parrilla',
+  Parrilla: 'Parrilla',
+};
+
+function humanizeUnderscorePieceToken(token) {
+  const parts = String(token ?? '')
+    .split(/[_-]+/)
+    .filter(Boolean);
+  if (!parts.length) return String(token ?? '').replace(/[_-]+/g, ' ');
+  const SIDE = {
+    IZQUIERDA: 'izquierda',
+    IZQUIERDO: 'izquierdo',
+    DERECHA: 'derecha',
+    DERECHO: 'derecho',
+    TI: 'trasera izquierda',
+    TD: 'trasera derecha',
+    DI: 'delantera izquierda',
+    DD: 'delantera derecha',
+    I: 'izquierda',
+    D: 'derecha',
+  };
+  const last = parts[parts.length - 1].toUpperCase();
+  const side = SIDE[last];
+  const head = parts
+    .slice(0, side ? -1 : parts.length)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+    .replace(/\bNiebla\b/i, 'de niebla');
+  if (!head) return String(token).replace(/[_-]+/g, ' ');
+  return side ? `${head} ${side}` : head;
+}
+
+/**
+ * Única función de presentación de pieza. No muta pieceCode.
+ */
+export function getClientPieceLabel(pieceCode, attrs) {
+  const raw = String(pieceCode ?? '').trim();
+  if (!raw) return raw;
+  const stripped = raw.replace(/^REFACCION\s*:\s*/i, '').trim();
+  if (isMolduraPieza(stripped) || isMolduraPieza(String(attrs?.physicalPanelKey ?? ''))) {
+    const pos =
+      attrs?.moldingPosition ||
+      (stripped.includes('::') ? stripped.slice(stripped.indexOf('::') + 2) : '');
+    return humanizeMolduraPieceLabel(pos);
+  }
+  if (CLIENT_PIECE_LABELS[stripped]) return CLIENT_PIECE_LABELS[stripped];
+  if (!/\s/.test(stripped)) {
+    const opt = findPanelPiezaOption(stripped);
+    if (opt?.code && opt.code.toLowerCase() === stripped.toLowerCase()) {
+      return CLIENT_PIECE_LABELS[opt.code] ?? opt.fullName;
+    }
+    if (CLIENT_PIECE_LABELS[opt?.code]) return CLIENT_PIECE_LABELS[opt.code];
+    if (/[_-]/.test(stripped)) return humanizeUnderscorePieceToken(stripped);
+    return opt?.fullName ?? stripped;
+  }
+  return stripped;
+}
+
+export function getQuoteServiceTypeLabel(serviceType) {
+  switch (String(serviceType ?? '').trim()) {
+    case 'REPARACION_PINTURA':
+      return 'Reparación y pintura';
+    case 'REFACCION':
+      return 'Refacción';
+    case 'MONTAJE_PINTURA':
+      return 'Montaje y pintura';
+    case 'MONTAJE':
+      return 'Montaje';
+    case 'PENDIENTE':
+      return 'Pendiente de revisión';
+    case 'ADVERTENCIA':
+      return 'Advertencia';
+    default:
+      return String(serviceType ?? '').trim();
+  }
+}
+
 /** Nombre completo para cliente / narrativa / API. */
 export function getPiezaClienteDisplayName(raw, moldingPosition) {
   const t = String(raw ?? '').trim();
+  if (!t) return 'Servicio';
+  const client = getClientPieceLabel(t, { moldingPosition });
+  if (client) return client;
   if (isMolduraPieza(t)) {
     const pos =
       moldingPosition ||
@@ -498,7 +602,6 @@ export function getPiezaClienteDisplayName(raw, moldingPosition) {
   }
   const opt = findPanelPiezaOption(raw);
   if (opt) return opt.fullName;
-  if (!t) return 'Servicio';
   const canon = matchCatalogPiezaFromFreeText(t);
   return canon ?? t;
 }

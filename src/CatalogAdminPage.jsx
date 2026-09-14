@@ -16,7 +16,7 @@ import {
 const TABS = [
   { id: 'rules', label: 'Reglas globales' },
   { id: 'pieces', label: 'Piezas (base)' },
-  { id: 'montaje', label: 'Montaje / pintura' },
+  { id: 'montaje', label: 'Montaje' },
   { id: 'integral', label: 'Servicios integrales' },
   { id: 'simulator', label: 'Simulador' },
 ];
@@ -89,10 +89,15 @@ export default function CatalogAdminPage() {
 
   const [montajeBases, setMontajeBases] = useState([]);
   const [montajeBaseline, setMontajeBaseline] = useState(() => new Map());
+  const [montajeInstallBases, setMontajeInstallBases] = useState([]);
+  const [montajeInstallBaseline, setMontajeInstallBaseline] = useState(
+    () => new Map(),
+  );
 
   const [savingRules, setSavingRules] = useState(false);
   const [savingPieces, setSavingPieces] = useState(false);
   const [savingMontaje, setSavingMontaje] = useState(false);
+  const [savingMontajeInstall, setSavingMontajeInstall] = useState(false);
   const [savingIntegral, setSavingIntegral] = useState(false);
   const [integralSeedSubmitting, setIntegralSeedSubmitting] = useState(false);
   const [seedMessage, setSeedMessage] = useState(null);
@@ -149,6 +154,21 @@ export default function CatalogAdminPage() {
       }
       setMontajeBaseline(mbMap);
 
+      const montajeInstall = Array.isArray(view.montajeBases)
+        ? view.montajeBases
+        : [];
+      setMontajeInstallBases(
+        montajeInstall.map((p) => ({
+          ...p,
+          precio: p.precio ?? 0,
+        })),
+      );
+      const miMap = new Map();
+      for (const p of montajeInstall) {
+        miMap.set(p.servicio, { precio: p.precio ?? 0, diasEntrega: p.diasEntrega });
+      }
+      setMontajeInstallBaseline(miMap);
+
       if (bases.length && !simPiece) {
         setSimPiece(bases[0].servicio);
         setSimBase(bases[0].basePrice ?? 2900);
@@ -195,6 +215,15 @@ export default function CatalogAdminPage() {
     }
     return false;
   }, [montajeBases, montajeBaseline]);
+
+  const montajeInstallDirty = useMemo(() => {
+    for (const p of montajeInstallBases) {
+      const b = montajeInstallBaseline.get(p.servicio);
+      if (!b) return true;
+      if (b.precio !== p.precio || b.diasEntrega !== p.diasEntrega) return true;
+    }
+    return false;
+  }, [montajeInstallBases, montajeInstallBaseline]);
 
   const handleSaveRules = async () => {
     setSavingRules(true);
@@ -262,9 +291,34 @@ export default function CatalogAdminPage() {
       await load();
       setSaveOk(true);
     } catch (e) {
-      setError(e?.message ?? 'Error al guardar montaje/pintura');
+      setError(e?.message ?? 'Error al guardar montaje y pintura');
     } finally {
       setSavingMontaje(false);
+    }
+  };
+
+  const handleSaveMontajeInstall = async () => {
+    setSavingMontajeInstall(true);
+    setError(null);
+    try {
+      const updates = montajeInstallBases.map((p) => ({
+        servicio: p.servicio,
+        precio: p.precio,
+        diasEntrega: p.diasEntrega,
+        matrixRowId: p.matrixRowId,
+      }));
+      const r = await apiFetchOrigin('/catalog/montaje-bases', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      });
+      if (!r.ok) throw new Error(await parseJsonError(r));
+      await load();
+      setSaveOk(true);
+    } catch (e) {
+      setError(e?.message ?? 'Error al guardar montaje');
+    } finally {
+      setSavingMontajeInstall(false);
     }
   };
 
@@ -590,22 +644,28 @@ export default function CatalogAdminPage() {
               </div>
             </section>
           ) : tab === 'montaje' ? (
-            <section>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <p className="text-sm text-gray-600">
-                  Tarifa independiente de montar y pintar al sustituir la pieza. No reutiliza
-                  DL/LEVE de reparación. $0 = aún sin cargar (el valuador marca
-                  LEGACY_REPAIR_MATRIX_FALLBACK).
-                </p>
-                <button
-                  type="button"
-                  disabled={!montajeDirty || savingMontaje}
-                  onClick={() => void handleSaveMontaje()}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {savingMontaje ? 'Guardando…' : 'Guardar montaje'}
-                </button>
-              </div>
+            <section className="space-y-8">
+              <div>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">
+                      Montaje y pintura
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Tarifa de instalar y pintar una pieza de sustitución. No reutiliza
+                      DL/LEVE de reparación. $0 = aún sin cargar (el valuador puede usar
+                      LEGACY_REPAIR_MATRIX_FALLBACK).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!montajeDirty || savingMontaje}
+                    onClick={() => void handleSaveMontaje()}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {savingMontaje ? 'Guardando…' : 'Guardar montaje y pintura'}
+                  </button>
+                </div>
               <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
@@ -700,9 +760,130 @@ export default function CatalogAdminPage() {
                 </table>
                 {montajeBases.length === 0 ? (
                   <p className="px-4 py-8 text-center text-gray-500">
-                    Sin piezas de montaje en catálogo.
+                    Sin piezas de montaje y pintura en catálogo.
                   </p>
                 ) : null}
+              </div>
+              </div>
+
+              <div>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Montaje</h2>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Desmontaje/instalación sin pintura (óptica, parrilla, moldura
+                      texturizada). $0 = tarifa no configurada; no se inventa precio.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!montajeInstallDirty || savingMontajeInstall}
+                    onClick={() => void handleSaveMontajeInstall()}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {savingMontajeInstall ? 'Guardando…' : 'Guardar montaje'}
+                  </button>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600">
+                          Pieza
+                        </th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600">
+                          MONTAJE MXN
+                        </th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600">
+                          Días
+                        </th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600">
+                          Fuente
+                        </th>
+                        {INTEGRAL_PREVIEW_SCENARIOS.map((s) => (
+                          <th
+                            key={s.key}
+                            className="px-3 py-2 text-left text-xs font-semibold text-gray-500"
+                          >
+                            {s.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {montajeInstallBases.map((p) => (
+                        <tr key={p.servicio} className="hover:bg-gray-50/80">
+                          <td className="whitespace-nowrap px-3 py-2 font-medium">
+                            {p.servicio}
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              min={0}
+                              className="w-28 rounded border border-gray-300 px-2 py-1"
+                              value={p.precio}
+                              onChange={(e) => {
+                                const n = parsePositiveInt(e.target.value);
+                                if (Number.isNaN(n)) return;
+                                setMontajeInstallBases((prev) =>
+                                  prev.map((x) =>
+                                    x.servicio === p.servicio
+                                      ? { ...x, precio: n }
+                                      : x,
+                                  ),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              min={0}
+                              className="w-16 rounded border border-gray-300 px-2 py-1"
+                              value={p.diasEntrega}
+                              onChange={(e) => {
+                                const n = parsePositiveInt(e.target.value);
+                                if (Number.isNaN(n)) return;
+                                setMontajeInstallBases((prev) =>
+                                  prev.map((x) =>
+                                    x.servicio === p.servicio
+                                      ? { ...x, diasEntrega: n }
+                                      : x,
+                                  ),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">
+                            {p.precio > 0 ? 'DEDICATED_TARIFF' : 'UNCONFIGURED'}
+                          </td>
+                          {INTEGRAL_PREVIEW_SCENARIOS.map((s) => (
+                            <td
+                              key={s.key}
+                              className="whitespace-nowrap px-3 py-2 text-gray-700"
+                            >
+                              {p.precio > 0
+                                ? formatMx(
+                                    computeIntegralPrice({
+                                      basePrice: p.precio,
+                                      sizeTier: s.sizeTier,
+                                      isPremium: s.isPremium,
+                                      rules,
+                                    }),
+                                  )
+                                : '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {montajeInstallBases.length === 0 ? (
+                    <p className="px-4 py-8 text-center text-gray-500">
+                      Sin piezas de montaje en catálogo.
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </section>
           ) : tab === 'integral' ? (
