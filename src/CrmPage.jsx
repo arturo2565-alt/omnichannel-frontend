@@ -5,9 +5,18 @@ import {
   createCrmAppointment,
   expireAuthSession,
   fetchCrmAppointments,
+  fetchCrmSuggestions,
   patchCrmVisit,
+  saveCrmCommercial,
   saveCrmContract,
 } from './apiClient.js';
+import {
+  blankServiceLine,
+  formatCents,
+  formatHundredths,
+  lineSubtotalCents,
+  parseDecimalToScaled,
+} from './crmMoney.js';
 import { getAuthTallerId } from './authStorage.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -34,6 +43,20 @@ const VISITS = [
 
 const TIME_CHIPS = ['09:00', '11:00', '13:00', '16:00'];
 
+const FREQUENT_SERVICES = [
+  'Baño de pintura',
+  'Pintura de salpicadera',
+  'Hojalatería',
+  'Pulido',
+  'Cerámico',
+];
+
+const ATTRIBUTION_LABELS = {
+  manual: 'Declarado en el CRM',
+  verified: 'Verificado por integración',
+  unknown: 'Sin anuncio',
+};
+
 const MXN = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',
@@ -43,6 +66,19 @@ const MXN = new Intl.NumberFormat('es-MX', {
 function formatMxn(value) {
   const n = Number(value);
   return Number.isFinite(n) ? MXN.format(n) : '—';
+}
+
+function quoteLabel(row) {
+  if (row.quotedTotalCents != null) return formatCents(row.quotedTotalCents);
+  if (row.quotedAmount == null) return 'Sin cotizar';
+  return formatMxn(row.quotedAmount);
+}
+
+function serviceLabel(row) {
+  const names = Array.isArray(row.lines) ? row.lines.map((line) => line.name).filter(Boolean) : [];
+  if (names.length > 1) return `${names[0]} +${names.length - 1}`;
+  if (names.length === 1) return names[0];
+  return row.serviceRequested || '';
 }
 
 function ymdInTz(date) {
@@ -117,24 +153,106 @@ function whenLabel(iso) {
 const fieldClass =
   'w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-amber-500/20 placeholder:text-gray-400 focus:border-amber-300 focus:ring-4 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
 
-function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
-  const [clientName, setClientName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [vehicleMake, setVehicleMake] = useState('');
-  const [vehicleModel, setVehicleModel] = useState('');
-  const [vehicleYear, setVehicleYear] = useState('');
-  const [serviceRequested, setServiceRequested] = useState('');
-  const [quotedAmount, setQuotedAmount] = useState('');
-  const [origin, setOrigin] = useState('desconocido');
+function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, onClose }) {
+  const editing = Boolean(appointment?.id);
+  const [clientName, setClientName] = useState(appointment?.clientName ?? '');
+  const [phone, setPhone] = useState(appointment?.phone ?? '');
+  const [vehicleMake, setVehicleMake] = useState(appointment?.vehicleMake ?? '');
+  const [vehicleModel, setVehicleModel] = useState(appointment?.vehicleModel ?? '');
+  const [vehicleYear, setVehicleYear] = useState(
+    appointment?.vehicleYear == null ? '' : String(appointment.vehicleYear),
+  );
+  const [lines, setLines] = useState(() =>
+    appointment?.lines?.length
+      ? appointment.lines.map((line) => ({
+          id: line.id,
+          name: line.name,
+          quantity: formatHundredths(line.quantityHundredths),
+          unitPrice: formatHundredths(line.unitPriceCents),
+        }))
+      : [blankServiceLine()],
+  );
+  const [linesDirty, setLinesDirty] = useState(!editing);
+  const [origin, setOrigin] = useState(appointment?.origin || 'desconocido');
+  const [campaignName, setCampaignName] = useState(appointment?.campaignName ?? '');
+  const [adName, setAdName] = useState(appointment?.adName ?? '');
+  const [adExternalId, setAdExternalId] = useState(appointment?.adExternalId ?? '');
   const [date, setDate] = useState(() => defaultDateYmd());
   const [time, setTime] = useState('10:00');
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(appointment?.notes ?? '');
+  const [localError, setLocalError] = useState('');
+  const [suggestions, setSuggestions] = useState({ campaigns: [], ads: [], services: [] });
+
+  useEffect(() => {
+    let active = true;
+    fetchCrmSuggestions()
+      .then((data) => {
+        if (!active) return;
+        setSuggestions({
+          campaigns: data?.campaigns ?? [],
+          ads: data?.ads ?? [],
+          services: data?.services ?? [],
+        });
+      })
+      .catch(() => {
+        if (active) setSuggestions({ campaigns: [], ads: [], services: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const serviceOptions = [...new Set([...FREQUENT_SERVICES, ...suggestions.services])];
+  const prepared = lines.map((line) => {
+    const empty = !line.name.trim() && !String(line.unitPrice).trim();
+    const quantityHundredths = parseDecimalToScaled(line.quantity || '1');
+    const unitPriceCents = parseDecimalToScaled(line.unitPrice);
+    const subtotalCents =
+      quantityHundredths != null && unitPriceCents != null
+        ? lineSubtotalCents(quantityHundredths, unitPriceCents)
+        : null;
+    return { ...line, empty, quantityHundredths, unitPriceCents, subtotalCents };
+  });
+  const activeLines = prepared.filter((line) => !line.empty);
+  const totalCents =
+    activeLines.length > 0 && activeLines.every((line) => line.subtotalCents != null)
+      ? activeLines.reduce((sum, line) => sum + line.subtotalCents, 0)
+      : null;
+
+  const updateLine = (id, patch) => {
+    setLinesDirty(true);
+    setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  };
 
   return (
     <form
       className="flex min-h-0 flex-1 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
+        setLocalError('');
+        if (activeLines.some((line) => !line.name.trim() || line.subtotalCents == null)) {
+          setLocalError('Cada servicio necesita nombre, cantidad y precio.');
+          return;
+        }
+        const payloadLines = activeLines.map((line) => ({
+          id: line.id,
+          name: line.name.trim(),
+          quantityHundredths: line.quantityHundredths,
+          unitPriceCents: line.unitPriceCents,
+        }));
+        const attribution = {
+          origin,
+          campaignName: campaignName.trim(),
+          adName: adName.trim(),
+          adExternalId: adExternalId.trim(),
+        };
+        if (editing) {
+          onSubmit({
+            ...attribution,
+            ...(linesDirty ? { lines: payloadLines } : {}),
+          });
+          return;
+        }
         onSubmit({
           clientRequestId: requestId,
           clientName,
@@ -142,15 +260,23 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
           vehicleMake,
           vehicleModel,
           vehicleYear: vehicleYear.trim() ? Number(vehicleYear) : undefined,
-          serviceRequested,
-          quotedAmount: quotedAmount.trim() ? Number(quotedAmount) : undefined,
           origin,
           notes,
           scheduledAtIso: `${date}T${String(time || '10:00').slice(0, 5)}:00`,
+          ...attribution,
+          lines: payloadLines,
         });
       }}
     >
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+        {editing ? (
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {appointment.clientName}
+            {appointment.phone ? ` · ${appointment.phone}` : ''}
+          </p>
+        ) : null}
+        {editing ? null : (
+        <>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
             Nombre del cliente
@@ -203,32 +329,90 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
             />
           </label>
         </div>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Servicio solicitado
-          </span>
-          <input
-            value={serviceRequested}
-            onChange={(e) => setServiceRequested(e.target.value)}
-            className={fieldClass}
-            placeholder="Pintura de salpicadera"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Importe cotizado
-          </span>
-          <input
-            inputMode="decimal"
-            value={quotedAmount}
-            onChange={(e) => setQuotedAmount(e.target.value)}
-            className={fieldClass}
-            placeholder="Opcional"
-          />
-          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-            No se registra como venta.
-          </span>
-        </label>
+        </>
+        )}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Servicios</span>
+            <button
+              type="button"
+              onClick={() => {
+                setLinesDirty(true);
+                setLines((current) => [...current, blankServiceLine()]);
+              }}
+              className="rounded-lg border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:text-amber-200"
+            >
+              Agregar servicio
+            </button>
+          </div>
+          {editing && !appointment?.lines?.length && appointment?.serviceRequested ? (
+            <p className="text-xs text-gray-500">
+              Esta cita ya tiene «{appointment.serviceRequested}». Agregar un servicio lo sustituye al guardar.
+            </p>
+          ) : null}
+          {lines.map((line, index) => {
+            const row = prepared.find((item) => item.id === line.id);
+            return (
+              <div key={line.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-500">Servicio {index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinesDirty(true);
+                      setLines((current) =>
+                        current.length === 1 ? [blankServiceLine()] : current.filter((item) => item.id !== line.id),
+                      );
+                    }}
+                    className="text-xs font-medium text-gray-500"
+                  >
+                    Quitar
+                  </button>
+                </div>
+                <input
+                  list="crm-service-names"
+                  value={line.name}
+                  onChange={(e) => updateLine(line.id, { name: e.target.value })}
+                  className={fieldClass}
+                  placeholder="Nombre del servicio"
+                />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-gray-400">Cantidad</span>
+                    <input
+                      inputMode="decimal"
+                      value={line.quantity}
+                      onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
+                      className={fieldClass}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-gray-400">Precio unitario</span>
+                    <input
+                      inputMode="decimal"
+                      value={line.unitPrice}
+                      onChange={(e) => updateLine(line.id, { unitPrice: e.target.value })}
+                      className={fieldClass}
+                      placeholder="0.00"
+                    />
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  Subtotal {row?.subtotalCents == null ? '—' : formatCents(row.subtotalCents)}
+                </p>
+              </div>
+            );
+          })}
+          <datalist id="crm-service-names">
+            {serviceOptions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            Total cotizado {totalCents == null ? '—' : formatCents(totalCents)}
+          </p>
+          <p className="text-xs text-gray-500">No se registra como venta.</p>
+        </div>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
             Origen
@@ -241,6 +425,54 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
             ))}
           </select>
         </label>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Campaña</span>
+            <input
+              list="crm-campaign-names"
+              value={campaignName}
+              onChange={(e) => setCampaignName(e.target.value)}
+              className={fieldClass}
+              placeholder="Opcional"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Anuncio</span>
+            <input
+              list="crm-ad-names"
+              value={adName}
+              onChange={(e) => setAdName(e.target.value)}
+              className={fieldClass}
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+        <datalist id="crm-campaign-names">
+          {suggestions.campaigns.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <datalist id="crm-ad-names">
+          {suggestions.ads.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+            Id del anuncio
+          </span>
+          <input
+            value={adExternalId}
+            onChange={(e) => setAdExternalId(e.target.value)}
+            className={fieldClass}
+            placeholder="Opcional, para una integración futura"
+          />
+          <span className="mt-1 block text-xs text-gray-500">
+            {ATTRIBUTION_LABELS[appointment?.attributionKind] || 'Sin anuncio hasta que lo escribas.'}
+          </span>
+        </label>
+        {editing ? null : (
+        <>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -274,6 +506,9 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Lun–vie 9:00–18:00, sáb 9:00–14:00, hora del centro de México.
         </p>
+        </>
+        )}
+        {editing ? null : (
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
             Observaciones
@@ -285,9 +520,10 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
             className={fieldClass}
           />
         </label>
-        {error ? (
+        )}
+        {localError || error ? (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-            {error}
+            {localError || error}
           </p>
         ) : null}
       </div>
@@ -304,14 +540,14 @@ function ManualAppointmentForm({ requestId, busy, error, onSubmit, onClose }) {
           disabled={busy}
           className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-60"
         >
-          {busy ? 'Guardando…' : 'Guardar cita'}
+          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar cita'}
         </button>
       </div>
     </form>
   );
 }
 
-function CrmAppointmentCard({ row, onVisit, onContract }) {
+function CrmAppointmentCard({ row, onVisit, onContract, onEdit }) {
   const [visit, setVisit] = useState(row.visitStatus || 'agendada');
   const [amount, setAmount] = useState(
     row.contractedAmount == null ? '' : String(row.contractedAmount),
@@ -339,9 +575,15 @@ function CrmAppointmentCard({ row, onVisit, onContract }) {
           </p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {vehicle || 'Vehículo no indicado'}
-            {row.serviceRequested ? ` · ${row.serviceRequested}` : ''}
+            {serviceLabel(row) ? ` · ${serviceLabel(row)}` : ''}
           </p>
-          <p className="mt-1 text-xs text-gray-400">{originLabel(row.origin)}</p>
+          <p className="mt-1 text-xs text-gray-400">
+            {originLabel(row.origin)}
+            {row.campaignName ? ` · ${row.campaignName}` : ''}
+            {row.adName ? ` · ${row.adName}` : ''}
+            {row.attributionKind === 'manual' ? ' · declarado' : ''}
+            {row.attributionKind === 'verified' ? ' · verificado' : ''}
+          </p>
         </div>
         <label className="block sm:w-44">
           <span className="sr-only">Resultado de la visita</span>
@@ -379,7 +621,7 @@ function CrmAppointmentCard({ row, onVisit, onContract }) {
             Cotizado
           </p>
           <p className="mt-0.5 text-sm text-gray-700 dark:text-gray-200">
-            {row.quotedAmount == null ? 'Sin cotizar' : formatMxn(row.quotedAmount)}
+            {quoteLabel(row)}
           </p>
           <p className="text-xs text-gray-400">No cuenta como venta.</p>
         </div>
@@ -420,6 +662,25 @@ function CrmAppointmentCard({ row, onVisit, onContract }) {
           </button>
         </form>
       </div>
+      {Array.isArray(row.lines) && row.lines.length > 0 ? (
+        <ul className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+          {row.lines.map((line) => (
+            <li key={line.id} className="flex justify-between gap-3">
+              <span className="truncate">
+                {line.name} · {formatHundredths(line.quantityHundredths)} × {formatCents(line.unitPriceCents)}
+              </span>
+              <span className="shrink-0">{formatCents(line.subtotalCents)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => onEdit(row)}
+        className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-300"
+      >
+        Editar servicios
+      </button>
       {row.notes ? (
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{row.notes}</p>
       ) : null}
@@ -433,6 +694,7 @@ export default function CrmPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const requestIdRef = useRef('');
@@ -475,6 +737,13 @@ export default function CrmPage() {
 
   const openForm = () => {
     requestIdRef.current = newRequestId();
+    setEditing(null);
+    setFormError('');
+    setFormOpen(true);
+  };
+
+  const openEdit = (row) => {
+    setEditing(row);
     setFormError('');
     setFormOpen(true);
   };
@@ -564,6 +833,7 @@ export default function CrmPage() {
                     await saveCrmContract(id, contractedAmount);
                     await load();
                   }}
+                  onEdit={openEdit}
                 />
               ))}
               <p className="pt-2 text-center text-sm text-gray-500">
@@ -580,10 +850,14 @@ export default function CrmPage() {
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center">
           <div className="flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-white dark:bg-gray-900 sm:h-[min(40rem,92dvh)] sm:max-w-lg sm:rounded-2xl sm:shadow-xl">
             <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Nueva cita</h2>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                {editing ? 'Editar servicios' : 'Nueva cita'}
+              </h2>
             </div>
             <ManualAppointmentForm
+              key={editing?.id || requestIdRef.current}
               requestId={requestIdRef.current}
+              appointment={editing}
               busy={saving}
               error={formError}
               onClose={() => {
@@ -593,7 +867,8 @@ export default function CrmPage() {
                 setSaving(true);
                 setFormError('');
                 try {
-                  await createCrmAppointment(payload);
+                  if (editing?.id) await saveCrmCommercial(editing.id, payload);
+                  else await createCrmAppointment(payload);
                   setFormOpen(false);
                   await load();
                 } catch (err) {

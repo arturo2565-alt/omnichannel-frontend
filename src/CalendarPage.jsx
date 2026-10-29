@@ -9,6 +9,7 @@ import {
 import { apiFetchWebhook, expireAuthSession } from './apiClient.js';
 import { getAuthTallerId } from './authStorage.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
+import { formatCents } from './crmMoney.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -265,18 +266,30 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
             <span className="italic text-gray-400">Vehículo no indicado</span>
           )}
         </p>
-        {appointment.serviceRequested || appointment.quoteSummary ? (
+        {appointment.lines?.length || appointment.serviceRequested || appointment.quoteSummary ? (
           <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
-            {appointment.serviceRequested || appointment.quoteSummary}
+            {appointment.lines?.length
+              ? appointment.lines.length === 1
+                ? appointment.lines[0].name
+                : `${appointment.lines[0].name} +${appointment.lines.length - 1}`
+              : appointment.serviceRequested || appointment.quoteSummary}
           </p>
         ) : (
           <p className="mt-1 text-xs italic text-gray-400">
             Sin servicio indicado
           </p>
         )}
-        {appointment.quotedAmount != null ? (
+        {appointment.quotedTotalCents != null || appointment.quotedAmount != null ? (
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Cotizado {formatMxn(appointment.quotedAmount)}
+            Cotizado{' '}
+            {appointment.quotedTotalCents != null
+              ? formatCents(appointment.quotedTotalCents)
+              : formatMxn(appointment.quotedAmount)}
+          </p>
+        ) : null}
+        {appointment.campaignName || appointment.adName ? (
+          <p className="mt-0.5 truncate text-xs text-gray-400">
+            {[appointment.campaignName, appointment.adName].filter(Boolean).join(' · ')}
           </p>
         ) : null}
         {appointment.contractedAmount != null ? (

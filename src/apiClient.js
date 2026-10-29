@@ -232,6 +232,12 @@ export async function registerRequest(payload) {
   return res.json();
 }
 
+export async function fetchCrmSuggestions() {
+  const res = await apiFetchOrigin('/api/crm/appointments/suggestions');
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
 export async function fetchCrmAppointments() {
   const res = await apiFetchOrigin('/api/crm/appointments');
   if (!res.ok) throw new Error(await parseApiError(res));
@@ -253,6 +259,18 @@ export async function patchCrmVisit(appointmentId, visitStatus) {
     method: 'PATCH',
     body: JSON.stringify({ visitStatus }),
   });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
+export async function saveCrmCommercial(appointmentId, payload) {
+  const res = await apiFetchOrigin(
+    `/api/crm/appointments/${appointmentId}/commercial`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
   if (!res.ok) throw new Error(await parseApiError(res));
   return res.json();
 }
