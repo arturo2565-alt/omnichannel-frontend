@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, LayoutDashboard, LogOut, MessageCircle, Settings2, Table2 } from 'lucide-react';
+import { Calendar, LayoutDashboard, LogOut, MessageCircle, Settings2, Table2, Users } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -11,6 +11,7 @@ export function OmnichannelLeftRail({ platformSlot }) {
   const { logout, taller, user } = useAuth();
 
   return (
+    <>
     <div className="z-10 hidden min-h-0 w-20 shrink-0 flex-col items-center bg-gray-900 py-4 shadow-xl lg:flex lg:min-h-full">
       {platformSlot ? (
         <>
@@ -49,6 +50,19 @@ export function OmnichannelLeftRail({ platformSlot }) {
           }
         >
           <MessageCircle className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </NavLink>
+        <NavLink
+          to="/crm"
+          title="CRM"
+          className={({ isActive }) =>
+            `${railBtn} ${
+              isActive
+                ? 'scale-105 bg-amber-600 text-white ring-2 ring-white ring-offset-2 ring-offset-gray-900 border-amber-400'
+                : 'border-gray-600 bg-gray-800/90 text-gray-200 hover:bg-gray-700'
+            }`
+          }
+        >
+          <Users className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
         <NavLink
           to="/calendar"
@@ -111,5 +125,36 @@ export function OmnichannelLeftRail({ platformSlot }) {
         </button>
       </div>
     </div>
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-gray-800 bg-gray-900 px-1 pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] lg:hidden"
+      aria-label="Navegación"
+    >
+      {[
+        { to: '/dashboard', title: 'Inicio', icon: LayoutDashboard, end: false },
+        { to: '/', title: 'Bandeja', icon: MessageCircle, end: true },
+        { to: '/crm', title: 'CRM', icon: Users, end: false },
+        { to: '/calendar', title: 'Citas', icon: Calendar, end: false },
+        { to: '/admin/catalog', title: 'Precios', icon: Table2, end: false },
+      ].map((item) => {
+        const Icon = item.icon;
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            title={item.title}
+            className={({ isActive }) =>
+              `flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium ${
+                isActive ? 'text-amber-300' : 'text-gray-400'
+              }`
+            }
+          >
+            <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
+            {item.title}
+          </NavLink>
+        );
+      })}
+    </nav>
+    </>
   );
 }

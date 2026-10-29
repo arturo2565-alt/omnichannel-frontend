@@ -392,7 +392,7 @@ export default function CatalogAdminPage() {
   }, [simBase, simSize, simPremium, simSeverity, rules]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <div className="flex h-screen overflow-hidden bg-gray-50 pb-16 dark:bg-gray-950 lg:pb-0">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="shrink-0 border-b border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">

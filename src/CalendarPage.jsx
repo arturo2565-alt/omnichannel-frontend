@@ -7,7 +7,8 @@ import {
   Phone,
   Search,
 } from 'lucide-react';
-import { apiFetchWebhook, transitionConversationStatus } from './apiClient.js';
+import { apiFetchWebhook } from './apiClient.js';
+import { getAccessToken, getAuthTallerId } from './authStorage.js';
 import { API_ORIGIN_URL } from './apiConfig.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
@@ -21,16 +22,16 @@ const RANGE_OPTIONS = [
 ];
 
 const STATUS_FILTERS = [
-  { id: 'confirmadas', label: 'Confirmadas' },
-  { id: 'finalizadas', label: 'Finalizadas / Completadas' },
+  { id: 'agendadas', label: 'Agendadas' },
+  { id: 'realizadas', label: 'Realizadas' },
   { id: 'todas', label: 'Todas' },
 ];
 
-const PATIO_ACTIONS = [
-  { id: 'confirmada', label: 'Confirmada' },
-  { id: 'en_taller', label: 'Atendido / En Taller' },
-  { id: 'finalizada', label: 'Finalizada' },
-  { id: 'no_asistio', label: 'No Asistió' },
+const VISIT_ACTIONS = [
+  { id: 'agendada', label: 'Agendada' },
+  { id: 'realizada', label: 'Realizada' },
+  { id: 'cancelada', label: 'Cancelada' },
+  { id: 'no_asistio', label: 'No asistió' },
 ];
 
 function capitalizeEs(value) {
@@ -126,28 +127,29 @@ function whatsappHref(phone) {
   return `https://wa.me/${n}`;
 }
 
-function patioValue(appointment) {
+function visitOf(appointment) {
+  const visit = String(appointment.visitStatus ?? '').toLowerCase();
+  if (['agendada', 'realizada', 'cancelada', 'no_asistio'].includes(visit)) {
+    return visit;
+  }
   const status = String(appointment.status ?? '').toLowerCase();
-  const lead = String(appointment.leadStatus ?? '').toLowerCase();
-  if (lead === 'no_asistio') return 'no_asistio';
-  if (lead === 'en_taller') return 'en_taller';
-  if (status === 'finalizada') return 'finalizada';
-  if (lead === 'atendido') return 'en_taller';
-  return 'confirmada';
+  if (status === 'finalizada') return 'realizada';
+  if (status === 'cancelada') return 'cancelada';
+  if (status === 'no_asistio') return 'no_asistio';
+  return 'agendada';
 }
 
 function appointmentBadge(appointment) {
-  const patio = patioValue(appointment);
-  switch (patio) {
-    case 'finalizada':
+  switch (visitOf(appointment)) {
+    case 'realizada':
       return {
-        label: 'Finalizada',
+        label: 'Realizada',
         className: 'bg-slate-100 text-slate-700 border-slate-200',
       };
-    case 'en_taller':
+    case 'cancelada':
       return {
-        label: 'En taller',
-        className: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+        label: 'Cancelada',
+        className: 'bg-rose-50 text-rose-800 border-rose-200',
       };
     case 'no_asistio':
       return {
@@ -156,13 +158,20 @@ function appointmentBadge(appointment) {
       };
     default:
       return {
-        label:
-          String(appointment.status ?? '') === 'pendiente'
-            ? 'Pendiente'
-            : 'Confirmada',
+        label: 'Agendada',
         className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
       };
   }
+}
+
+function formatMxn(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 function matchesSearch(appointment, query) {
@@ -186,9 +195,9 @@ function inRange(ymd, range, todayYmd) {
 }
 
 function matchesStatusFilter(appointment, statusFilter) {
-  const st = String(appointment.status ?? '').toLowerCase();
-  if (statusFilter === 'finalizadas') return st === 'finalizada';
-  if (statusFilter === 'confirmadas') return st !== 'finalizada';
+  const visit = visitOf(appointment);
+  if (statusFilter === 'realizadas') return visit === 'realizada';
+  if (statusFilter === 'agendadas') return visit === 'agendada';
   return true;
 }
 
@@ -233,7 +242,7 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
   const chatTo = appointment.conversationId
     ? `/?conversation=${encodeURIComponent(appointment.conversationId)}`
     : null;
-  const patio = patioValue(appointment);
+  const patio = visitOf(appointment);
 
   return (
     <article className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800 lg:flex-row lg:items-center lg:gap-5">
@@ -257,15 +266,25 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
             <span className="italic text-gray-400">Vehículo no indicado</span>
           )}
         </p>
-        {appointment.quoteSummary ? (
+        {appointment.serviceRequested || appointment.quoteSummary ? (
           <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
-            {appointment.quoteSummary}
+            {appointment.serviceRequested || appointment.quoteSummary}
           </p>
         ) : (
           <p className="mt-1 text-xs italic text-gray-400">
-            Sin resumen de cotización
+            Sin servicio indicado
           </p>
         )}
+        {appointment.quotedAmount != null ? (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Cotizado {formatMxn(appointment.quotedAmount)}
+          </p>
+        ) : null}
+        {appointment.contractedAmount != null ? (
+          <p className="mt-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+            Contratado {formatMxn(appointment.contractedAmount)}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-1.5 lg:w-48 lg:shrink-0">
@@ -307,14 +326,14 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
           </span>
         )}
         <label className="block min-w-0">
-          <span className="sr-only">Estado de patio</span>
+          <span className="sr-only">Resultado de la visita</span>
           <select
             value={patio}
             disabled={busy}
             onChange={(e) => onPatioChange(appointment, e.target.value)}
             className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-900 shadow-sm disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
           >
-            {PATIO_ACTIONS.map((opt) => (
+            {VISIT_ACTIONS.map((opt) => (
               <option key={opt.id} value={opt.id}>
                 {opt.label}
               </option>
@@ -345,30 +364,11 @@ export default function CalendarPage() {
       setError(null);
     }
     try {
-      const [aptRes, convRes] = await Promise.all([
-        apiFetchWebhook('/appointments'),
-        apiFetchWebhook('/conversations'),
-      ]);
+      const aptRes = await apiFetchWebhook('/appointments');
       if (!aptRes.ok) throw new Error(`HTTP ${aptRes.status}`);
       const data = await aptRes.json();
       const appointments = Array.isArray(data) ? data : [];
-      let leadByConv = new Map();
-      if (convRes.ok) {
-        const convs = await convRes.json();
-        if (Array.isArray(convs)) {
-          leadByConv = new Map(
-            convs.map((c) => [c.id, c.status ?? null]),
-          );
-        }
-      }
-      setItems(
-        appointments.map((a) => ({
-          ...a,
-          leadStatus: a.conversationId
-            ? leadByConv.get(a.conversationId) ?? null
-            : null,
-        })),
-      );
+      setItems(appointments);
     } catch (e) {
       if (!silent) {
         setError(e?.message ?? 'Error al cargar citas');
@@ -384,15 +384,20 @@ export default function CalendarPage() {
   }, [load]);
 
   useEffect(() => {
-    const socket = io(API_ORIGIN_URL, { transports: ['websocket'] });
-    const onRefresh = () => {
+    const socket = io(API_ORIGIN_URL, {
+      transports: ['websocket'],
+      auth: { token: getAccessToken() ?? '' },
+    });
+    const onRefresh = (payload) => {
+      const tallerId = getAuthTallerId();
+      if (!payload?.tallerId || payload.tallerId !== tallerId) return;
       void load({ silent: true });
     };
     socket.on('appointmentCreated', onRefresh);
-    socket.on('conversationLeadUpdated', onRefresh);
+    socket.on('appointmentUpdated', onRefresh);
     return () => {
       socket.off('appointmentCreated', onRefresh);
-      socket.off('conversationLeadUpdated', onRefresh);
+      socket.off('appointmentUpdated', onRefresh);
       socket.disconnect();
     };
   }, [load]);
@@ -451,45 +456,26 @@ export default function CalendarPage() {
   );
 
   const applyPatioAction = async (appointment, action) => {
-    if (!action || action === patioValue(appointment) || busyId) return;
+    if (!action || action === visitOf(appointment) || busyId) return;
     setBusyId(appointment.id);
     try {
-      if (action === 'confirmada' || action === 'finalizada') {
-        const r = await apiFetchWebhook(`/appointments/${appointment.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ status: action }),
-        });
-        if (!r.ok) throw new Error('patch');
-        setItems((prev) =>
-          prev.map((a) =>
-            a.id === appointment.id
-              ? {
-                  ...a,
-                  status: action,
-                  leadStatus:
-                    action === 'finalizada' ? 'atendido' : a.leadStatus,
-                }
-              : a,
-          ),
-        );
-      } else if (
-        (action === 'en_taller' || action === 'no_asistio') &&
-        appointment.conversationId
-      ) {
-        const result = await transitionConversationStatus(
-          appointment.conversationId,
-          action,
-        );
-        setItems((prev) =>
-          prev.map((a) =>
-            a.id === appointment.id
-              ? { ...a, leadStatus: result?.status ?? action }
-              : a,
-          ),
-        );
-      } else {
-        throw new Error('Sin conversación vinculada');
-      }
+      const r = await apiFetchWebhook(`/appointments/${appointment.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ visitStatus: action }),
+      });
+      if (!r.ok) throw new Error('patch');
+      const updated = await r.json();
+      setItems((prev) =>
+        prev.map((a) =>
+          a.id === appointment.id
+            ? {
+                ...a,
+                status: updated?.status ?? a.status,
+                visitStatus: updated?.visitStatus ?? action,
+              }
+            : a,
+        ),
+      );
       await load({ silent: true });
     } catch {
       alert('No se pudo actualizar el estado');
@@ -500,7 +486,7 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <div className="flex h-screen overflow-hidden bg-gray-50 pb-16 dark:bg-gray-950 lg:pb-0">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="shrink-0 border-b border-gray-100 bg-white px-4 py-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:px-6">

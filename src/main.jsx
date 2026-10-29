@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import CalendarPage from './CalendarPage.jsx'
+import CrmPage from './CrmPage.jsx'
 import DashboardView from './DashboardView.jsx'
 import AiSettingsPage from './AiSettingsPage.jsx'
 import CatalogAdminPage from './CatalogAdminPage.jsx'
@@ -32,6 +33,14 @@ createRoot(document.getElementById('root')).render(
             element={
               <ProtectedRoute>
                 <DashboardView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/crm"
+            element={
+              <ProtectedRoute>
+                <CrmPage />
               </ProtectedRoute>
             }
           />

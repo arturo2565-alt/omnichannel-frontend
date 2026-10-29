@@ -227,3 +227,40 @@ export async function registerRequest(payload) {
   }
   return res.json();
 }
+
+export async function fetchCrmAppointments() {
+  const res = await apiFetchOrigin('/api/crm/appointments');
+  if (!res.ok) throw new Error(await parseApiError(res));
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createCrmAppointment(payload) {
+  const res = await apiFetchOrigin('/api/crm/appointments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
+export async function patchCrmVisit(appointmentId, visitStatus) {
+  const res = await apiFetchOrigin(`/api/crm/appointments/${appointmentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ visitStatus }),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
+export async function saveCrmContract(appointmentId, contractedAmount) {
+  const res = await apiFetchOrigin(
+    `/api/crm/appointments/${appointmentId}/contract`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ contractedAmount }),
+    },
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
