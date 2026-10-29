@@ -1,15 +1,14 @@
 import { Link } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { io } from 'socket.io-client';
 import {
   CalendarDays,
   MessageCircle,
   Phone,
   Search,
 } from 'lucide-react';
-import { apiFetchWebhook } from './apiClient.js';
-import { getAccessToken, getAuthTallerId } from './authStorage.js';
-import { API_ORIGIN_URL } from './apiConfig.js';
+import { apiFetchWebhook, expireAuthSession } from './apiClient.js';
+import { getAuthTallerId } from './authStorage.js';
+import { connectWorkshopSocket } from './realtimeSocket.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -384,10 +383,10 @@ export default function CalendarPage() {
   }, [load]);
 
   useEffect(() => {
-    const socket = io(API_ORIGIN_URL, {
-      transports: ['websocket'],
-      auth: { token: getAccessToken() ?? '' },
+    const socket = connectWorkshopSocket({
+      onUnauthorized: () => expireAuthSession(),
     });
+    if (!socket) return undefined;
     const onRefresh = (payload) => {
       const tallerId = getAuthTallerId();
       if (!payload?.tallerId || payload.tallerId !== tallerId) return;

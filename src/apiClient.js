@@ -8,6 +8,10 @@ import {
 /** Evita redirecciones en bucle si varias peticiones fallan a la vez. */
 let redirectingToLogin = false;
 
+export function expireAuthSession() {
+  redirectToLogin();
+}
+
 function redirectToLogin() {
   if (redirectingToLogin) return;
   if (typeof window === 'undefined') return;

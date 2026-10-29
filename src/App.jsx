@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { io } from 'socket.io-client';
 import ChatView from './ChatView';
 import { API_BASE_URL } from './apiConfig.js';
-import { apiFetchWebhook, sendAgentMessageRequest } from './apiClient.js';
+import { apiFetchWebhook, expireAuthSession, sendAgentMessageRequest } from './apiClient.js';
+import { connectWorkshopSocket } from './realtimeSocket.js';
 import { useAuth } from './AuthContext.jsx';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
@@ -17,10 +17,6 @@ function suggestionLinesFromAi(text) {
   if (lines.length > 1) return lines;
   return [raw];
 }
-const socket = io('https://omnichannel-backend-production.up.railway.app', { 
-  transports: ['websocket'], 
-  upgrade: false 
-});
 
 function App() {
   const [searchParams] = useSearchParams();
@@ -32,7 +28,8 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [selectedConvId, setSelectedConvId] = useState(null);
   const [reply, setReply] = useState("");
-  const [isConnected, setIsConnected] = useState(socket.connected);
+  const [isConnected, setIsConnected] = useState(false);
+  const socketRef = useRef(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState(null);
 
@@ -79,10 +76,29 @@ function App() {
 
   // --- EFECTOS ---
   useEffect(() => {
+    const socket = connectWorkshopSocket({
+      onUnauthorized: () => expireAuthSession(),
+    });
+    if (!socket) return undefined;
+    socketRef.current = socket;
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.disconnect();
+      if (socketRef.current === socket) socketRef.current = null;
+      setIsConnected(false);
+    };
+  }, []);
+
+  useEffect(() => {
     fetchConversations();
-    socket.on('connect', () => setIsConnected(true));
-    socket.on('disconnect', () => setIsConnected(false));
-    socket.on('newMessage', (msg) => {
+    const socket = socketRef.current;
+    if (!socket) return undefined;
+    const onNewMessage = (msg) => {
       if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
         setMessages((prev) => {
           if (msg?.id && prev.some((m) => m.id === msg.id)) return prev;
@@ -90,10 +106,10 @@ function App() {
         });
       }
       fetchConversations();
-    });
-    socket.on('aiSuggestion', (data) => {
+    };
+    const onAiSuggestion = (data) => {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
-    });
+    };
     const mergeQuoteIntoMessages = (payload) => {
       setContacts((prev) =>
         prev.map((c) =>
@@ -180,15 +196,15 @@ function App() {
       );
       fetchConversations();
     };
+    socket.on('newMessage', onNewMessage);
+    socket.on('aiSuggestion', onAiSuggestion);
     socket.on('draftQuoteReady', mergeQuoteIntoMessages);
     socket.on('imageDamageAnalysis', mergeQuoteIntoMessages);
     socket.on('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
     socket.on('conversationLeadUpdated', onConversationLeadUpdated);
-    return () => { 
-      socket.off('connect'); 
-      socket.off('disconnect'); 
-      socket.off('newMessage'); 
-      socket.off('aiSuggestion');
+    return () => {
+      socket.off('newMessage', onNewMessage);
+      socket.off('aiSuggestion', onAiSuggestion);
       socket.off('draftQuoteReady', mergeQuoteIntoMessages);
       socket.off('imageDamageAnalysis', mergeQuoteIntoMessages);
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);

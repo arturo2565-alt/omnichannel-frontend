@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { io } from 'socket.io-client';
 import { CalendarDays, Plus, Users } from 'lucide-react';
 import {
   createCrmAppointment,
+  expireAuthSession,
   fetchCrmAppointments,
   patchCrmVisit,
   saveCrmContract,
 } from './apiClient.js';
-import { API_ORIGIN_URL } from './apiConfig.js';
-import { getAccessToken, getAuthTallerId } from './authStorage.js';
+import { getAuthTallerId } from './authStorage.js';
+import { connectWorkshopSocket } from './realtimeSocket.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -454,10 +454,10 @@ export default function CrmPage() {
   }, [load]);
 
   useEffect(() => {
-    const socket = io(API_ORIGIN_URL, {
-      transports: ['websocket'],
-      auth: { token: getAccessToken() ?? '' },
+    const socket = connectWorkshopSocket({
+      onUnauthorized: () => expireAuthSession(),
     });
+    if (!socket) return undefined;
     const onRefresh = (payload) => {
       if (payload?.source && payload.source !== 'manual') return;
       const tallerId = getAuthTallerId();
