@@ -1237,7 +1237,7 @@ export default function AiSettingsPage() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <div className="flex h-screen overflow-hidden bg-gray-50 pb-16 dark:bg-gray-950 lg:pb-0">
       <OmnichannelLeftRail />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
