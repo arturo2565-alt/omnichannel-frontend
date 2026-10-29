@@ -5,11 +5,14 @@ import {
   createCrmAppointment,
   expireAuthSession,
   fetchCrmAppointments,
+  fetchCrmCatalogOffer,
   fetchCrmSuggestions,
   patchCrmVisit,
   saveCrmCommercial,
   saveCrmContract,
 } from './apiClient.js';
+import { categoryFromStored, linePayload } from './crmCatalog.js';
+import { CrmServiceEditor } from './CrmServiceLine.jsx';
 import {
   blankServiceLine,
   formatCents,
@@ -42,14 +45,6 @@ const VISITS = [
 ];
 
 const TIME_CHIPS = ['09:00', '11:00', '13:00', '16:00'];
-
-const FREQUENT_SERVICES = [
-  'Baño de pintura',
-  'Pintura de salpicadera',
-  'Hojalatería',
-  'Pulido',
-  'Cerámico',
-];
 
 const ATTRIBUTION_LABELS = {
   manual: 'Declarado en el CRM',
@@ -165,10 +160,21 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
   const [lines, setLines] = useState(() =>
     appointment?.lines?.length
       ? appointment.lines.map((line) => ({
+          ...blankServiceLine(),
           id: line.id,
           name: line.name,
           quantity: formatHundredths(line.quantityHundredths),
           unitPrice: formatHundredths(line.unitPriceCents),
+          category: categoryFromStored(line),
+          pieceCode: line.catalogPieceCode || '',
+          operations: String(line.catalogOperations || '')
+            .split('+')
+            .filter(Boolean),
+          tariffKind: line.tariffKind || '',
+          catalogMatrixRowId: line.catalogMatrixRowId || '',
+          catalogUnitPriceCents: line.catalogUnitPriceCents ?? null,
+          priceTouched: true,
+          nameTouched: true,
         }))
       : [blankServiceLine()],
   );
@@ -182,6 +188,8 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
   const [notes, setNotes] = useState(appointment?.notes ?? '');
   const [localError, setLocalError] = useState('');
   const [suggestions, setSuggestions] = useState({ campaigns: [], ads: [], services: [] });
+  const [offer, setOffer] = useState(null);
+  const [offerState, setOfferState] = useState('loading');
 
   useEffect(() => {
     let active = true;
@@ -197,12 +205,21 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
       .catch(() => {
         if (active) setSuggestions({ campaigns: [], ads: [], services: [] });
       });
+    fetchCrmCatalogOffer()
+      .then((data) => {
+        if (!active) return;
+        setOffer(data);
+        setOfferState('ready');
+      })
+      .catch(() => {
+        if (!active) return;
+        setOffer(null);
+        setOfferState('error');
+      });
     return () => {
       active = false;
     };
   }, []);
-
-  const serviceOptions = [...new Set([...FREQUENT_SERVICES, ...suggestions.services])];
   const prepared = lines.map((line) => {
     const empty = !line.name.trim() && !String(line.unitPrice).trim();
     const quantityHundredths = parseDecimalToScaled(line.quantity || '1');
@@ -219,27 +236,21 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
       ? activeLines.reduce((sum, line) => sum + line.subtotalCents, 0)
       : null;
 
-  const updateLine = (id, patch) => {
-    setLinesDirty(true);
-    setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
-  };
-
   return (
     <form
       className="flex min-h-0 flex-1 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
         setLocalError('');
+        if (lines.some((line) => line.incompatible && (line.name.trim() || line.pieceCode))) {
+          setLocalError('Hay una combinación que el catálogo no permite.');
+          return;
+        }
         if (activeLines.some((line) => !line.name.trim() || line.subtotalCents == null)) {
           setLocalError('Cada servicio necesita nombre, cantidad y precio.');
           return;
         }
-        const payloadLines = activeLines.map((line) => ({
-          id: line.id,
-          name: line.name.trim(),
-          quantityHundredths: line.quantityHundredths,
-          unitPriceCents: line.unitPriceCents,
-        }));
+        const payloadLines = activeLines.map((line) => linePayload(line));
         const attribution = {
           origin,
           campaignName: campaignName.trim(),
@@ -350,6 +361,12 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
               Esta cita ya tiene «{appointment.serviceRequested}». Agregar un servicio lo sustituye al guardar.
             </p>
           ) : null}
+          <p className="text-xs text-gray-500">
+            {offer?.pricingNote ||
+              (offerState === 'loading'
+                ? 'Cargando el catálogo del taller…'
+                : 'Si el catálogo no responde, captura el servicio y el precio a mano.')}
+          </p>
           {lines.map((line, index) => {
             const row = prepared.find((item) => item.id === line.id);
             return (
@@ -369,42 +386,21 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
                     Quitar
                   </button>
                 </div>
-                <input
-                  list="crm-service-names"
-                  value={line.name}
-                  onChange={(e) => updateLine(line.id, { name: e.target.value })}
-                  className={fieldClass}
-                  placeholder="Nombre del servicio"
+                <CrmServiceEditor
+                  line={line}
+                  offer={offer}
+                  fieldClass={fieldClass}
+                  prepared={row}
+                  onChange={(next) => {
+                    setLinesDirty(true);
+                    setLines((current) => current.map((item) => (item.id === line.id ? next : item)));
+                  }}
                 />
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-gray-400">Cantidad</span>
-                    <input
-                      inputMode="decimal"
-                      value={line.quantity}
-                      onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
-                      className={fieldClass}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-gray-400">Precio unitario</span>
-                    <input
-                      inputMode="decimal"
-                      value={line.unitPrice}
-                      onChange={(e) => updateLine(line.id, { unitPrice: e.target.value })}
-                      className={fieldClass}
-                      placeholder="0.00"
-                    />
-                  </label>
-                </div>
-                <p className="mt-2 text-xs text-gray-500">
-                  Subtotal {row?.subtotalCents == null ? '—' : formatCents(row.subtotalCents)}
-                </p>
               </div>
             );
           })}
           <datalist id="crm-service-names">
-            {serviceOptions.map((name) => (
+            {suggestions.services.map((name) => (
               <option key={name} value={name} />
             ))}
           </datalist>

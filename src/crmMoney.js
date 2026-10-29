@@ -30,5 +30,20 @@ export function blankServiceLine() {
     typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return { id, name: '', quantity: '1', unitPrice: '' };
+  return {
+    id,
+    name: '',
+    quantity: '1',
+    unitPrice: '',
+    category: 'personalizado',
+    pieceCode: '',
+    operations: [],
+    tariffKind: '',
+    catalogMatrixRowId: '',
+    catalogUnitPriceCents: null,
+    priceTouched: false,
+    nameTouched: false,
+    incompatible: false,
+    hint: '',
+  };
 }
