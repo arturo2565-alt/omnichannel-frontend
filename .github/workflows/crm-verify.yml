@@ -4,6 +4,10 @@ name: CRM verify
 on:
   pull_request:
   workflow_dispatch:
+  workflow_call:
+  push:
+    branches:
+      - genesis/crm-010
 
 jobs:
   verify:
@@ -15,4 +19,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node --test scripts/assert-staging-preview.test.mjs
       - run: npm run build

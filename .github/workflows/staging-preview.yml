@@ -1,0 +1,53 @@
+# Preview de Vercel para genesis/staging, en un proyecto distinto al de producción.
+# Permanece apagado hasta STAGING_DEPLOY_ENABLED=true.
+name: Staging preview
+
+on:
+  push:
+    branches:
+      - genesis/staging
+  workflow_dispatch:
+
+concurrency:
+  group: pegazuz-staging-frontend
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/crm-verify.yml
+
+  deploy:
+    needs: verify
+    if: vars.STAGING_DEPLOY_ENABLED == 'true'
+    environment: staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: El proyecto y el API no pueden ser los de producción
+        env:
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          PRODUCTION_VERCEL_PROJECT_ID: ${{ vars.PRODUCTION_VERCEL_PROJECT_ID }}
+          STAGING_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
+          STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+          STAGING_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST }}
+        run: node --input-type=module -e "import { assertStagingPreview } from './scripts/assert-staging-preview.mjs'; assertStagingPreview(process.env);"
+      - name: Publicar el preview
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VITE_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
+          VITE_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "falta el token del proyecto de staging"
+            exit 1
+          fi
+          npx --yes vercel deploy --yes --token "$VERCEL_TOKEN" \
+            --build-env "VITE_API_ORIGIN=$VITE_API_ORIGIN" \
+            --build-env "VITE_API_BASE_URL=$VITE_API_BASE_URL"
