@@ -16,5 +16,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node --test scripts/assert-staging-preview.test.mjs scripts/assert-staging-bundle.test.mjs
+      - run: node --test scripts/assert-staging-preview.test.mjs scripts/assert-staging-bundle.test.mjs scripts/assert-catalog-admin.test.mjs
       - run: npm run build
