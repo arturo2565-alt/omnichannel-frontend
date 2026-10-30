@@ -235,19 +235,33 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
     activeLines.length > 0 && activeLines.every((line) => line.subtotalCents != null)
       ? activeLines.reduce((sum, line) => sum + line.subtotalCents, 0)
       : null;
+  const vehicleSummary =
+    [vehicleMake, vehicleModel, vehicleYear].map((part) => String(part).trim()).filter(Boolean).join(' ') ||
+    'Sin vehículo';
+  const issues = [];
+  if (!editing) {
+    if (!clientName.trim()) issues.push('Escribe el nombre del cliente.');
+    if (!phone.trim()) issues.push('Escribe el teléfono.');
+    if (!date) issues.push('Elige la fecha.');
+    if (!time) issues.push('Elige la hora.');
+    if (activeLines.length === 0) issues.push('Agrega al menos un servicio con precio.');
+  }
+  if (lines.some((line) => line.incompatible && (line.name.trim() || line.pieceCode))) {
+    issues.push('Hay una combinación que el catálogo no permite.');
+  }
+  if (activeLines.some((line) => !line.name.trim() || line.subtotalCents == null)) {
+    issues.push('Cada servicio necesita nombre, cantidad y precio.');
+  }
+  const canSave = issues.length === 0 && !busy;
 
   return (
     <form
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden"
       onSubmit={(event) => {
         event.preventDefault();
         setLocalError('');
-        if (lines.some((line) => line.incompatible && (line.name.trim() || line.pieceCode))) {
-          setLocalError('Hay una combinación que el catálogo no permite.');
-          return;
-        }
-        if (activeLines.some((line) => !line.name.trim() || line.subtotalCents == null)) {
-          setLocalError('Cada servicio necesita nombre, cantidad y precio.');
+        if (issues.length > 0) {
+          setLocalError(issues[0]);
           return;
         }
         const payloadLines = activeLines.map((line) => linePayload(line));
@@ -279,265 +293,293 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
         });
       }}
     >
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
-        {editing ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            {appointment.clientName}
-            {appointment.phone ? ` · ${appointment.phone}` : ''}
-          </p>
-        ) : null}
-        {editing ? null : (
-        <>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Nombre del cliente
-          </span>
-          <input
-            required
-            autoFocus
-            value={clientName}
-            onChange={(e) => setClientName(e.target.value)}
-            className={fieldClass}
-            placeholder="Ana López"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Teléfono
-          </span>
-          <input
-            required
-            inputMode="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className={fieldClass}
-            placeholder="55 1234 5678"
-          />
-        </label>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              Marca
-            </span>
-            <input value={vehicleMake} onChange={(e) => setVehicleMake(e.target.value)} className={fieldClass} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              Modelo
-            </span>
-            <input value={vehicleModel} onChange={(e) => setVehicleModel(e.target.value)} className={fieldClass} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              Año
-            </span>
-            <input
-              inputMode="numeric"
-              value={vehicleYear}
-              onChange={(e) => setVehicleYear(e.target.value)}
-              className={fieldClass}
-              placeholder="2019"
-            />
-          </label>
-        </div>
-        </>
-        )}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Servicios</span>
-            <button
-              type="button"
-              onClick={() => {
-                setLinesDirty(true);
-                setLines((current) => [...current, blankServiceLine()]);
-              }}
-              className="rounded-lg border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:text-amber-200"
-            >
-              Agregar servicio
-            </button>
-          </div>
-          {editing && !appointment?.lines?.length && appointment?.serviceRequested ? (
-            <p className="text-xs text-gray-500">
-              Esta cita ya tiene «{appointment.serviceRequested}». Agregar un servicio lo sustituye al guardar.
-            </p>
-          ) : null}
-          <p className="text-xs text-gray-500">
-            {offer?.pricingNote ||
-              (offerState === 'loading'
-                ? 'Cargando el catálogo del taller…'
-                : 'Si el catálogo no responde, captura el servicio y el precio a mano.')}
-          </p>
-          {lines.map((line, index) => {
-            const row = prepared.find((item) => item.id === line.id);
-            return (
-              <div key={line.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs text-gray-500">Servicio {index + 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLinesDirty(true);
-                      setLines((current) =>
-                        current.length === 1 ? [blankServiceLine()] : current.filter((item) => item.id !== line.id),
-                      );
-                    }}
-                    className="text-xs font-medium text-gray-500"
-                  >
-                    Quitar
-                  </button>
+      <div className="grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] lg:overflow-hidden">
+        <div className="space-y-6 px-4 py-4 sm:px-5 lg:min-h-0 lg:overflow-y-auto">
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cliente</h3>
+            {editing ? (
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                {appointment.clientName}
+                {appointment.phone ? ` · ${appointment.phone}` : ''}
+              </p>
+            ) : (
+              <>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Nombre del cliente
+                  </span>
+                  <input
+                    autoFocus
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    className={fieldClass}
+                    placeholder="Ana López"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Teléfono
+                  </span>
+                  <input
+                    inputMode="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className={fieldClass}
+                    placeholder="55 1234 5678"
+                  />
+                </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Marca</span>
+                    <input value={vehicleMake} onChange={(e) => setVehicleMake(e.target.value)} className={fieldClass} />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Modelo</span>
+                    <input value={vehicleModel} onChange={(e) => setVehicleModel(e.target.value)} className={fieldClass} />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Año</span>
+                    <input
+                      inputMode="numeric"
+                      value={vehicleYear}
+                      onChange={(e) => setVehicleYear(e.target.value)}
+                      className={fieldClass}
+                      placeholder="2019"
+                    />
+                  </label>
                 </div>
+              </>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Servicios</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setLinesDirty(true);
+                  setLines((current) => [...current, blankServiceLine()]);
+                }}
+                className="rounded-lg border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:text-amber-200"
+              >
+                Agregar servicio
+              </button>
+            </div>
+            {editing && !appointment?.lines?.length && appointment?.serviceRequested ? (
+              <p className="text-xs text-gray-500">
+                Esta cita ya tiene «{appointment.serviceRequested}». Agregar un servicio lo sustituye al guardar.
+              </p>
+            ) : null}
+            <p className="text-xs text-gray-500">
+              {offer?.pricingNote ||
+                (offerState === 'loading'
+                  ? 'Cargando el catálogo del taller…'
+                  : 'Si el catálogo no responde, captura el servicio y el precio a mano.')}
+            </p>
+            {lines.map((line) => {
+              const row = prepared.find((item) => item.id === line.id);
+              return (
                 <CrmServiceEditor
+                  key={line.id}
                   line={line}
                   offer={offer}
                   fieldClass={fieldClass}
                   prepared={row}
+                  onRemove={() => {
+                    setLinesDirty(true);
+                    setLines((current) =>
+                      current.length === 1 ? [blankServiceLine()] : current.filter((item) => item.id !== line.id),
+                    );
+                  }}
                   onChange={(next) => {
                     setLinesDirty(true);
                     setLines((current) => current.map((item) => (item.id === line.id ? next : item)));
                   }}
                 />
+              );
+            })}
+            <datalist id="crm-service-names">
+              {suggestions.services.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </section>
+        </div>
+
+        <aside className="flex flex-col border-t border-gray-100 dark:border-gray-800 lg:min-h-0 lg:border-l lg:border-t-0">
+          <div className="space-y-5 px-4 py-4 sm:px-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+            <section className="sticky top-0 z-10 space-y-2 rounded-2xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Resumen</h3>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {editing ? appointment.clientName : clientName.trim() || 'Sin cliente'}
+              </p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">{vehicleSummary}</p>
+              <ul className="space-y-1 text-xs text-gray-700 dark:text-gray-200">
+                {activeLines.length === 0 ? (
+                  <li className="text-gray-500">Sin servicios</li>
+                ) : (
+                  activeLines.map((line) => (
+                    <li key={line.id} className="flex justify-between gap-2">
+                      <span className="min-w-0 truncate">{line.name}</span>
+                      <span className="shrink-0">
+                        {line.subtotalCents == null ? '—' : formatCents(line.subtotalCents)}
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                {totalCents == null ? 'Total —' : formatCents(totalCents)}
+              </p>
+              <p className="text-[11px] text-gray-500">No se registra como venta.</p>
+              <div className="flex flex-wrap gap-1">
+                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                  {originLabel(origin)}
+                </span>
+                {campaignName.trim() ? (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                    {campaignName.trim()}
+                  </span>
+                ) : null}
+                {adName.trim() ? (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                    {adName.trim()}
+                  </span>
+                ) : null}
               </div>
-            );
-          })}
-          <datalist id="crm-service-names">
-            {suggestions.services.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-            Total cotizado {totalCents == null ? '—' : formatCents(totalCents)}
-          </p>
-          <p className="text-xs text-gray-500">No se registra como venta.</p>
-        </div>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Origen
-          </span>
-          <select value={origin} onChange={(e) => setOrigin(e.target.value)} className={fieldClass}>
-            {ORIGINS.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Campaña</span>
-            <input
-              list="crm-campaign-names"
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-              className={fieldClass}
-              placeholder="Opcional"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Anuncio</span>
-            <input
-              list="crm-ad-names"
-              value={adName}
-              onChange={(e) => setAdName(e.target.value)}
-              className={fieldClass}
-              placeholder="Opcional"
-            />
-          </label>
-        </div>
-        <datalist id="crm-campaign-names">
-          {suggestions.campaigns.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-        <datalist id="crm-ad-names">
-          {suggestions.ads.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Id del anuncio
-          </span>
-          <input
-            value={adExternalId}
-            onChange={(e) => setAdExternalId(e.target.value)}
-            className={fieldClass}
-            placeholder="Opcional, para una integración futura"
-          />
-          <span className="mt-1 block text-xs text-gray-500">
-            {ATTRIBUTION_LABELS[appointment?.attributionKind] || 'Sin anuncio hasta que lo escribas.'}
-          </span>
-        </label>
-        {editing ? null : (
-        <>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              Fecha
-            </span>
-            <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={fieldClass} />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              Hora
-            </span>
-            <input type="time" required value={time} onChange={(e) => setTime(e.target.value)} className={fieldClass} />
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {TIME_CHIPS.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => setTime(chip)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                time === chip
-                  ? 'border-amber-400 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
-                  : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'
-              }`}
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Lun–vie 9:00–18:00, sáb 9:00–14:00, hora del centro de México.
-        </p>
-        </>
-        )}
-        {editing ? null : (
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            Observaciones
-          </span>
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className={fieldClass}
-          />
-        </label>
-        )}
-        {localError || error ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-            {localError || error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
-          Cancelar
-        </button>
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-60"
-        >
-          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar cita'}
-        </button>
+              {editing ? null : (
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  {date || 'Sin fecha'} · {time || 'sin hora'}
+                </p>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Atribución</h3>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Origen</span>
+                <select value={origin} onChange={(e) => setOrigin(e.target.value)} className={fieldClass}>
+                  {ORIGINS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Campaña</span>
+                <input
+                  list="crm-campaign-names"
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                  className={fieldClass}
+                  placeholder="Opcional"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Anuncio</span>
+                <input
+                  list="crm-ad-names"
+                  value={adName}
+                  onChange={(e) => setAdName(e.target.value)}
+                  className={fieldClass}
+                  placeholder="Opcional"
+                />
+              </label>
+              <datalist id="crm-campaign-names">
+                {suggestions.campaigns.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <datalist id="crm-ad-names">
+                {suggestions.ads.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Id del anuncio</span>
+                <input
+                  value={adExternalId}
+                  onChange={(e) => setAdExternalId(e.target.value)}
+                  className={fieldClass}
+                  placeholder="Opcional"
+                />
+                <span className="mt-1 block text-xs text-gray-500">
+                  {ATTRIBUTION_LABELS[appointment?.attributionKind] || 'Sin anuncio hasta que lo escribas.'}
+                </span>
+              </label>
+            </section>
+
+            {editing ? null : (
+              <section className="space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Agenda</h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Fecha</span>
+                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldClass} />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Hora</span>
+                    <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={fieldClass} />
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {TIME_CHIPS.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setTime(chip)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                        time === chip
+                          ? 'border-amber-400 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
+                          : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Lun–vie 9:00–18:00, sáb 9:00–14:00, hora del centro de México.
+                </p>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">Observaciones</span>
+                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={fieldClass} />
+                </label>
+              </section>
+            )}
+          </div>
+
+          <div className="shrink-0 space-y-2 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
+            {issues.length > 0 ? (
+              <ul className="space-y-1 text-xs text-amber-900 dark:text-amber-100">
+                {issues.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+            {localError || error ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{localError || error}</p>
+            ) : null}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={!canSave}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-60"
+              >
+                {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar cita'}
+              </button>
+            </div>
+          </div>
+        </aside>
       </div>
     </form>
   );
@@ -571,15 +613,27 @@ function CrmAppointmentCard({ row, onVisit, onContract, onEdit }) {
           </p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {vehicle || 'Vehículo no indicado'}
-            {serviceLabel(row) ? ` · ${serviceLabel(row)}` : ''}
           </p>
-          <p className="mt-1 text-xs text-gray-400">
-            {originLabel(row.origin)}
-            {row.campaignName ? ` · ${row.campaignName}` : ''}
-            {row.adName ? ` · ${row.adName}` : ''}
-            {row.attributionKind === 'manual' ? ' · declarado' : ''}
-            {row.attributionKind === 'verified' ? ' · verificado' : ''}
-          </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              {originLabel(row.origin)}
+            </span>
+            {row.campaignName ? (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                {row.campaignName}
+              </span>
+            ) : null}
+            {row.adName ? (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                {row.adName}
+              </span>
+            ) : null}
+            {row.attributionKind === 'manual' || row.attributionKind === 'verified' ? (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                {ATTRIBUTION_LABELS[row.attributionKind]}
+              </span>
+            ) : null}
+          </div>
         </div>
         <label className="block sm:w-44">
           <span className="sr-only">Resultado de la visita</span>
@@ -611,12 +665,34 @@ function CrmAppointmentCard({ row, onVisit, onContract, onEdit }) {
         </label>
       </div>
 
+      {Array.isArray(row.lines) && row.lines.length > 0 ? (
+        <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3 text-sm dark:border-gray-700">
+          {row.lines.map((line) => (
+            <li key={line.id} className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 text-gray-800 dark:text-gray-100">
+                <span className="block truncate font-medium">{line.name}</span>
+                <span className="text-xs text-gray-500">
+                  {formatHundredths(line.quantityHundredths)} × {formatCents(line.unitPriceCents)}
+                </span>
+              </span>
+              <span className="shrink-0 font-medium text-gray-900 dark:text-gray-100">
+                {formatCents(line.subtotalCents)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : serviceLabel(row) ? (
+        <p className="mt-3 border-t border-gray-100 pt-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+          {serviceLabel(row)}
+        </p>
+      ) : null}
+
       <div className="mt-3 grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-            Cotizado
+            Total cotizado
           </p>
-          <p className="mt-0.5 text-sm text-gray-700 dark:text-gray-200">
+          <p className="mt-0.5 text-lg font-semibold text-gray-900 dark:text-gray-100">
             {quoteLabel(row)}
           </p>
           <p className="text-xs text-gray-400">No cuenta como venta.</p>
@@ -658,18 +734,6 @@ function CrmAppointmentCard({ row, onVisit, onContract, onEdit }) {
           </button>
         </form>
       </div>
-      {Array.isArray(row.lines) && row.lines.length > 0 ? (
-        <ul className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-          {row.lines.map((line) => (
-            <li key={line.id} className="flex justify-between gap-3">
-              <span className="truncate">
-                {line.name} · {formatHundredths(line.quantityHundredths)} × {formatCents(line.unitPriceCents)}
-              </span>
-              <span className="shrink-0">{formatCents(line.subtotalCents)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
       <button
         type="button"
         onClick={() => onEdit(row)}
@@ -785,7 +849,7 @@ export default function CrmPage() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <main className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           {error ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {error}
@@ -844,7 +908,7 @@ export default function CrmPage() {
 
       {formOpen ? (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center">
-          <div className="flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-white dark:bg-gray-900 sm:h-[min(40rem,92dvh)] sm:max-w-lg sm:rounded-2xl sm:shadow-xl">
+          <div className="flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-white dark:bg-gray-900 sm:h-[min(46rem,92dvh)] sm:max-w-5xl sm:rounded-2xl sm:shadow-xl">
             <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
               <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
                 {editing ? 'Editar servicios' : 'Nueva cita'}
