@@ -1,5 +1,10 @@
-# Preview de Vercel para genesis/staging, en un proyecto distinto al de producción.
-# Permanece apagado hasta STAGING_DEPLOY_ENABLED=true.
+# Único publicador del frontend de staging.
+# Proyecto pegazuz-frontend-staging, no el de producción.
+# En ese proyecto: Settings → Git → Disconnect, para que un push no publique.
+# --prod actualiza el dominio estable de ESE proyecto.
+# STAGING_DEPLOY_ENABLED y STAGING_NATIVE_DEPLOY son variables del repositorio.
+# Una variable de entorno de GitHub no llega a la condición del job.
+# Sigue apagado hasta que la primera sea true y la segunda sea off.
 name: Staging preview
 
 on:
@@ -18,7 +23,7 @@ jobs:
 
   deploy:
     needs: verify
-    if: vars.STAGING_DEPLOY_ENABLED == 'true'
+    if: vars.STAGING_DEPLOY_ENABLED == 'true' && vars.STAGING_NATIVE_DEPLOY == 'off'
     environment: staging
     runs-on: ubuntu-latest
     steps:
@@ -35,8 +40,17 @@ jobs:
           STAGING_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
           STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
           STAGING_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST }}
-        run: node --input-type=module -e "import { assertStagingPreview } from './scripts/assert-staging-preview.mjs'; assertStagingPreview(process.env);"
-      - name: Publicar el preview
+          STAGING_NATIVE_DEPLOY: ${{ vars.STAGING_NATIVE_DEPLOY }}
+        run: node --input-type=module -e "import { assertStagingRelease } from './scripts/assert-staging-preview.mjs'; assertStagingRelease(process.env);"
+      - name: Comprobar el bundle antes de publicarlo
+        env:
+          VITE_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
+          VITE_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+          STAGING_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST }}
+        run: |
+          npm run build
+          node scripts/assert-staging-bundle.mjs dist
+      - name: Publicar el dominio de staging
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
@@ -44,10 +58,12 @@ jobs:
           VITE_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
           VITE_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
         run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "falta el token del proyecto de staging"
+          set -euo pipefail
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "faltan el token o los identificadores del proyecto de staging"
             exit 1
           fi
-          npx --yes vercel deploy --yes --token "$VERCEL_TOKEN" \
+          rm -rf .vercel
+          npx --yes vercel deploy --prod --yes --project "$VERCEL_PROJECT_ID" \
             --build-env "VITE_API_ORIGIN=$VITE_API_ORIGIN" \
             --build-env "VITE_API_BASE_URL=$VITE_API_BASE_URL"

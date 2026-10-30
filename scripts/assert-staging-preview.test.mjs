@@ -14,6 +14,19 @@ test('acepta el proyecto y el host de staging', () => {
   assert.doesNotThrow(() => assertStagingPreview(valid));
 });
 
+test('rechaza el API de producción aunque el host fijado lo copie', () => {
+  assert.throws(
+    () =>
+      assertStagingPreview({
+        ...valid,
+        STAGING_API_ORIGIN: 'https://omnichannel-backend-production.up.railway.app',
+        STAGING_API_BASE_URL: 'https://omnichannel-backend-production.up.railway.app/webhook',
+        STAGING_PUBLIC_HOST: 'omnichannel-backend-production.up.railway.app',
+      }),
+    /producción/,
+  );
+});
+
 test('rechaza el proyecto de producción y un host distinto', () => {
   assert.throws(
     () =>
