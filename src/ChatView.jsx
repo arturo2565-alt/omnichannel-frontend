@@ -36,6 +36,7 @@ import {
 const classifyPlatform = (raw) => {
   if (!raw) return 'unknown';
   const s = String(raw).toLowerCase().trim();
+  if (s === 'lab') return 'lab';
   if (s.includes('whatsapp')) return 'whatsapp';
   if (s.includes('instagram')) return 'instagram';
   if (
@@ -85,6 +86,17 @@ const PlatformBadge = ({
         aria-hidden
       >
         I
+      </span>
+    );
+  }
+  if (kind === 'lab') {
+    return (
+      <span
+        title="Laboratorio"
+        className={`bg-amber-600 ${baseBadge}`}
+        aria-hidden
+      >
+        L
       </span>
     );
   }

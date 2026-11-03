@@ -281,6 +281,33 @@ export async function saveCrmCommercial(appointmentId, payload) {
   return res.json();
 }
 
+export async function createLabConversation() {
+  const res = await apiFetchOrigin('/lab/conversations', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
+export async function sendLabTurn(conversationId, payload) {
+  const id = String(conversationId ?? '').trim();
+  const res = await apiFetchOrigin(`/lab/conversations/${id}/turn`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return res.json();
+}
+
+export async function fetchConversationMessages(conversationId) {
+  const id = String(conversationId ?? '').trim();
+  const res = await apiFetchWebhook(`/messages/${id}`);
+  if (!res.ok) throw new Error(await parseApiError(res));
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
 export async function saveCrmContract(appointmentId, contractedAmount) {
   const res = await apiFetchOrigin(
     `/api/crm/appointments/${appointmentId}/contract`,

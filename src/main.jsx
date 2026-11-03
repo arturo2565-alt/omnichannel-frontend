@@ -8,6 +8,7 @@ import CrmPage from './CrmPage.jsx'
 import DashboardView from './DashboardView.jsx'
 import AiSettingsPage from './AiSettingsPage.jsx'
 import CatalogAdminPage from './CatalogAdminPage.jsx'
+import LabPage from './LabPage.jsx'
 import LoginPage from './LoginPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 import { AuthProvider } from './AuthContext.jsx'
@@ -65,6 +66,14 @@ createRoot(document.getElementById('root')).render(
             element={
               <ProtectedRoute>
                 <CatalogAdminPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/lab"
+            element={
+              <ProtectedRoute>
+                <LabPage />
               </ProtectedRoute>
             }
           />
