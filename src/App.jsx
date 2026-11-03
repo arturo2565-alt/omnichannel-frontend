@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ChatView from './ChatView';
-import { API_BASE_URL } from './apiConfig.js';
-import { apiFetchWebhook, expireAuthSession, sendAgentMessageRequest } from './apiClient.js';
+import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
+import { apiFetchWebhook, createLabConversation, expireAuthSession, sendAgentMessageRequest, sendLabTurn } from './apiClient.js';
+import { buildLabTurnPayload, canStartLabTrial, isLabChannel } from './labInbox.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
 import { useAuth } from './AuthContext.jsx';
 
@@ -38,6 +39,15 @@ function App() {
   const [filePreviewUrl, setFilePreviewUrl] = useState(null); 
   const [isSending, setIsSending] = useState(false);
   const [deleteToast, setDeleteToast] = useState('');
+  const [labTrialBusy, setLabTrialBusy] = useState(false);
+  const [labProcessingId, setLabProcessingId] = useState('');
+  const labProcessingRef = useRef('');
+  labProcessingRef.current = labProcessingId;
+  const labTrialAvailable = canStartLabTrial({
+    apiOrigin: API_ORIGIN_URL,
+    user,
+    tallerId: authTallerId,
+  });
 
   // --- LÓGICA DE CARGA ---
   const fetchConversations = async () => {
@@ -99,6 +109,14 @@ function App() {
     const socket = socketRef.current;
     if (!socket) return undefined;
     const onNewMessage = (msg) => {
+      const incomingId = msg.conversationId || msg.conversation?.id;
+      if (
+        String(msg?.direction ?? '').toLowerCase() === 'outbound' &&
+        incomingId &&
+        incomingId === labProcessingRef.current
+      ) {
+        setLabProcessingId('');
+      }
       if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
         setMessages((prev) => {
           if (msg?.id && prev.some((m) => m.id === msg.id)) return prev;
@@ -259,6 +277,11 @@ function App() {
     const useOverride = textFromOverride.length > 0;
     const textContent = useOverride ? textFromOverride : textFromInput;
 
+    const currentConv = contacts.find(c => c.id === selectedConvId);
+    if (isLabChannel(currentConv?.platform)) {
+      window.alert('Esta prueba no envía mensajes reales. Usa «Enviar como cliente».');
+      return;
+    }
     if ((!textContent && !selectedFile) || !selectedConvId || isSending) return;
     if (!authTallerId) {
       alert('Sesión sin taller asignado. Cierra sesión e inicia de nuevo.');
@@ -293,7 +316,6 @@ function App() {
       }
 
       // --- ENVÍO FINAL DEL MENSAJE ---
-      const currentConv = contacts.find(c => c.id === selectedConvId);
       await sendAgentMessageRequest({
         message: finalContent,
         platform: currentConv?.platform || 'web-dashboard',
@@ -367,6 +389,62 @@ function App() {
       );
     }
   };
+
+  const handleCreateLabTrial = async () => {
+    if (!labTrialAvailable || labTrialBusy) return;
+    setLabTrialBusy(true);
+    try {
+      const created = await createLabConversation();
+      const id = String(created?.id ?? '').trim();
+      if (!id) throw new Error('No se pudo abrir la prueba.');
+      const optimistic = {
+        id,
+        platform: created.platform || 'lab',
+        contactName: 'Cliente de laboratorio',
+        status: 'nuevo',
+        lastMessage: '',
+        direction: 'inbound',
+      };
+      setContacts((prev) => [optimistic, ...prev.filter((item) => item.id !== id)]);
+      setSelectedConvId(id);
+      setMessages([]);
+      await fetchConversations();
+      setContacts((prev) =>
+        prev.some((item) => item.id === id) ? prev : [optimistic, ...prev],
+      );
+    } catch (error) {
+      window.alert(error?.message || 'No se pudo crear la prueba.');
+    } finally {
+      setLabTrialBusy(false);
+    }
+  };
+
+  const handleSendAsClient = async ({ text, images }) => {
+    const current = contacts.find((item) => item.id === selectedConvId);
+    if (!selectedConvId || !isLabChannel(current?.platform)) {
+      throw new Error('Esta conversación no es una prueba.');
+    }
+    const payload = buildLabTurnPayload({
+      text,
+      images,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    setLabProcessingId(selectedConvId);
+    try {
+      await sendLabTurn(selectedConvId, payload);
+      await fetchMessagesForConv(selectedConvId);
+      await fetchConversations();
+    } catch (error) {
+      setLabProcessingId('');
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (!labProcessingId) return undefined;
+    const timer = setTimeout(() => setLabProcessingId(''), 40_000);
+    return () => clearTimeout(timer);
+  }, [labProcessingId]);
 
   const handleDraftQuotePatched = ({ messageId, draftQuote, damageAnalysis }) => {
     if (!messageId) return;
@@ -443,6 +521,11 @@ function App() {
       onDeleteConversation={handleDeleteConversation}
       onClienteEsperandoAtendido={handleClienteEsperandoAtendido}
       onLeadStatusChange={handleLeadStatusChange}
+      labTrialAvailable={labTrialAvailable}
+      labTrialBusy={labTrialBusy}
+      onCreateLabTrial={handleCreateLabTrial}
+      onSendAsClient={handleSendAsClient}
+      labProcessing={Boolean(selectedConvId) && labProcessingId === selectedConvId}
     />
     </>
   );

@@ -6,6 +6,8 @@ import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
+import LabClientComposer from './LabClientComposer.jsx';
+import { isLabChannel } from './labInbox.js';
 import {
   PANEL_DAMAGE_MAGNITUDES,
   PANEL_SEVERITY_LABELS,
@@ -1253,6 +1255,11 @@ function ChatView({
   onDeleteConversation,
   onClienteEsperandoAtendido,
   onLeadStatusChange,
+  labTrialAvailable = false,
+  labTrialBusy = false,
+  onCreateLabTrial,
+  onSendAsClient,
+  labProcessing = false,
 }) {
 
   const { logout } = useAuth();
@@ -1346,6 +1353,8 @@ function ChatView({
   );
 
   const selectedContact = contacts.find((c) => c.id === selectedConvId);
+  const selectedIsLab = isLabChannel(selectedContact?.platform);
+  const [labPhotoLightbox, setLabPhotoLightbox] = useState(null);
   const selectedLeadStatus = normalizeConversationLeadStatus(
     selectedContact?.status,
   );
@@ -2790,6 +2799,10 @@ function ChatView({
   }, [evidenceLightbox, closeEvidenceLightbox]);
 
   useEffect(() => {
+    if (selectedConvId) setShowChatWindow(true);
+  }, [selectedConvId]);
+
+  useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
     const onChange = () => {
       if (mq.matches) setShowChatWindow(false);
@@ -3709,7 +3722,7 @@ function ChatView({
               </button>
             </div>
           </div>
-          <div className="flex items-start gap-2 px-4 py-3">
+          <div className="flex flex-wrap items-start gap-2 px-4 py-3">
             <BandejaFilterSelect
               label="Canal"
               value={platformFilter}
@@ -3724,6 +3737,16 @@ function ChatView({
               counts={statusFilterCounts}
               showStatusDots
             />
+            {labTrialAvailable ? (
+              <button
+                type="button"
+                onClick={() => void onCreateLabTrial?.()}
+                disabled={labTrialBusy}
+                className="mt-5 shrink-0 rounded-full border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+              >
+                {labTrialBusy ? 'Abriendo…' : '🧪 Nueva prueba'}
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -3768,7 +3791,14 @@ function ChatView({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-1">
-                  <p className="truncate font-bold text-gray-800 dark:text-gray-100">{contact.contactName}</p>
+                  <p className="flex min-w-0 items-center gap-1 truncate font-bold text-gray-800 dark:text-gray-100">
+                    <span className="truncate">{contact.contactName}</span>
+                    {isLabChannel(contact.platform) ? (
+                      <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        LAB
+                      </span>
+                    ) : null}
+                  </p>
                   <span className="ml-2 shrink-0 text-[10px] text-gray-400">
                     {contact.lastMessageAt ? new Date(contact.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                   </span>
@@ -3813,7 +3843,14 @@ function ChatView({
                   </div>
                 </div>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm dark:text-gray-100">{selectedUserName}</span>
+                  <span className="flex min-w-0 items-center gap-1 truncate text-sm dark:text-gray-100">
+                    <span className="truncate">{selectedUserName}</span>
+                    {selectedIsLab ? (
+                      <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        LAB
+                      </span>
+                    ) : null}
+                  </span>
                   <LeadStatusDropdown
                     key={selectedConvId}
                     status={selectedLeadStatus}
@@ -3886,7 +3923,15 @@ function ChatView({
                       <span className="text-xs text-gray-500">[Sticker]</span>
                     )
                   ) : showImage ? (
-                    <img src={mediaUrl} alt="Adjunto" className="max-h-72 cursor-pointer rounded-lg object-cover transition hover:opacity-95" onClick={() => window.open(mediaUrl, '_blank')} />
+                    <img
+                      src={mediaUrl}
+                      alt="Adjunto"
+                      className="max-h-72 cursor-pointer rounded-lg object-cover transition hover:opacity-95"
+                      onClick={() => {
+                        if (/^data:image\//i.test(mediaUrl)) setLabPhotoLightbox(mediaUrl);
+                        else window.open(mediaUrl, '_blank');
+                      }}
+                    />
                   ) : (
                     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                       {msg.content}
@@ -3902,6 +3947,15 @@ function ChatView({
 
             {/* --- SECCIÓN DE ENTRADA PRO (Multimedia + IA) --- */}
             <div className="z-10 mt-auto border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900">
+              {selectedIsLab ? (
+                <LabClientComposer
+                  key={selectedConvId}
+                  busy={isSending}
+                  processing={labProcessing}
+                  onSend={onSendAsClient}
+                />
+              ) : (
+              <>
               {clienteEsperandoAfuera ? (
                 <button
                   type="button"
@@ -4002,6 +4056,8 @@ function ChatView({
                   )}
                 </button>
               </div>
+              </>
+              )}
             </div>
           </>
         ) : (
@@ -4076,6 +4132,29 @@ function ChatView({
         </div>
       ) : null}
 
+      {labPhotoLightbox ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fotografía ampliada"
+          onClick={() => setLabPhotoLightbox(null)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-gray-900"
+            onClick={() => setLabPhotoLightbox(null)}
+          >
+            Cerrar
+          </button>
+          <img
+            src={labPhotoLightbox}
+            alt="Fotografía enviada"
+            className="max-h-[85dvh] max-w-full rounded-lg object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : null}
       {renderQuoteEvidenceLightbox()}
       </div>
     </div>

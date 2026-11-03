@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ImagePlus, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
   createLabConversation,
@@ -8,39 +8,20 @@ import {
   sendLabTurn,
 } from './apiClient.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
+import { LAB_MAX_IMAGES, LAB_MAX_TEXT } from './labInbox.js';
+import {
+  LabPhotoPicker,
+  formatLabFileSize,
+  readLabImageFile,
+  shortLabFileName,
+  takeLabFiles,
+} from './labPhotos.jsx';
 
 const LAB_KEY = 'pegazuz.lab.conversationId';
-const MAX_IMAGES = 6;
-const MAX_BYTES = 5_242_880;
 const WAIT_MS = 40_000;
-const ACCEPTED = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function isImageContent(value) {
   return /^data:image\/(?:jpeg|png|webp);base64,/i.test(String(value ?? ''));
-}
-
-function readImageFile(file) {
-  return new Promise((resolve, reject) => {
-    if (!ACCEPTED.has(file.type)) {
-      reject(new Error('Usa fotografías JPEG, PNG o WebP.'));
-      return;
-    }
-    if (file.size <= 0 || file.size > MAX_BYTES) {
-      reject(new Error('Cada fotografía puede medir hasta 5 MB.'));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === 'string' ? reader.result.replace(/\s/g, '') : '';
-      if (!isImageContent(value)) {
-        reject(new Error('No se pudo leer la fotografía.'));
-        return;
-      }
-      resolve(value);
-    };
-    reader.onerror = () => reject(new Error('No se pudo leer la fotografía.'));
-    reader.readAsDataURL(file);
-  });
 }
 
 function sortMessages(rows) {
@@ -49,22 +30,6 @@ function sortMessages(rows) {
     const right = new Date(b.createdAt ?? 0).getTime();
     return left - right;
   });
-}
-
-function formatSize(bytes) {
-  const size = Number(bytes) || 0;
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function shortName(name) {
-  const value = String(name || 'fotografia');
-  if (value.length <= 22) return value;
-  const dot = value.lastIndexOf('.');
-  const ext = dot > 0 ? value.slice(dot) : '';
-  const keep = Math.max(8, 18 - ext.length);
-  return `${value.slice(0, keep)}…${ext}`;
 }
 
 function groupThread(messages) {
@@ -188,28 +153,9 @@ export default function LabPage() {
   };
 
   const addFiles = (list) => {
-    const incoming = Array.from(list ?? []);
-    if (!incoming.length) return;
-    const problems = [];
-    const room = MAX_IMAGES - files.length;
-    const next = [];
-    for (const file of incoming) {
-      if (!ACCEPTED.has(file.type)) {
-        problems.push('Usa fotografías JPEG, PNG o WebP.');
-        continue;
-      }
-      if (file.size <= 0 || file.size > MAX_BYTES) {
-        problems.push('Cada fotografía puede medir hasta 5 MB.');
-        continue;
-      }
-      if (next.length >= room) {
-        problems.push('Se pueden enviar hasta 6 fotografías.');
-        break;
-      }
-      next.push({ id: crypto.randomUUID(), file });
-    }
-    setError(problems[0] || '');
-    if (next.length) setFiles((current) => [...current, ...next]);
+    const { accepted, problem } = takeLabFiles(list, files.length);
+    setError(problem || '');
+    if (accepted.length) setFiles((current) => [...current, ...accepted]);
   };
 
   const sendTurn = async () => {
@@ -217,12 +163,12 @@ export default function LabPage() {
     setBusy(true);
     setError('');
     try {
-      if (files.length > MAX_IMAGES) {
+      if (files.length > LAB_MAX_IMAGES) {
         throw new Error('Se pueden enviar hasta 6 fotografías.');
       }
       const images = [];
       for (const item of files) {
-        images.push(await readImageFile(item.file));
+        images.push(await readLabImageFile(item.file));
       }
       const payload = {
         idempotencyKey: crypto.randomUUID(),
@@ -329,12 +275,12 @@ export default function LabPage() {
                   value={text}
                   onChange={(event) => setText(event.target.value)}
                   rows={3}
-                  maxLength={2000}
+                  maxLength={LAB_MAX_TEXT}
                   className="mt-1 w-full resize-y rounded-2xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30 dark:border-gray-700 dark:bg-gray-950"
                   placeholder="Ejemplo: quiero arreglar mi Beetle 2015"
                 />
               </label>
-              <PhotoPicker
+              <LabPhotoPicker
                 inputRef={fileInputRef}
                 dragging={dragging}
                 count={files.length}
@@ -368,9 +314,9 @@ export default function LabPage() {
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium" title={item.file.name}>
-                          {shortName(item.file.name)}
+                          {shortLabFileName(item.file.name)}
                         </p>
-                        <p className="text-[11px] text-gray-500">{formatSize(item.file.size)}</p>
+                        <p className="text-[11px] text-gray-500">{formatLabFileSize(item.file.size)}</p>
                         <button
                           type="button"
                           className="mt-1 text-[11px] font-medium text-red-700 dark:text-red-300"
@@ -387,7 +333,7 @@ export default function LabPage() {
                 <p className="text-xs text-gray-500">
                   {files.length === 0
                     ? 'Ninguna fotografía'
-                    : `${files.length} de ${MAX_IMAGES} fotografías`}
+                    : `${files.length} de ${LAB_MAX_IMAGES} fotografías`}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -441,48 +387,6 @@ export default function LabPage() {
           />
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function PhotoPicker({
-  inputRef,
-  dragging,
-  count,
-  onBrowse,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-  onSelect,
-}) {
-  return (
-    <div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-        multiple
-        className="sr-only"
-        onChange={onSelect}
-      />
-      <button
-        type="button"
-        onClick={onBrowse}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={`flex w-full flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed px-4 py-5 text-center transition ${
-          dragging
-            ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
-            : 'border-stone-300 bg-stone-50 hover:border-amber-400 dark:border-gray-600 dark:bg-gray-950'
-        }`}
-      >
-        <ImagePlus className="h-5 w-5 text-amber-700 dark:text-amber-300" aria-hidden />
-        <span className="text-sm font-medium">Suelta las fotografías o haz clic para elegirlas</span>
-        <span className="text-xs text-gray-500">
-          JPG, PNG o WebP · hasta {MAX_IMAGES} · {count === 1 ? '1 seleccionada' : `${count} seleccionadas`}
-        </span>
-      </button>
     </div>
   );
 }
