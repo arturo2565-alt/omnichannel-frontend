@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ImagePlus, X } from 'lucide-react';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import {
   createLabConversation,
@@ -12,6 +13,7 @@ const LAB_KEY = 'pegazuz.lab.conversationId';
 const MAX_IMAGES = 6;
 const MAX_BYTES = 5_242_880;
 const WAIT_MS = 40_000;
+const ACCEPTED = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 function isImageContent(value) {
   return /^data:image\/(?:jpeg|png|webp);base64,/i.test(String(value ?? ''));
@@ -19,7 +21,7 @@ function isImageContent(value) {
 
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    if (!ACCEPTED.has(file.type)) {
       reject(new Error('Usa fotografías JPEG, PNG o WebP.'));
       return;
     }
@@ -49,6 +51,41 @@ function sortMessages(rows) {
   });
 }
 
+function formatSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function shortName(name) {
+  const value = String(name || 'fotografia');
+  if (value.length <= 22) return value;
+  const dot = value.lastIndexOf('.');
+  const ext = dot > 0 ? value.slice(dot) : '';
+  const keep = Math.max(8, 18 - ext.length);
+  return `${value.slice(0, keep)}…${ext}`;
+}
+
+function groupThread(messages) {
+  const groups = [];
+  for (const message of messages) {
+    const outbound = message.direction === 'outbound';
+    const image = isImageContent(message.content);
+    const last = groups[groups.length - 1];
+    if (image && last?.kind === 'images' && last.outbound === outbound) {
+      last.items.push(message);
+      continue;
+    }
+    groups.push(
+      image
+        ? { id: message.id, kind: 'images', outbound, items: [message] }
+        : { id: message.id, kind: 'text', outbound, message },
+    );
+  }
+  return groups;
+}
+
 export default function LabPage() {
   const [conversationId, setConversationId] = useState(
     () => sessionStorage.getItem(LAB_KEY) || '',
@@ -56,17 +93,33 @@ export default function LabPage() {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
   const bottomRef = useRef(null);
   const waitTimer = useRef(null);
+  const fileInputRef = useRef(null);
+  const thread = useMemo(() => groupThread(messages), [messages]);
 
   const loadMessages = useCallback(async (id) => {
     if (!id) return;
     const rows = await fetchConversationMessages(id);
     setMessages(sortMessages(rows));
   }, []);
+
+  useEffect(() => {
+    const next = files.map((item) => ({
+      ...item,
+      url: URL.createObjectURL(item.file),
+    }));
+    setPreviews(next);
+    return () => {
+      next.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [files]);
 
   useEffect(() => {
     if (!conversationId) return undefined;
@@ -101,11 +154,20 @@ export default function LabPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages]);
+  }, [messages, waiting]);
 
   useEffect(() => () => {
     if (waitTimer.current) clearTimeout(waitTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!lightbox) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') setLightbox(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   const startConversation = async () => {
     setBusy(true);
@@ -125,6 +187,31 @@ export default function LabPage() {
     }
   };
 
+  const addFiles = (list) => {
+    const incoming = Array.from(list ?? []);
+    if (!incoming.length) return;
+    const problems = [];
+    const room = MAX_IMAGES - files.length;
+    const next = [];
+    for (const file of incoming) {
+      if (!ACCEPTED.has(file.type)) {
+        problems.push('Usa fotografías JPEG, PNG o WebP.');
+        continue;
+      }
+      if (file.size <= 0 || file.size > MAX_BYTES) {
+        problems.push('Cada fotografía puede medir hasta 5 MB.');
+        continue;
+      }
+      if (next.length >= room) {
+        problems.push('Se pueden enviar hasta 6 fotografías.');
+        break;
+      }
+      next.push({ id: crypto.randomUUID(), file });
+    }
+    setError(problems[0] || '');
+    if (next.length) setFiles((current) => [...current, ...next]);
+  };
+
   const sendTurn = async () => {
     if (!conversationId || busy) return;
     setBusy(true);
@@ -134,8 +221,8 @@ export default function LabPage() {
         throw new Error('Se pueden enviar hasta 6 fotografías.');
       }
       const images = [];
-      for (const file of files) {
-        images.push(await readImageFile(file));
+      for (const item of files) {
+        images.push(await readImageFile(item.file));
       }
       const payload = {
         idempotencyKey: crypto.randomUUID(),
@@ -160,10 +247,10 @@ export default function LabPage() {
   };
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+    <div className="flex h-[100dvh] overflow-hidden bg-stone-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <OmnichannelLeftRail />
       <main className="flex min-w-0 flex-1 flex-col pb-16 lg:pb-0">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
           <div>
             <h1 className="text-lg font-semibold">Laboratorio</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -182,7 +269,7 @@ export default function LabPage() {
 
         {!conversationId ? (
           <section className="m-auto max-w-md px-6 text-center">
-            <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">
+            <p className="mb-4 text-sm leading-6 text-gray-600 dark:text-gray-300">
               Inicia una conversación para probar texto, fotografías y la cotización real.
             </p>
             <button
@@ -196,97 +283,131 @@ export default function LabPage() {
           </section>
         ) : (
           <>
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2 text-sm dark:border-gray-800">
+            <div className="flex items-center justify-between gap-3 border-b border-stone-200 bg-white/80 px-4 py-2 text-sm dark:border-gray-800 dark:bg-gray-900/80">
               <span className="truncate text-gray-500">Conversación {conversationId.slice(0, 8)}</span>
               <Link
                 to={`/?conversation=${conversationId}`}
-                className="shrink-0 font-medium text-amber-700 underline dark:text-amber-300"
+                className="shrink-0 font-medium text-amber-700 underline decoration-amber-300 underline-offset-2 dark:text-amber-300"
               >
                 Abrir cotización
               </Link>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-              {messages.map((message) => {
-                const outbound = message.direction === 'outbound';
-                const image = isImageContent(message.content);
-                return (
-                  <article
-                    key={message.id}
-                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                      outbound
-                        ? 'ml-auto bg-amber-100 text-gray-900 dark:bg-amber-900/40 dark:text-amber-50'
-                        : 'bg-white text-gray-900 dark:bg-gray-800 dark:text-gray-100'
-                    }`}
-                  >
-                    <p className="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
-                      {outbound ? 'Agente' : 'Cliente'}
-                    </p>
-                    {image ? (
-                      <img
-                        src={message.content}
-                        alt="Fotografía enviada"
-                        className="max-h-48 rounded-lg"
-                      />
-                    ) : (
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                    )}
-                  </article>
-                );
-              })}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
+              <div className="mx-auto w-full max-w-3xl space-y-4">
+              {thread.length === 0 ? (
+                <p className="mx-auto max-w-sm pt-10 text-center text-sm leading-6 text-gray-500">
+                  Escribe el mensaje del cliente y, si hace falta, adjunta las fotografías del daño.
+                </p>
+              ) : null}
+              {thread.map((group) => (
+                <ThreadGroup
+                  key={group.id}
+                  group={group}
+                  onOpenImage={setLightbox}
+                />
+              ))}
               {waiting ? (
-                <p className="text-sm text-gray-500">
+                <p className="max-w-xl rounded-2xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
                   El agente responde al cerrar la ráfaga, unos 25 segundos después del último envío.
                 </p>
               ) : null}
               <div ref={bottomRef} />
+              </div>
             </div>
             <form
-              className="border-t border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
+              className="border-t border-stone-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6"
               onSubmit={(event) => {
                 event.preventDefault();
                 void sendTurn();
               }}
             >
-              <label className="mb-2 block text-sm">
+              <div className="mx-auto w-full max-w-3xl">
+              <label className="mb-3 block text-sm font-medium" htmlFor="lab-message">
                 Mensaje
                 <textarea
+                  id="lab-message"
                   value={text}
                   onChange={(event) => setText(event.target.value)}
                   rows={3}
                   maxLength={2000}
-                  className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500 dark:border-gray-700 dark:bg-gray-950"
+                  className="mt-1 w-full resize-y rounded-2xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30 dark:border-gray-700 dark:bg-gray-950"
                   placeholder="Ejemplo: quiero arreglar mi Beetle 2015"
                 />
               </label>
-              <label className="mb-3 block text-sm">
-                Fotografías
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  multiple
-                  className="mt-1 block w-full text-sm"
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.files ?? []).slice(0, MAX_IMAGES);
-                    setFiles(selected);
-                  }}
-                />
-              </label>
-              {files.length > 0 ? (
-                <ul className="mb-3 text-xs text-gray-500">
-                  {files.map((file) => (
-                    <li key={`${file.name}-${file.size}`}>
-                      {file.name} ({Math.ceil(file.size / 1024)} KB)
+              <PhotoPicker
+                inputRef={fileInputRef}
+                dragging={dragging}
+                count={files.length}
+                onBrowse={() => fileInputRef.current?.click()}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  addFiles(event.dataTransfer?.files);
+                }}
+                onSelect={(event) => {
+                  addFiles(event.target.files);
+                  event.target.value = '';
+                }}
+              />
+              {previews.length > 0 ? (
+                <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {previews.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex gap-2 rounded-xl border border-stone-200 bg-stone-50 p-2 dark:border-gray-700 dark:bg-gray-950"
+                    >
+                      <img
+                        src={item.url}
+                        alt=""
+                        className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium" title={item.file.name}>
+                          {shortName(item.file.name)}
+                        </p>
+                        <p className="text-[11px] text-gray-500">{formatSize(item.file.size)}</p>
+                        <button
+                          type="button"
+                          className="mt-1 text-[11px] font-medium text-red-700 dark:text-red-300"
+                          onClick={() => setFiles((current) => current.filter((row) => row.id !== item.id))}
+                        >
+                          Quitar
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
               ) : null}
-              <button
-                type="submit"
-                disabled={busy}
-                className="rounded-full bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-amber-600"
-              >
-                Enviar turno
-              </button>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-500">
+                  {files.length === 0
+                    ? 'Ninguna fotografía'
+                    : `${files.length} de ${MAX_IMAGES} fotografías`}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={files.length === 0 || busy}
+                    onClick={() => setFiles([])}
+                    className="rounded-full border border-stone-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-40 dark:border-gray-600 dark:text-gray-200"
+                  >
+                    Limpiar fotografías
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    Enviar turno
+                  </button>
+                </div>
+              </div>
+              </div>
             </form>
           </>
         )}
@@ -296,6 +417,111 @@ export default function LabPage() {
           </p>
         ) : null}
       </main>
+      {lightbox ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fotografía ampliada"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-gray-900"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="h-4 w-4" aria-hidden />
+            <span className="sr-only">Cerrar</span>
+          </button>
+          <img
+            src={lightbox}
+            alt="Fotografía enviada"
+            className="max-h-[85dvh] max-w-full rounded-lg object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function PhotoPicker({
+  inputRef,
+  dragging,
+  count,
+  onBrowse,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onSelect,
+}) {
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+        multiple
+        className="sr-only"
+        onChange={onSelect}
+      />
+      <button
+        type="button"
+        onClick={onBrowse}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={`flex w-full flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed px-4 py-5 text-center transition ${
+          dragging
+            ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
+            : 'border-stone-300 bg-stone-50 hover:border-amber-400 dark:border-gray-600 dark:bg-gray-950'
+        }`}
+      >
+        <ImagePlus className="h-5 w-5 text-amber-700 dark:text-amber-300" aria-hidden />
+        <span className="text-sm font-medium">Suelta las fotografías o haz clic para elegirlas</span>
+        <span className="text-xs text-gray-500">
+          JPG, PNG o WebP · hasta {MAX_IMAGES} · {count === 1 ? '1 seleccionada' : `${count} seleccionadas`}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function ThreadGroup({ group, onOpenImage }) {
+  const mine = !group.outbound;
+  const shell = mine
+    ? 'ml-auto bg-amber-600 text-white'
+    : 'border border-stone-200 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
+  const width = group.kind === 'text' && group.outbound ? 'max-w-[min(100%,42rem)]' : 'max-w-[min(100%,28rem)]';
+  return (
+    <article className={`${width} ${mine ? 'ml-auto' : ''}`}>
+      <p className={`mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide ${mine ? 'text-right text-amber-800 dark:text-amber-300' : 'text-stone-500'}`}>
+        {mine ? 'Cliente' : 'Agente'}
+      </p>
+      <div className={`rounded-2xl px-4 py-3 ${shell}`}>
+        {group.kind === 'text' ? (
+          <p className={`whitespace-pre-wrap break-words ${group.outbound ? 'text-[15px] leading-7' : 'text-sm leading-6'}`}>
+            {group.message.content}
+          </p>
+        ) : (
+          <div className={`grid gap-2 ${group.items.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {group.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="overflow-hidden rounded-xl"
+                onClick={() => onOpenImage(item.content)}
+              >
+                <img
+                  src={item.content}
+                  alt="Fotografía enviada"
+                  className="h-28 w-full object-cover sm:h-36"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
