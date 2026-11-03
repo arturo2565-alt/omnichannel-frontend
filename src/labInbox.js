@@ -20,12 +20,7 @@ export function isStagingApiOrigin(origin) {
   } catch {
     host = raw.toLowerCase();
   }
-  if (
-    host === 'omnichannel-backend-production.up.railway.app' ||
-    host.includes('production')
-  ) {
-    return false;
-  }
+  if (host.includes('production')) return false;
   return host.includes('staging');
 }
 
