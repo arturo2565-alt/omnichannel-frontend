@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, ChartNoAxesCombined, LogOut, MessageCircle, Settings2, Table2, Users } from 'lucide-react';
+import { Calendar, ChartNoAxesCombined, Library, LogOut, MessageCircle, Settings2, Table2, Users } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -89,6 +89,19 @@ export function OmnichannelLeftRail({ platformSlot }) {
           }
         >
           <Settings2 className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </NavLink>
+        <NavLink
+          to="/admin/calibracion"
+          title="Calibración"
+          className={({ isActive }) =>
+            `${railBtn} ${
+              isActive
+                ? 'scale-105 bg-slate-600 text-white ring-2 ring-white ring-offset-2 ring-offset-gray-900 border-slate-400'
+                : 'border-gray-600 bg-gray-800/90 text-gray-200 hover:bg-gray-700'
+            }`
+          }
+        >
+          <Library className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
         <NavLink
           to="/admin/catalog"

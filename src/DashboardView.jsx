@@ -136,7 +136,13 @@ export default function DashboardView() {
               </p>
             </div>
             </div>
-            <div className="lg:hidden">
+            <div className="flex items-center gap-2 lg:hidden">
+              <Link
+                to="/admin/calibracion"
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200"
+              >
+                Calibración
+              </Link>
               <ThemeToggle placement="header" />
             </div>
           </div>
