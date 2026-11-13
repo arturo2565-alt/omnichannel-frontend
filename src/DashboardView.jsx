@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, LayoutDashboard } from 'lucide-react';
+import { ChartNoAxesCombined, ChevronRight } from 'lucide-react';
 import { fetchHotLeads, fetchKpis } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
@@ -126,8 +126,8 @@ export default function DashboardView() {
         <header className="shrink-0 border-b border-gray-100 bg-white px-6 py-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
-            <span className="mt-0.5 hidden h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300 sm:inline-flex">
-              <LayoutDashboard className="h-5 w-5" strokeWidth={2} />
+            <span className="mt-0.5 hidden h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300 lg:inline-flex">
+              <ChartNoAxesCombined className="h-5 w-5" strokeWidth={2} aria-hidden />
             </span>
             <div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>

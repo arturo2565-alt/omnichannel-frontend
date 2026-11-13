@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Calendar, FlaskConical, LayoutDashboard, LogOut, MessageCircle, Settings2, Table2, Users } from 'lucide-react';
+import { Calendar, ChartNoAxesCombined, LogOut, MessageCircle, Settings2, Table2, Users } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -35,7 +35,7 @@ export function OmnichannelLeftRail({ platformSlot }) {
             }`
           }
         >
-          <LayoutDashboard className="h-5 w-5" strokeWidth={2} aria-hidden />
+          <ChartNoAxesCombined className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
         <NavLink
           to="/"
@@ -91,19 +91,6 @@ export function OmnichannelLeftRail({ platformSlot }) {
           <Settings2 className="h-5 w-5" strokeWidth={2} aria-hidden />
         </NavLink>
         <NavLink
-          to="/lab"
-          title="Laboratorio"
-          className={({ isActive }) =>
-            `${railBtn} ${
-              isActive
-                ? 'scale-105 bg-amber-600 text-white ring-2 ring-white ring-offset-2 ring-offset-gray-900 border-amber-400'
-                : 'border-gray-600 bg-gray-800/90 text-gray-200 hover:bg-gray-700'
-            }`
-          }
-        >
-          <FlaskConical className="h-5 w-5" strokeWidth={2} aria-hidden />
-        </NavLink>
-        <NavLink
           to="/admin/catalog"
           title="Catálogo y precios"
           className={({ isActive }) =>
@@ -143,11 +130,10 @@ export function OmnichannelLeftRail({ platformSlot }) {
       aria-label="Navegación"
     >
       {[
-        { to: '/dashboard', title: 'Inicio', icon: LayoutDashboard, end: false },
+        { to: '/dashboard', title: 'Inicio', icon: ChartNoAxesCombined, end: false },
         { to: '/', title: 'Bandeja', icon: MessageCircle, end: true },
         { to: '/crm', title: 'CRM', icon: Users, end: false },
         { to: '/calendar', title: 'Citas', icon: Calendar, end: false },
-        { to: '/lab', title: 'Lab', icon: FlaskConical, end: false },
         { to: '/admin/catalog', title: 'Precios', icon: Table2, end: false },
       ].map((item) => {
         const Icon = item.icon;

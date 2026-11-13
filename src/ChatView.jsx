@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Calendar, ChevronDown, LayoutDashboard, LogOut, MoreVertical } from 'lucide-react';
+import { ChevronDown, LogOut, MoreVertical } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -3695,22 +3694,6 @@ function ChatView({
             </div>
             <div className="flex shrink-0 items-center gap-2 lg:hidden">
               <ThemeToggle placement="header" />
-              <Link
-                to="/dashboard"
-                title="Dashboard"
-                aria-label="Ir al dashboard"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-sky-200/90 bg-gradient-to-br from-sky-50 via-white to-blue-50 text-sky-700 shadow-md ring-1 ring-sky-100/80 transition active:scale-95 hover:border-sky-300 hover:shadow-lg"
-              >
-                <LayoutDashboard className="h-5 w-5" strokeWidth={2} aria-hidden />
-              </Link>
-              <Link
-                to="/calendar"
-                title="Citas y agenda"
-                aria-label="Ir al calendario de citas"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-indigo-200/90 bg-gradient-to-br from-indigo-50 via-white to-violet-50 text-indigo-700 shadow-md ring-1 ring-indigo-100/80 transition active:scale-95 hover:border-indigo-300 hover:shadow-lg"
-              >
-                <Calendar className="h-5 w-5" strokeWidth={2} aria-hidden />
-              </Link>
               <button
                 type="button"
                 onClick={logout}
