@@ -7,6 +7,7 @@ import {
   fetchCalibrationDocument,
   loadCalibrationPhoto,
 } from './calibrationApi.js';
+import { declaredAmount, galleryMove, groupRepairLines, listAmount, sumDeclared } from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { useAuth } from './AuthContext.jsx';
@@ -46,6 +47,11 @@ const WORK = {
   disassembly: 'Desarmado',
   interior_frames: 'Marcos interiores',
 };
+const LABOR = {
+  mount_and_paint: 'Montaje y pintura',
+  paint: 'Pintura',
+  repair: 'Reparación',
+};
 
 const money = new Intl.NumberFormat('es-MX', {
   style: 'currency',
@@ -69,24 +75,21 @@ export default function CalibrationPage() {
   const [service, setService] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const trimmedQuery = query.trim();
+  const listKind = tab === 'visual' ? 'cases' : tab === 'repair' ? 'repairs' : 'opportunities';
+  const listFilter = tab === 'visual' ? archive : tab === 'commercial' ? service : '';
   const summaryQuery = useQuery({
     queryKey: workshopKey(scope, 'calibration', 'summary'),
     enabled,
     queryFn: () => fetchCalibrationDocument('/api/calibration/summary'),
   });
   const listQuery = useQuery({
-    queryKey: workshopKey(
-      scope,
-      'calibration',
-      tab === 'visual' ? 'cases' : 'opportunities',
-      trimmedQuery,
-      tab === 'visual' ? archive : service,
-    ),
+    queryKey: workshopKey(scope, 'calibration', listKind, trimmedQuery, listFilter),
     enabled,
-    queryFn: () => fetchCalibrationDocument(calibrationListPath(
-      tab === 'visual' ? 'cases' : 'opportunities',
-      { q: trimmedQuery, archive, service },
-    )),
+    queryFn: () => fetchCalibrationDocument(calibrationListPath(listKind, {
+      q: trimmedQuery,
+      archive,
+      service,
+    })),
   });
   const detailQuery = useQuery({
     queryKey: workshopKey(scope, 'calibration', 'detail', tab, selectedId),
@@ -132,7 +135,7 @@ export default function CalibrationPage() {
                   <CalibrationRefreshMark mode={refreshMode} />
                 </div>
                 <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                  Consulta privada de expedientes visuales y cotizaciones comerciales.
+                  Consulta privada de expedientes, cotizaciones comerciales y reparaciones.
                 </p>
               </div>
             </div>
@@ -141,7 +144,7 @@ export default function CalibrationPage() {
             </div>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-6">
           <StatusNotice
             status={authRejected ? 'forbidden' : summary?.status}
             pending={!summary && (summaryQuery.isPending || !enabled)}
@@ -150,18 +153,20 @@ export default function CalibrationPage() {
           {!authRejected && summary?.status !== 'missing' ? (
             <>
               {summary?.status === 'ok' ? (
-                <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                   <Stat label="Expedientes" value={summary.data.visual.caseCount} />
                   <Stat label="Archivados" value={summary.data.visual.archivedCount} />
                   <Stat label="Pendientes" value={summary.data.visual.pendingCount} />
                   <Stat label="Oportunidades" value={summary.data.commercial.opportunityCount} />
                   <Stat label="Cotizaciones" value={summary.data.commercial.quoteCount} />
+                  <Stat label="Reparaciones" value={summary.data.repairs?.opportunityCount ?? 0} />
                 </section>
               ) : null}
-              <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-end">
-                <div className="flex rounded-full bg-gray-100 p-1 dark:bg-gray-800" role="tablist" aria-label="Tipo de registro">
+              <div className="mt-5 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
+                <div className="flex max-w-full flex-wrap gap-1 rounded-2xl bg-gray-100 p-1 dark:bg-gray-800" role="tablist" aria-label="Tipo de registro">
                   <TabButton active={tab === 'visual'} onClick={() => { setTab('visual'); clearSelection(); }}>Expedientes</TabButton>
                   <TabButton active={tab === 'commercial'} onClick={() => { setTab('commercial'); clearSelection(); }}>Comercial</TabButton>
+                  <TabButton active={tab === 'repair'} onClick={() => { setTab('repair'); clearSelection(); }}>Reparaciones</TabButton>
                 </div>
                 <label className="min-w-0 flex-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Buscar
@@ -174,9 +179,10 @@ export default function CalibrationPage() {
                 </label>
                 {tab === 'visual' ? (
                   <Filter label="Archivo" value={archive} onChange={(value) => { setArchive(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(ARCHIVE)]} />
-                ) : (
+                ) : null}
+                {tab === 'commercial' ? (
                   <Filter label="Servicio" value={service} onChange={(value) => { setService(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(SERVICES)]} />
-                )}
+                ) : null}
               </div>
               <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -290,7 +296,7 @@ function TabButton({ active, onClick, children }) {
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-sm font-medium ${active ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}
+      className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium ${active ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}
     >
       {children}
     </button>
@@ -323,19 +329,20 @@ function ListState({ state, pending, failed, tab, onSelect, selectedId }) {
     <ul className="divide-y divide-gray-100 dark:divide-gray-800">
       {items.map((item) => {
         const id = tab === 'visual' ? item.id : item.headQuoteId;
-        const title = tab === 'visual'
-          ? vehicle(item) || item.id
-          : vehicle(item) || item.headQuoteId;
+        const title = vehicle(item) || id;
+        const amount = listAmount(item, tab);
         return (
           <li key={id}>
             <button
               type="button"
               onClick={() => onSelect(id)}
-              className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left ${selectedId === id ? 'bg-sky-50 dark:bg-sky-950/40' : ''}`}
+              className={`flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left ${selectedId === id ? 'bg-sky-50 dark:bg-sky-950/40' : ''}`}
             >
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold">{title}</span>
-                <span className="mt-0.5 block text-xs text-gray-500">{id}</span>
+                <span className="mt-0.5 block truncate text-xs text-gray-500">
+                  {id}{amount == null ? '' : ` · ${money.format(amount)}`}
+                </span>
               </span>
               <Integrity value={item.integrity} />
             </button>
@@ -353,53 +360,108 @@ function Detail({ state, pending, failed, tab }) {
   if (!state && !pending) return <p className="text-sm text-gray-500">Selecciona un registro para ver el detalle.</p>;
   if (pending || !state) return <p className="text-sm text-gray-500">Cargando el detalle…</p>;
   if (state.status === 'missing') return <p className="text-sm text-gray-500">No encontramos ese registro.</p>;
-  return tab === 'visual' ? <VisualDetail record={state.data} /> : <CommercialDetail record={state.data} />;
+  return tab === 'visual'
+    ? <VisualDetail record={state.data} />
+    : tab === 'repair'
+      ? <RepairDetail record={state.data} />
+      : <CommercialDetail record={state.data} />;
 }
 
-function VisualDetail({ record }) {
+export function VisualDetail({ record }) {
+  const verified = (record.photos ?? []).filter((photo) => photo.verified).map((photo) => photo.id);
+  const [galleryId, setGalleryId] = useState(null);
+  const open = galleryId && verified.includes(galleryId) ? galleryId : null;
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold">{vehicle(record) || record.id}</h2>
-          <p className="text-xs text-gray-500">{record.id} · {ARCHIVE[record.archiveStatus] ?? record.archiveStatus}</p>
+    <div className="flex min-w-0 flex-col gap-4">
+      <header>
+        <h2 className="text-2xl font-semibold tracking-tight">{vehicle(record) || record.id}</h2>
+        <p className="mt-1 text-sm text-gray-500">{record.id}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <MetaChip>{ARCHIVE[record.archiveStatus] ?? record.archiveStatus}</MetaChip>
+          <Integrity value={record.integrity} />
         </div>
-        <Integrity value={record.integrity} />
-      </div>
-      <p className="mt-3 text-sm">Cotizado {money.format(record.quotedTotalMxn || 0)}</p>
-      <h3 className="mt-4 text-sm font-semibold">Piezas y tratamientos</h3>
-      {record.lines?.length ? (
-        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-          {record.lines.map((line) => (
-            <li key={line.lineId ?? line.part} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span>{line.part}<span className="block text-xs text-gray-500">{TREATMENTS[line.treatment] ?? line.treatment}</span></span>
-              <span className="tabular-nums">{money.format(line.priceMxn)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="mt-2 text-sm text-gray-500">Sin piezas registradas.</p>}
-      <h3 className="mt-4 text-sm font-semibold">Fotografías</h3>
-      {record.photos?.length ? (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {record.photos.map((photo) => (
-            <figure key={photo.id} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-              {photo.verified ? (
-                <CalibrationPhoto caseId={record.id} photoId={photo.id} />
-              ) : (
-                <div className="flex h-28 items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800">
-                  No disponible
-                </div>
-              )}
-              <figcaption className="px-2 py-1 text-[11px] text-gray-500">{photo.id}</figcaption>
-            </figure>
-          ))}
-        </div>
-      ) : <p className="mt-2 text-sm text-gray-500">Este expediente no tiene fotografías.</p>}
+      </header>
+      <article className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-800 dark:bg-gray-950/50">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total cotizado</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums">{money.format(record.quotedTotalMxn || 0)}</p>
+      </article>
+      <section>
+        <h3 className="text-sm font-semibold">Piezas y tratamientos</h3>
+        {record.lines?.length ? (
+          <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+            {record.lines.map((line) => (
+              <li key={line.lineId ?? line.part} className="flex min-w-0 items-center justify-between gap-3 py-2 text-sm">
+                <span className="min-w-0">
+                  <span className="block truncate">{line.part}</span>
+                  <span className="block text-xs text-gray-500">{TREATMENTS[line.treatment] ?? line.treatment}</span>
+                </span>
+                <span className="shrink-0 tabular-nums">{money.format(line.priceMxn)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-2 text-sm text-gray-500">Sin piezas registradas.</p>}
+      </section>
+      <section>
+        <h3 className="text-sm font-semibold">Fotografías</h3>
+        {record.photos?.length ? (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {record.photos.map((photo) => (
+              <figure key={photo.id} className="min-w-0 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                {photo.verified ? (
+                  <button type="button" className="block w-full" onClick={() => setGalleryId(photo.id)} aria-label={`Ampliar ${photo.id}`}>
+                    <CalibrationPhoto caseId={record.id} photoId={photo.id} />
+                  </button>
+                ) : (
+                  <div className="flex h-28 items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800">
+                    No disponible
+                  </div>
+                )}
+                <figcaption className="truncate px-2 py-1 text-[11px] text-gray-500">{photo.id}</figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : <p className="mt-2 text-sm text-gray-500">Este expediente no tiene fotografías.</p>}
+      </section>
+      {open ? (
+        <PhotoGallery
+          caseId={record.id}
+          photoId={open}
+          onClose={() => setGalleryId(null)}
+          onStep={(step) => setGalleryId(galleryMove(verified, open, step))}
+          hasPrevious={verified.indexOf(open) > 0}
+          hasNext={verified.indexOf(open) < verified.length - 1}
+        />
+      ) : null}
     </div>
   );
 }
 
-function CalibrationPhoto({ caseId, photoId }) {
+function PhotoGallery({ caseId, photoId, onClose, onStep, hasPrevious, hasNext }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft' && hasPrevious) onStep(-1);
+      if (event.key === 'ArrowRight' && hasNext) onStep(1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasNext, hasPrevious, onClose, onStep]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/80 p-3" role="dialog" aria-modal="true" aria-label="Fotografía ampliada">
+      <button type="button" className="absolute inset-0" aria-label="Cerrar fotografía" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-3xl min-w-0 flex-col gap-3">
+        <CalibrationPhoto caseId={caseId} photoId={photoId} frame="stage" />
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-gray-900 disabled:opacity-40" disabled={!hasPrevious} onClick={() => onStep(-1)}>Anterior</button>
+          <p className="truncate text-xs text-white">{photoId}</p>
+          <button type="button" className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-gray-900 disabled:opacity-40" disabled={!hasNext} onClick={() => onStep(1)}>Siguiente</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalibrationPhoto({ caseId, photoId, frame = 'thumb' }) {
   const queryClient = useQueryClient();
   const { user, taller } = useAuth();
   const { rejected } = useSessionCacheStatus();
@@ -416,11 +478,113 @@ function CalibrationPhoto({ caseId, photoId }) {
     },
   });
   const src = !rejected && isSessionObjectUrl(photoQuery.data) ? photoQuery.data : '';
-  if (src) return <img src={src} alt="" className="h-28 w-full object-cover" />;
+  const frameClass = frame === 'stage'
+    ? 'max-h-[70vh] w-full rounded-xl bg-black object-contain'
+    : 'h-28 w-full object-cover';
+  if (src) return <img src={src} alt="" className={frameClass} />;
   return (
-    <div className="flex h-28 items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800">
+    <div className={`flex items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800 ${frame === 'stage' ? 'h-64 w-full rounded-xl' : 'h-28'}`}>
       {photoQuery.isPending ? 'Cargando…' : 'No disponible'}
     </div>
+  );
+}
+
+export function RepairDetail({ record }) {
+  const revisions = record.revisions ?? [];
+  const active = revisions.find((item) => item.id === record.headQuoteId) ?? revisions[revisions.length - 1] ?? null;
+  const quoteId = active?.id ?? record.headQuoteId;
+  const groups = groupRepairLines(active?.lines);
+  const contracted = sumDeclared(active?.lines, 'contractedMxn', 'contractedValidation');
+  const collected = sumDeclared(active?.lines, 'collectedMxn', 'collectedValidation');
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <header>
+        <h2 className="break-all text-2xl font-semibold tracking-tight">{quoteId}</h2>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{vehicle(active ?? record) || 'Vehículo incompleto'}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <MetaChip>Evidencia textual</MetaChip>
+          <MetaChip>Sin fotografías</MetaChip>
+          <Integrity value={record.integrity} />
+          <MetaChip>{active?.revision ? `Revisión ${active.revision}` : 'Sin revisión'}</MetaChip>
+        </div>
+      </header>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <article className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/50">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total cotizado</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">{active?.quotedTotalMxn == null ? 'No proporcionado' : money.format(active.quotedTotalMxn)}</p>
+        </article>
+        {contracted == null ? null : <PriceCard label="Contratado" value={contracted} validation="human_confirmed" />}
+        {collected == null ? null : <PriceCard label="Cobrado" value={collected} validation="human_confirmed" />}
+      </div>
+      <RepairLines title="Refacciones" lines={groups.parts} />
+      <RepairLines title="Mano de obra" lines={groups.labor} />
+      <section>
+        <h3 className="text-sm font-semibold">Condiciones</h3>
+        {active?.conditions?.length ? (
+          <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+            {active.conditions.map((condition) => <li key={condition} className="break-words">{condition}</li>)}
+          </ul>
+        ) : <p className="mt-2 text-sm text-gray-400">Sin condiciones declaradas.</p>}
+      </section>
+      <section>
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-semibold">Historial de revisiones</h3>
+          <p className="text-xs text-gray-400">{revisionCount(revisions.length)}</p>
+        </div>
+        {revisions.length ? (
+          <ol className="mt-2 space-y-2">
+            {revisions.map((revision) => {
+              const current = revision.id === quoteId;
+              return (
+                <li key={revision.id} className={`rounded-xl border p-3 ${current ? 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950/30'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{revision.id}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Revisión {revision.revision ?? '—'}
+                        {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+                      </p>
+                    </div>
+                    {current ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Activa</span> : null}
+                  </div>
+                  <p className="mt-2 text-sm font-medium tabular-nums">Cotizado {revision.quotedTotalMxn == null ? 'No proporcionado' : money.format(revision.quotedTotalMxn)}</p>
+                  <RepairLines title="Refacciones" lines={groupRepairLines(revision.lines).parts} compact />
+                  <RepairLines title="Mano de obra" lines={groupRepairLines(revision.lines).labor} compact />
+                </li>
+              );
+            })}
+          </ol>
+        ) : <p className="mt-2 text-sm text-gray-400">Sin revisiones.</p>}
+      </section>
+    </div>
+  );
+}
+
+function RepairLines({ title, lines, compact = false }) {
+  if (!lines?.length) return null;
+  return (
+    <section className={compact ? 'mt-3' : ''}>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+        {lines.map((line) => {
+          const contracted = declaredAmount(line.contractedMxn, line.contractedValidation);
+          const collected = declaredAmount(line.collectedMxn, line.collectedValidation);
+          return (
+            <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 items-start justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate">{line.part}</span>
+                <span className="block text-xs text-gray-500">{line.role === 'labor' ? (LABOR[line.labor] ?? line.labor) : 'Refacción'}</span>
+              </span>
+              <span className="shrink-0 text-right text-xs tabular-nums">
+                <span className="block text-sm font-medium">{money.format(line.quotedMxn)}</span>
+                {contracted == null ? null : <span className="block text-gray-500">Contratado {money.format(contracted)}</span>}
+                {collected == null ? null : <span className="block text-gray-500">Cobrado {money.format(collected)}</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

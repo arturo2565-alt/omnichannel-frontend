@@ -5,13 +5,17 @@ export function calibrationListPath(kind, filters = {}) {
   if (kind === 'cases' && filters.archive) params.set('archive', filters.archive);
   if (kind === 'opportunities' && filters.service) params.set('service', filters.service);
   const suffix = params.toString();
-  const base = kind === 'cases' ? '/api/calibration/cases' : '/api/calibration/opportunities';
+  const base = kind === 'cases'
+    ? '/api/calibration/cases'
+    : kind === 'repairs'
+      ? '/api/calibration/repairs'
+      : '/api/calibration/opportunities';
   return `${base}${suffix ? `?${suffix}` : ''}`;
 }
 
 export function calibrationDetailPath(tab, id) {
   const encoded = encodeURIComponent(id);
-  return tab === 'visual'
-    ? `/api/calibration/cases/${encoded}`
-    : `/api/calibration/quotes/${encoded}`;
+  if (tab === 'visual') return `/api/calibration/cases/${encoded}`;
+  if (tab === 'repair') return `/api/calibration/repairs/${encoded}`;
+  return `/api/calibration/quotes/${encoded}`;
 }

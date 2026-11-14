@@ -5,6 +5,13 @@ import {
   calibrationListPath,
 } from './calibrationPaths.js';
 import {
+  declaredAmount,
+  galleryMove,
+  groupRepairLines,
+  listAmount,
+  sumDeclared,
+} from './calibrationView.js';
+import {
   CALIBRATION_SLOW_DELAY_MS,
   CALIBRATION_SYNC_DELAY_MS,
   calibrationRefreshIndicator,
@@ -41,11 +48,34 @@ function photoKey(caseId, photoId, current = scope) {
   return workshopKey(current, 'calibration', 'photo', caseId, photoId);
 }
 
+test('RQ separa partidas, oculta importes ausentes y la galería no sale del rango', () => {
+  const lines = [
+    { role: 'part', quotedMxn: 2900, quotedValidation: 'human_confirmed', contractedMxn: null, contractedValidation: 'not_provided', collectedMxn: null, collectedValidation: 'not_provided' },
+    { role: 'labor', quotedMxn: 3400, quotedValidation: 'human_confirmed', contractedMxn: null, contractedValidation: 'not_provided', collectedMxn: null, collectedValidation: 'not_provided' },
+  ];
+  const groups = groupRepairLines(lines);
+  assert.equal(groups.parts.length, 1);
+  assert.equal(groups.labor.length, 1);
+  assert.equal(sumDeclared(lines, 'quotedMxn', 'quotedValidation'), 6300);
+  assert.equal(sumDeclared(lines, 'contractedMxn', 'contractedValidation'), null);
+  assert.equal(declaredAmount(null, 'not_provided'), null);
+  assert.equal(listAmount({ quotedTotalMxn: 1900 }, 'visual'), 1900);
+  assert.equal(listAmount({ quotedMxn: 6300 }, 'repair'), 6300);
+  assert.equal(listAmount({}, 'repair'), null);
+  const photos = ['IMG-000001', 'IMG-000002', 'IMG-000003'];
+  assert.equal(galleryMove(photos, 'IMG-000001', -1), 'IMG-000001');
+  assert.equal(galleryMove(photos, 'IMG-000001', 1), 'IMG-000002');
+  assert.equal(galleryMove(photos, 'IMG-000003', 1), 'IMG-000003');
+  assert.equal(galleryMove([], 'IMG-000001', 1), null);
+});
+
 test('las rutas de calibración no apuntan a un almacenamiento externo', () => {
   assert.equal(calibrationListPath('cases', { q: ' AF-000002 ', archive: 'archived_private' }), '/api/calibration/cases?q=AF-000002&archive=archived_private');
   assert.equal(calibrationListPath('opportunities', { q: '', service: 'bath_with_bodywork' }), '/api/calibration/opportunities?service=bath_with_bodywork');
+  assert.equal(calibrationListPath('repairs', { q: ' fascia ' }), '/api/calibration/repairs?q=fascia');
   assert.equal(calibrationDetailPath('visual', 'AF-000002'), '/api/calibration/cases/AF-000002');
   assert.equal(calibrationDetailPath('commercial', 'CQ-000001'), '/api/calibration/quotes/CQ-000001');
+  assert.equal(calibrationDetailPath('repair', 'RQ-000001'), '/api/calibration/repairs/RQ-000001');
   assert.equal(isSessionObjectUrl('https://res.cloudinary.com/demo/image/upload/a.jpg'), false);
   assert.equal(isSessionObjectUrl('blob:http://local/photo'), true);
 });
@@ -142,6 +172,13 @@ test('AF y CQ conservan claves distintas al cambiar de expediente', async () => 
   assert.equal(client.getQueryData(quotesKey()).data.items[0].headQuoteId, 'CQ-000001');
   assert.equal(client.getQueryData(detailKey('AF-000002')).data.id, 'AF-000002');
   assert.equal(client.getQueryData(detailKey('AF-000003')).data.id, 'AF-000003');
+  const repairKey = workshopKey(scope, 'calibration', 'repairs', 'fascia', '');
+  await client.prefetchQuery({
+    queryKey: repairKey,
+    queryFn: async () => ({ status: 'ok', data: { items: [{ headQuoteId: 'RQ-000001' }] } }),
+  });
+  assert.equal(client.getQueryData(repairKey).data.items[0].headQuoteId, 'RQ-000001');
+  assert.notDeepEqual(repairKey, quotesKey());
 });
 
 test('varias fotografías se reutilizan en la sesión y no repiten la descarga', async () => {

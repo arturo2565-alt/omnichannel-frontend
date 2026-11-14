@@ -15,6 +15,16 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(rail, /to="\/admin\/calibracion"[\s\S]*title="Calibración"/);
   assert.doesNotMatch(bottom, /calibracion/);
   assert.match(page, /Centro de Calibración/);
+  assert.match(page, /Reparaciones/);
+  assert.match(page, /Evidencia textual/);
+  assert.match(page, /Sin fotografías/);
+  assert.match(page, /Total cotizado/);
+  assert.match(page, /role="dialog"/);
+  assert.match(page, /object-contain/);
+  assert.match(page, /flex-wrap/);
+  assert.match(page, /overflow-x-hidden/);
+  assert.match(page, /Historial de revisiones/);
+  assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);
   assert.match(page, /loadCalibrationPhoto/);
   assert.match(page, /staleTime: Infinity/);
   assert.match(page, /calibrationRefreshIndicator/);
