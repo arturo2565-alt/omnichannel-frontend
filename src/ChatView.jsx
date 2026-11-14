@@ -1,10 +1,13 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { ChevronDown, LogOut, MoreVertical } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { useQuery } from '@tanstack/react-query';
 import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
+import { hasSessionScope, readWorkshopResponse, sessionScope, workshopKey } from './sessionQuery.js';
 import LabClientComposer from './LabClientComposer.jsx';
 import { isLabChannel } from './labInbox.js';
 import {
@@ -1259,9 +1262,39 @@ function ChatView({
   onCreateLabTrial,
   onSendAsClient,
   labProcessing = false,
+  contactsPending = false,
 }) {
 
-  const { logout } = useAuth();
+  const { logout, user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const catalogQuery = useQuery({
+    queryKey: workshopKey(scope, 'catalog-view'),
+    enabled: hasSessionScope(scope) && !rejected,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const response = await apiFetchOrigin('/catalog/catalog-view');
+      if (response.status === 401 || response.status === 403) {
+        return readWorkshopResponse(response);
+      }
+      if (!response.ok) return { pieceBases: [], integralBases: [], rules: null };
+      const data = await readWorkshopResponse(response);
+      return {
+        pieceBases: Array.isArray(data.pieceBases) ? data.pieceBases : [],
+        integralBases: Array.isArray(data.integralBases) ? data.integralBases : [],
+        rules: data.rules ?? null,
+      };
+    },
+  });
+  const catalogPieceBases = useMemo(
+    () => catalogQuery.data?.pieceBases ?? [],
+    [catalogQuery.data],
+  );
+  const catalogIntegralBases = useMemo(
+    () => catalogQuery.data?.integralBases ?? [],
+    [catalogQuery.data],
+  );
+  const catalogPricingRules = catalogQuery.data?.rules ?? null;
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null); // Referencia al input hidden
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -1290,10 +1323,6 @@ function ChatView({
     () => collapseConsecutiveStickers(messages),
     [messages],
   );
-
-  const [catalogPieceBases, setCatalogPieceBases] = useState([]);
-  const [catalogIntegralBases, setCatalogIntegralBases] = useState([]);
-  const [catalogPricingRules, setCatalogPricingRules] = useState(null);
 
   const filteredContacts = useMemo(() => {
     return contacts.filter((c) => {
@@ -1623,32 +1652,6 @@ function ChatView({
     ],
   );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    void (async () => {
-      try {
-        const r = await apiFetchOrigin('/catalog/catalog-view', {
-          signal: ac.signal,
-        });
-        if (!r.ok) return;
-        const data = await r.json();
-        setCatalogPieceBases(
-          Array.isArray(data.pieceBases) ? data.pieceBases : [],
-        );
-        setCatalogIntegralBases(
-          Array.isArray(data.integralBases) ? data.integralBases : [],
-        );
-        setCatalogPricingRules(data.rules ?? null);
-      } catch (e) {
-        if (e?.name !== 'AbortError') {
-          setCatalogPieceBases([]);
-          setCatalogIntegralBases([]);
-          setCatalogPricingRules(null);
-        }
-      }
-    })();
-    return () => ac.abort();
-  }, []);
 
   /** Referencia de cotización aprobada (solo lectura en panel). */
   const approvedDraftReference = useMemo(() => {
@@ -3733,7 +3736,11 @@ function ChatView({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {sortedBandejaContacts.length === 0 ? (
+          {contactsPending && sortedBandejaContacts.length === 0 ? (
+            <p className="px-4 py-8 text-center text-xs text-gray-400">
+              Cargando conversaciones…
+            </p>
+          ) : sortedBandejaContacts.length === 0 ? (
             <p className="px-4 py-8 text-center text-xs text-gray-400">
               No hay conversaciones con este filtro.
             </p>

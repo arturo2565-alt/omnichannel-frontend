@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ChartNoAxesCombined, ChevronRight } from 'lucide-react';
 import { fetchHotLeads, fetchKpis } from './apiClient.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { useAuth } from './AuthContext.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  dashboardVisitState,
+  hasSessionScope,
+  isAuthRejection,
+  sessionScope,
+  workshopKey,
+} from './sessionQuery.js';
 
 const MXN = new Intl.NumberFormat('es-MX', {
   style: 'currency',
@@ -49,16 +59,6 @@ function formatStepPct(rate) {
   return `${rate.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`;
 }
 
-const EMPTY_KPIS = {
-  leadsAtendidos: 0,
-  cotizaciones: 0,
-  citas: 0,
-  llegaron: 0,
-  trabajosVendidos: 0,
-  ventasGeneradas: 0,
-  roiPegazuz: 0,
-};
-
 const FUNNEL_STEPS = [
   { key: 'leadsAtendidos', label: 'Leads atendidos', hint: 'Conversaciones del taller' },
   { key: 'cotizaciones', label: 'Cotizaciones', hint: 'Precio enviado' },
@@ -68,41 +68,48 @@ const FUNNEL_STEPS = [
 ];
 
 export default function DashboardView() {
-  const [kpis, setKpis] = useState(EMPTY_KPIS);
-  const [hotLeads, setHotLeads] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [kpiData, leads] = await Promise.all([
-        fetchKpis(),
-        fetchHotLeads(10),
-      ]);
-      setKpis({
-        leadsAtendidos: Number(kpiData?.leadsAtendidos) || 0,
-        cotizaciones: Number(kpiData?.cotizaciones) || 0,
-        citas: Number(kpiData?.citas) || 0,
-        llegaron: Number(kpiData?.llegaron) || 0,
-        trabajosVendidos: Number(kpiData?.trabajosVendidos) || 0,
-        ventasGeneradas: Number(kpiData?.ventasGeneradas) || 0,
-        roiPegazuz: Number(kpiData?.roiPegazuz) || 0,
-      });
-      setHotLeads(Array.isArray(leads) ? leads : []);
-    } catch (e) {
-      setError(e?.message ?? 'No se pudieron cargar las métricas');
-      setKpis(EMPTY_KPIS);
-      setHotLeads([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const enabled = hasSessionScope(scope) && !rejected;
+  const kpisQuery = useQuery({
+    queryKey: workshopKey(scope, 'dashboard', 'kpis'),
+    enabled,
+    queryFn: fetchKpis,
+  });
+  const leadsQuery = useQuery({
+    queryKey: workshopKey(scope, 'dashboard', 'hot-leads'),
+    enabled,
+    queryFn: () => fetchHotLeads(10),
+  });
+  const authRejected = rejected
+    || isAuthRejection(kpisQuery.error)
+    || isAuthRejection(leadsQuery.error);
+  const kpiData = authRejected ? null : kpisQuery.data;
+  const hotLeads = authRejected || !Array.isArray(leadsQuery.data) ? [] : leadsQuery.data;
+  const visit = dashboardVisitState({
+    hasData: Boolean(kpiData),
+    isFetching: kpisQuery.isFetching || leadsQuery.isFetching,
+    isError: kpisQuery.isError || leadsQuery.isError,
+    authRejected,
+  });
+  const kpis = useMemo(() => ({
+    leadsAtendidos: Number(kpiData?.leadsAtendidos) || 0,
+    cotizaciones: Number(kpiData?.cotizaciones) || 0,
+    citas: Number(kpiData?.citas) || 0,
+    llegaron: Number(kpiData?.llegaron) || 0,
+    trabajosVendidos: Number(kpiData?.trabajosVendidos) || 0,
+    ventasGeneradas: Number(kpiData?.ventasGeneradas) || 0,
+    roiPegazuz: Number(kpiData?.roiPegazuz) || 0,
+  }), [kpiData]);
+  const loading = !kpiData;
+  const error = visit === 'error' || visit === 'rejected'
+    ? (kpisQuery.error?.message || leadsQuery.error?.message || 'No se pudieron cargar las métricas')
+    : null;
+  const refetchMetrics = () => {
+    void kpisQuery.refetch();
+    void leadsQuery.refetch();
+  };
 
   const funnel = useMemo(
     () =>
@@ -134,6 +141,16 @@ export default function DashboardView() {
               <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                 Embudo de conversión, ventas y prospectos de mayor valor.
               </p>
+              {visit === 'unconfirmed' ? (
+                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
+                  Actualizando. Estas cifras aún no se confirman en esta visita.
+                </p>
+              ) : null}
+              {visit === 'stale-failed' ? (
+                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
+                  No se pudieron actualizar. Se muestran las últimas cifras conocidas, sin confirmar.
+                </p>
+              ) : null}
             </div>
             </div>
             <div className="flex items-center gap-2 lg:hidden">
@@ -154,7 +171,7 @@ export default function DashboardView() {
               {error}
               <button
                 type="button"
-                onClick={() => void load()}
+                onClick={refetchMetrics}
                 className="ml-3 font-medium underline underline-offset-2"
               >
                 Reintentar
@@ -239,7 +256,7 @@ export default function DashboardView() {
               </p>
             </div>
 
-            {loading ? (
+            {!Array.isArray(leadsQuery.data) && !authRejected ? (
               <p className="px-5 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
                 Cargando prospectos…
               </p>

@@ -71,7 +71,9 @@ export async function apiFetch(url, options = {}) {
 
   if (res.status === 401 && !skipAuth) {
     redirectToLogin();
-    throw new Error('Sesión expirada. Inicia sesión de nuevo.');
+    const expired = new Error('Sesión expirada. Inicia sesión de nuevo.');
+    expired.status = 401;
+    throw expired;
   }
 
   return res;
@@ -128,7 +130,9 @@ export async function transitionConversationStatus(
 export async function fetchKpis() {
   const res = await apiFetchOrigin('/api/dashboard/kpis');
   if (!res.ok) {
-    throw new Error(await parseApiError(res));
+    const error = new Error(await parseApiError(res));
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }
@@ -137,7 +141,9 @@ export async function fetchHotLeads(limit = 10) {
   const n = Math.min(100, Math.max(1, Math.floor(Number(limit) || 10)));
   const res = await apiFetchOrigin(`/api/dashboard/hot-leads?limit=${n}`);
   if (!res.ok) {
-    throw new Error(await parseApiError(res));
+    const error = new Error(await parseApiError(res));
+    error.status = res.status;
+    throw error;
   }
   const data = await res.json();
   return Array.isArray(data) ? data : [];

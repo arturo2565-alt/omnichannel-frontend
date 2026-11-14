@@ -6,6 +6,8 @@ import {
   getStoredUser,
   isAuthenticated,
 } from './authStorage.js';
+import { SessionQueryProvider } from './SessionQueryProvider.jsx';
+import { sessionScope, sessionScopeKey } from './sessionQuery.js';
 
 const AuthContext = createContext(null);
 
@@ -38,7 +40,11 @@ export function AuthProvider({ children }) {
   );
 
   return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={value}>
+      <SessionQueryProvider key={sessionScopeKey(sessionScope(user, taller))}>
+        {children}
+      </SessionQueryProvider>
+    </AuthContext.Provider>
   );
 }
 

@@ -1,11 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import ChatView from './ChatView';
 import { API_BASE_URL, API_ORIGIN_URL } from './apiConfig.js';
-import { apiFetchWebhook, createLabConversation, expireAuthSession, sendAgentMessageRequest, sendLabTurn } from './apiClient.js';
+import { apiFetchWebhook, createLabConversation, expireAuthSession, parseApiError, sendAgentMessageRequest, sendLabTurn } from './apiClient.js';
 import { buildLabTurnPayload, canStartLabTrial, isLabChannel } from './labInbox.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
 import { useAuth } from './AuthContext.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  applyConversationPatch,
+  applyIncomingMessage,
+  chronologicalMessages,
+  hasSessionScope,
+  nextSocketConnect,
+  readWorkshopResponse,
+  sessionScope,
+  syncAfterOutboundMessage,
+  syncAfterSocketReconnect,
+  workshopKey,
+} from './sessionQuery.js';
 
 /** Convierte el texto único de la IA en varias opciones para QuickReplies */
 function suggestionLinesFromAi(text) {
@@ -22,11 +36,14 @@ function suggestionLinesFromAi(text) {
 function App() {
   const [searchParams] = useSearchParams();
   const { taller, user } = useAuth();
-  const authTallerId = taller?.id ?? user?.tallerId ?? '';
+  const { rejected } = useSessionCacheStatus();
+  const queryClient = useQueryClient();
+  const scope = sessionScope(user, taller);
+  const userId = scope.userId;
+  const tallerId = scope.tallerId;
+  const authTallerId = tallerId;
+  const queriesEnabled = hasSessionScope(scope) && !rejected;
 
-  // --- ESTADOS ---
-  const [contacts, setContacts] = useState([]);
-  const [messages, setMessages] = useState([]);
   const [selectedConvId, setSelectedConvId] = useState(null);
   const [reply, setReply] = useState("");
   const [isConnected, setIsConnected] = useState(false);
@@ -49,39 +66,33 @@ function App() {
     tallerId: authTallerId,
   });
 
-  // --- LÓGICA DE CARGA ---
-  const fetchConversations = async () => {
-    try {
-      const response = await apiFetchWebhook('/conversations');
-      if (!response.ok) {
-        console.error("Error conversaciones HTTP:", response.status);
-        setContacts([]);
-        return;
-      }
-      const data = await response.json();
-      setContacts(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Error conversaciones:", error);
-      setContacts([]);
-    }
-  };
+  const conversationKey = workshopKey(scope, 'conversations');
+  const messageKey = workshopKey(scope, 'messages', selectedConvId ?? '');
 
-  const fetchMessagesForConv = async (convId) => {
-    if (!convId) return;
-    try {
-      const response = await apiFetchWebhook(`/messages/${convId}`);
-      if (!response.ok) {
-        console.error("Error mensajes HTTP:", response.status);
-        setMessages([]);
-        return;
-      }
-      const data = await response.json();
-      const list = Array.isArray(data) ? data : [];
-      setMessages([...list].reverse());
-    } catch (error) {
-      console.error("Error mensajes:", error);
-      setMessages([]);
-    }
+  const conversationsQuery = useQuery({
+    queryKey: conversationKey,
+    enabled: queriesEnabled,
+    queryFn: async () => {
+      const response = await apiFetchWebhook('/conversations');
+      const data = await readWorkshopResponse(response);
+      return Array.isArray(data) ? data : [];
+    },
+  });
+  const messagesQuery = useQuery({
+    queryKey: messageKey,
+    enabled: queriesEnabled && Boolean(selectedConvId),
+    queryFn: async () => {
+      const response = await apiFetchWebhook(`/messages/${selectedConvId}`);
+      const data = await readWorkshopResponse(response);
+      return chronologicalMessages(data);
+    },
+  });
+
+  const contacts = rejected ? [] : (conversationsQuery.data ?? []);
+  const messages = rejected ? [] : (messagesQuery.data ?? []);
+  const refreshConversations = () => {
+    if (!queriesEnabled) return Promise.resolve();
+    return queryClient.invalidateQueries({ queryKey: conversationKey });
   };
 
   // --- EFECTOS ---
@@ -91,7 +102,13 @@ function App() {
     });
     if (!socket) return undefined;
     socketRef.current = socket;
-    const onConnect = () => setIsConnected(true);
+    const activeScope = { userId, tallerId };
+    let connectState = { connectedBefore: false };
+    const onConnect = () => {
+      setIsConnected(true);
+      connectState = nextSocketConnect(connectState);
+      if (connectState.shouldSync && queriesEnabled) syncAfterSocketReconnect(queryClient, activeScope);
+    };
     const onDisconnect = () => setIsConnected(false);
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -102,12 +119,20 @@ function App() {
       if (socketRef.current === socket) socketRef.current = null;
       setIsConnected(false);
     };
-  }, []);
+  }, [queriesEnabled, queryClient, userId, tallerId]);
 
   useEffect(() => {
-    fetchConversations();
     const socket = socketRef.current;
-    if (!socket) return undefined;
+    if (!socket || !queriesEnabled) return undefined;
+    const activeScope = { userId, tallerId };
+    const listKey = workshopKey(activeScope, 'conversations');
+    const patchMessages = (updater) => {
+      if (!selectedConvId) return;
+      queryClient.setQueryData(workshopKey(activeScope, 'messages', selectedConvId), (current) => {
+        const list = Array.isArray(current) ? current : [];
+        return updater(list);
+      });
+    };
     const onNewMessage = (msg) => {
       const incomingId = msg.conversationId || msg.conversation?.id;
       if (
@@ -117,35 +142,19 @@ function App() {
       ) {
         setLabProcessingId('');
       }
-      if (msg.conversationId === selectedConvId || msg.conversation?.id === selectedConvId) {
-        setMessages((prev) => {
-          if (msg?.id && prev.some((m) => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-      }
-      fetchConversations();
+      applyIncomingMessage(queryClient, activeScope, msg);
     };
     const onAiSuggestion = (data) => {
       if (data.conversationId === selectedConvId) { setAiSuggestion(data.suggestion); }
     };
     const mergeQuoteIntoMessages = (payload) => {
-      setContacts((prev) =>
-        prev.map((c) =>
-          c.id === payload.conversationId
-            ? {
-                ...c,
-                ...(payload.isAutoPilotActive !== undefined
-                  ? { isAutoPilotActive: payload.isAutoPilotActive }
-                  : {}),
-              }
-            : c,
-        ),
-      );
-      if (payload.conversationId !== selectedConvId) {
-        fetchConversations();
-        return;
-      }
-      setMessages((prev) =>
+      applyConversationPatch(queryClient, activeScope, payload.conversationId, {
+        ...(payload.isAutoPilotActive !== undefined
+          ? { isAutoPilotActive: payload.isAutoPilotActive }
+          : {}),
+      });
+      if (payload.conversationId !== selectedConvId) return;
+      patchMessages((prev) =>
         prev.map((m) =>
           m.id === payload.messageId
             ? {
@@ -156,52 +165,30 @@ function App() {
             : m,
         ),
       );
-      fetchConversations();
     };
     const onConversationLeadUpdated = (payload) => {
-      setContacts((prev) => {
-        const idx = prev.findIndex((c) => c.id === payload.conversationId);
-        if (idx === -1) {
-          fetchConversations();
-          return prev;
-        }
-        return prev.map((c) =>
-          c.id === payload.conversationId
-            ? {
-                ...c,
-                status: payload.status ?? c.status,
-                ...(payload.lastMessageAt != null
-                  ? { lastMessageAt: payload.lastMessageAt }
-                  : {}),
-                ...(payload.lastMessage != null
-                  ? { lastMessage: payload.lastMessage }
-                  : {}),
-                ...(payload.isAutoPilotActive !== undefined
-                  ? { isAutoPilotActive: payload.isAutoPilotActive }
-                  : {}),
-              }
-            : c,
-        );
+      const known = (queryClient.getQueryData(listKey) ?? []).some((item) => item.id === payload.conversationId);
+      if (!known) {
+        void queryClient.invalidateQueries({ queryKey: listKey });
+        return;
+      }
+      applyConversationPatch(queryClient, activeScope, payload.conversationId, {
+        ...(payload.status != null ? { status: payload.status } : {}),
+        ...(payload.lastMessageAt != null ? { lastMessageAt: payload.lastMessageAt } : {}),
+        ...(payload.lastMessage != null ? { lastMessage: payload.lastMessage } : {}),
+        ...(payload.isAutoPilotActive !== undefined
+          ? { isAutoPilotActive: payload.isAutoPilotActive }
+          : {}),
       });
     };
     const onPeritajeAwaitingVehicle = (payload) => {
-      setContacts((prev) =>
-        prev.map((c) =>
-          c.id === payload.conversationId
-            ? {
-                ...c,
-                ...(payload.isAutoPilotActive !== undefined
-                  ? { isAutoPilotActive: payload.isAutoPilotActive }
-                  : {}),
-              }
-            : c,
-        ),
-      );
-      if (payload.conversationId !== selectedConvId) {
-        fetchConversations();
-        return;
-      }
-      setMessages((prev) =>
+      applyConversationPatch(queryClient, activeScope, payload.conversationId, {
+        ...(payload.isAutoPilotActive !== undefined
+          ? { isAutoPilotActive: payload.isAutoPilotActive }
+          : {}),
+      });
+      if (payload.conversationId !== selectedConvId) return;
+      patchMessages((prev) =>
         prev.map((m) =>
           m.id === payload.messageId
             ? {
@@ -212,7 +199,6 @@ function App() {
             : m,
         ),
       );
-      fetchConversations();
     };
     socket.on('newMessage', onNewMessage);
     socket.on('aiSuggestion', onAiSuggestion);
@@ -228,7 +214,7 @@ function App() {
       socket.off('draftPeritajeAwaitingVehicle', onPeritajeAwaitingVehicle);
       socket.off('conversationLeadUpdated', onConversationLeadUpdated);
     };
-  }, [selectedConvId]);
+  }, [selectedConvId, queriesEnabled, queryClient, userId, tallerId]);
 
   useEffect(() => {
     const cid = searchParams.get('conversation');
@@ -236,14 +222,6 @@ function App() {
       setSelectedConvId(cid.trim());
     }
   }, [searchParams]);
-
-  useEffect(() => {
-    if (selectedConvId) { 
-      fetchMessagesForConv(selectedConvId); 
-      setAiSuggestion(null); 
-      handleClearFile(); 
-    }
-  }, [selectedConvId]);
 
   // --- ACCIONES DE MULTIMEDIA ---
   const handleFileSelect = (file) => {
@@ -255,11 +233,27 @@ function App() {
     setAiSuggestion(null);
   };
 
+  const filePreviewUrlRef = useRef(null);
+  filePreviewUrlRef.current = filePreviewUrl;
+
   const handleClearFile = () => {
     setSelectedFile(null);
-    if (filePreviewUrl) { URL.revokeObjectURL(filePreviewUrl); }
+    if (filePreviewUrlRef.current) {
+      URL.revokeObjectURL(filePreviewUrlRef.current);
+      filePreviewUrlRef.current = null;
+    }
     setFilePreviewUrl(null);
   };
+
+  useEffect(() => {
+    setAiSuggestion(null);
+    setSelectedFile(null);
+    if (filePreviewUrlRef.current) {
+      URL.revokeObjectURL(filePreviewUrlRef.current);
+      filePreviewUrlRef.current = null;
+      setFilePreviewUrl(null);
+    }
+  }, [selectedConvId]);
 
   // --- 🌟 FUNCIÓN MAESTRA DE ENVÍO ACTUALIZADA 🌟 ---
   /** @param {string|undefined} textOverride Si se pasa, se envía ese texto (p. ej. cotización) en lugar de `reply`. */
@@ -330,6 +324,9 @@ function App() {
       if (!useOverride) setReply("");
       handleClearFile();
       setAiSuggestion(null);
+      syncAfterOutboundMessage(queryClient, scope, selectedConvId, {
+        affectsDashboard: sendOptions?.conversationLeadStatus === 'cotizado',
+      });
 
     } catch (error) {
       console.error("Error crítico al enviar:", error);
@@ -375,9 +372,11 @@ function App() {
         throw new Error(await parseApiError(res));
       }
 
-      setContacts((prev) => prev.filter((c) => c.id !== selectedConvId));
+      queryClient.setQueryData(conversationKey, (prev) => (
+        Array.isArray(prev) ? prev.filter((c) => c.id !== selectedConvId) : prev
+      ));
+      queryClient.removeQueries({ queryKey: messageKey });
       setSelectedConvId(null);
-      setMessages([]);
       setAiSuggestion(null);
       handleClearFile();
       setDeleteToast('Conversación eliminada correctamente');
@@ -405,13 +404,17 @@ function App() {
         lastMessage: '',
         direction: 'inbound',
       };
-      setContacts((prev) => [optimistic, ...prev.filter((item) => item.id !== id)]);
+      queryClient.setQueryData(conversationKey, (prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        return [optimistic, ...list.filter((item) => item.id !== id)];
+      });
       setSelectedConvId(id);
-      setMessages([]);
-      await fetchConversations();
-      setContacts((prev) =>
-        prev.some((item) => item.id === id) ? prev : [optimistic, ...prev],
-      );
+      queryClient.setQueryData(workshopKey(scope, 'messages', id), []);
+      await queryClient.refetchQueries({ queryKey: conversationKey });
+      queryClient.setQueryData(conversationKey, (prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        return list.some((item) => item.id === id) ? list : [optimistic, ...list];
+      });
     } catch (error) {
       window.alert(error?.message || 'No se pudo crear la prueba.');
     } finally {
@@ -432,8 +435,8 @@ function App() {
     setLabProcessingId(selectedConvId);
     try {
       await sendLabTurn(selectedConvId, payload);
-      await fetchMessagesForConv(selectedConvId);
-      await fetchConversations();
+      await queryClient.refetchQueries({ queryKey: messageKey });
+      await queryClient.refetchQueries({ queryKey: conversationKey });
     } catch (error) {
       setLabProcessingId('');
       throw error;
@@ -448,8 +451,9 @@ function App() {
 
   const handleDraftQuotePatched = ({ messageId, draftQuote, damageAnalysis }) => {
     if (!messageId) return;
-    setMessages((prev) =>
-      prev.map((m) =>
+    queryClient.setQueryData(messageKey, (prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.map((m) =>
         m.id === messageId
           ? {
               ...m,
@@ -457,34 +461,23 @@ function App() {
               ...(damageAnalysis !== undefined ? { damageAnalysis } : {}),
             }
           : m,
-      ),
-    );
+      );
+    });
   };
 
   const handleLeadStatusChange = (conversationId, patch) => {
-    setContacts((prev) =>
-      prev.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              ...(patch?.status ? { status: patch.status } : {}),
-              ...(patch?.isAutoPilotActive !== undefined
-                ? { isAutoPilotActive: patch.isAutoPilotActive }
-                : {}),
-            }
-          : c,
-      ),
-    );
+    applyConversationPatch(queryClient, scope, conversationId, {
+      ...(patch?.status ? { status: patch.status } : {}),
+      ...(patch?.isAutoPilotActive !== undefined
+        ? { isAutoPilotActive: patch.isAutoPilotActive }
+        : {}),
+    });
   };
 
   const handleClienteEsperandoAtendido = (conversationId) => {
-    setContacts((prev) =>
-      prev.map((c) =>
-        c.id === conversationId ?
-          { ...c, clienteEsperandoAfuera: false }
-        : c,
-      ),
-    );
+    applyConversationPatch(queryClient, scope, conversationId, {
+      clienteEsperandoAfuera: false,
+    });
   };
 
   return (
@@ -507,7 +500,8 @@ function App() {
       setReply={setReply}
       onSendMessage={() => sendMessage()}
       onSendQuoteText={(text, opts) => sendMessage(text, opts ?? {})}
-      onRefresh={fetchConversations}
+      contactsPending={conversationsQuery.isPending}
+      onRefresh={refreshConversations}
       quickReplySuggestions={quickReplySuggestions}
       isAiLoading={isAiLoading}
       onGetAiSuggestion={handleGetAiSuggestion}
