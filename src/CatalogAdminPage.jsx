@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetchOrigin } from './apiClient.js';
+import { useAuth } from './AuthContext.jsx';
+import { catalogEditorFromView } from './catalogView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  beginQueryEpoch,
+  finishQueryEpoch,
+  hasSessionScope,
+  invalidateCatalogView,
+  isAuthRejection,
+  normalizeCatalogView,
+  publishCatalogRules,
+  publishCatalogView,
+  readWorkshopResponse,
+  rejectCachedSession,
+  sessionScope,
+  workshopKey,
+} from './sessionQuery.js';
 import {
   computeIntegralPrice,
   computePiecePrice,
@@ -57,24 +75,43 @@ function parsePositiveInt(raw) {
   return Number.isFinite(n) && n >= 0 ? n : NaN;
 }
 
-async function parseJsonError(res) {
-  const raw = await res.text().catch(() => '');
-  let msg = raw?.trim() || `Error ${res.status}`;
-  try {
-    const j = JSON.parse(raw);
-    if (j?.message != null) {
-      msg = Array.isArray(j.message) ? j.message.join(', ') : String(j.message);
-    }
-  } catch {
-    /* plain */
-  }
-  if (msg.length > 360) msg = `${msg.slice(0, 360)}…`;
-  return msg;
+function applyEditor(editor, setters) {
+  setters.setRules(editor.rules);
+  setters.setRulesBaseline(editor.rulesBaseline);
+  setters.setPieceBases(editor.pieceBases);
+  setters.setPieceBaseline(editor.pieceBaseline);
+  setters.setIntegralBases(editor.integralBases);
+  setters.setIntegralBaseline(editor.integralBaseline);
+  setters.setMontajeBases(editor.montajeBases);
+  setters.setMontajeBaseline(editor.montajeBaseline);
+  setters.setMontajeInstallBases(editor.montajeInstallBases);
+  setters.setMontajeInstallBaseline(editor.montajeInstallBaseline);
 }
 
 export default function CatalogAdminPage() {
+  const queryClient = useQueryClient();
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const enabled = hasSessionScope(scope) && !rejected;
+  const catalogQuery = useQuery({
+    queryKey: workshopKey(scope, 'catalog-view'),
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const epoch = beginQueryEpoch(queryClient, 'catalog-view');
+      const response = await apiFetchOrigin('/catalog/catalog-view');
+      const data = await readWorkshopResponse(response);
+      return finishQueryEpoch(
+        queryClient,
+        'catalog-view',
+        epoch,
+        normalizeCatalogView(data),
+        queryClient.getQueryData(workshopKey(scope, 'catalog-view')),
+      );
+    },
+  });
   const [tab, setTab] = useState('rules');
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saveOk, setSaveOk] = useState(false);
 
@@ -108,81 +145,9 @@ export default function CatalogAdminPage() {
   const [simPremium, setSimPremium] = useState(false);
   const [simSeverity, setSimSeverity] = useState('LEVE');
 
-  const load = useCallback(async () => {
-    setError(null);
-    setSaveOk(false);
-    setLoading(true);
-    try {
-      const viewRes = await apiFetchOrigin('/catalog/catalog-view');
-      if (!viewRes.ok) throw new Error(await parseJsonError(viewRes));
-      const view = await viewRes.json();
-
-      const mergedRules = mergeRules(view.rules);
-      setRules(mergedRules);
-      setRulesBaseline(mergedRules);
-
-      const bases = Array.isArray(view.pieceBases) ? view.pieceBases : [];
-      setPieceBases(bases.map((p) => ({ ...p, basePrice: p.basePrice ?? 0 })));
-      const pbMap = new Map();
-      for (const p of bases) {
-        pbMap.set(p.servicio, { basePrice: p.basePrice, diasEntrega: p.diasEntrega });
-      }
-      setPieceBaseline(pbMap);
-
-      const integrals = Array.isArray(view.integralBases) ? view.integralBases : [];
-      setIntegralBases(
-        integrals.map((p) => ({ ...p, basePrice: p.basePrice ?? 0 })),
-      );
-      const ibMap = new Map();
-      for (const p of integrals) {
-        ibMap.set(p.servicio, { basePrice: p.basePrice, diasEntrega: p.diasEntrega });
-      }
-      setIntegralBaseline(ibMap);
-
-      const montajes = Array.isArray(view.montajePinturaBases)
-        ? view.montajePinturaBases
-        : [];
-      setMontajeBases(
-        montajes.map((p) => ({
-          ...p,
-          precio: p.precio ?? 0,
-        })),
-      );
-      const mbMap = new Map();
-      for (const p of montajes) {
-        mbMap.set(p.servicio, { precio: p.precio ?? 0, diasEntrega: p.diasEntrega });
-      }
-      setMontajeBaseline(mbMap);
-
-      const montajeInstall = Array.isArray(view.montajeBases)
-        ? view.montajeBases
-        : [];
-      setMontajeInstallBases(
-        montajeInstall.map((p) => ({
-          ...p,
-          precio: p.precio ?? 0,
-        })),
-      );
-      const miMap = new Map();
-      for (const p of montajeInstall) {
-        miMap.set(p.servicio, { precio: p.precio ?? 0, diasEntrega: p.diasEntrega });
-      }
-      setMontajeInstallBaseline(miMap);
-
-      if (bases.length && !simPiece) {
-        setSimPiece(bases[0].servicio);
-        setSimBase(bases[0].basePrice ?? 2900);
-      }
-    } catch (e) {
-      setError(e?.message ?? 'No se pudo cargar el catálogo');
-    } finally {
-      setLoading(false);
-    }
-  }, [simPiece]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const serverView = rejected ? null : catalogQuery.data;
+  const serverStamp = catalogQuery.dataUpdatedAt;
+  const [seenStamp, setSeenStamp] = useState(0);
 
   const rulesDirty = useMemo(
     () => JSON.stringify(rules) !== JSON.stringify(rulesBaseline),
@@ -225,6 +190,49 @@ export default function CatalogAdminPage() {
     return false;
   }, [montajeInstallBases, montajeInstallBaseline]);
 
+  const catalogDirty = rulesDirty || piecesDirty || integralDirty || montajeDirty || montajeInstallDirty;
+  if (serverView && serverStamp !== seenStamp && !catalogDirty) {
+    setSeenStamp(serverStamp);
+    applyEditor(catalogEditorFromView(serverView), {
+      setRules,
+      setRulesBaseline,
+      setPieceBases,
+      setPieceBaseline,
+      setIntegralBases,
+      setIntegralBaseline,
+      setMontajeBases,
+      setMontajeBaseline,
+      setMontajeInstallBases,
+      setMontajeInstallBaseline,
+    });
+    if (!simPiece && serverView.pieceBases?.[0]) {
+      setSimPiece(serverView.pieceBases[0].servicio);
+      setSimBase(serverView.pieceBases[0].basePrice ?? 2900);
+    }
+  }
+  const loading = !rejected && !serverView && (catalogQuery.isPending || !enabled);
+  const loadError = !rejected && !serverView && catalogQuery.isError
+    ? (catalogQuery.error?.message || 'No se pudo cargar el catálogo')
+    : null;
+
+  const rememberSavedView = (view) => {
+    const editor = catalogEditorFromView(view);
+    applyEditor(editor, {
+      setRules,
+      setRulesBaseline,
+      setPieceBases,
+      setPieceBaseline,
+      setIntegralBases,
+      setIntegralBaseline,
+      setMontajeBases,
+      setMontajeBaseline,
+      setMontajeInstallBases,
+      setMontajeInstallBaseline,
+    });
+    setSeenStamp(queryClient.getQueryState(workshopKey(scope, 'catalog-view'))?.dataUpdatedAt ?? serverStamp);
+    setSaveOk(true);
+  };
+
   const handleSaveRules = async () => {
     setSavingRules(true);
     setError(null);
@@ -234,13 +242,15 @@ export default function CatalogAdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rules }),
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      const data = await r.json();
+      const data = await readWorkshopResponse(r);
+      publishCatalogRules(queryClient, scope, data.rules);
       const merged = mergeRules(data.rules);
       setRules(merged);
       setRulesBaseline(merged);
+      setSeenStamp(queryClient.getQueryState(workshopKey(scope, 'catalog-view'))?.dataUpdatedAt ?? serverStamp);
       setSaveOk(true);
     } catch (e) {
+      if (isAuthRejection(e)) rejectCachedSession(queryClient);
       setError(e?.message ?? 'Error al guardar reglas');
     } finally {
       setSavingRules(false);
@@ -262,10 +272,10 @@ export default function CatalogAdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      await load();
-      setSaveOk(true);
+      const data = await readWorkshopResponse(r);
+      rememberSavedView(publishCatalogView(queryClient, scope, data));
     } catch (e) {
+      if (isAuthRejection(e)) rejectCachedSession(queryClient);
       setError(e?.message ?? 'Error al guardar piezas');
     } finally {
       setSavingPieces(false);
@@ -287,10 +297,10 @@ export default function CatalogAdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      await load();
-      setSaveOk(true);
+      const data = await readWorkshopResponse(r);
+      rememberSavedView(publishCatalogView(queryClient, scope, data));
     } catch (e) {
+      if (isAuthRejection(e)) rejectCachedSession(queryClient);
       setError(e?.message ?? 'Error al guardar montaje y pintura');
     } finally {
       setSavingMontaje(false);
@@ -312,10 +322,10 @@ export default function CatalogAdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      await load();
-      setSaveOk(true);
+      const data = await readWorkshopResponse(r);
+      rememberSavedView(publishCatalogView(queryClient, scope, data));
     } catch (e) {
+      if (isAuthRejection(e)) rejectCachedSession(queryClient);
       setError(e?.message ?? 'Error al guardar montaje');
     } finally {
       setSavingMontajeInstall(false);
@@ -337,10 +347,10 @@ export default function CatalogAdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updates }),
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      await load();
-      setSaveOk(true);
+      const data = await readWorkshopResponse(r);
+      rememberSavedView(publishCatalogView(queryClient, scope, data));
     } catch (e) {
+      if (isAuthRejection(e)) rejectCachedSession(queryClient);
       setError(e?.message ?? 'Error al guardar servicios integrales');
     } finally {
       setSavingIntegral(false);
@@ -355,13 +365,13 @@ export default function CatalogAdminPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      if (!r.ok) throw new Error(await parseJsonError(r));
-      const data = await r.json();
+      const data = await readWorkshopResponse(r);
       setSeedMessage(
         `Servicios integrales: ${data?.upserted ?? 0} fila(s). Total en BD: ${data?.totalInDb ?? ''}.`,
       );
-      await load();
+      invalidateCatalogView(queryClient, scope);
     } catch (err) {
+      if (isAuthRejection(err)) rejectCachedSession(queryClient);
       setError(err?.message ?? 'No se pudo cargar el seed');
     } finally {
       setIntegralSeedSubmitting(false);
@@ -425,13 +435,23 @@ export default function CatalogAdminPage() {
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 overflow-auto px-4 py-6">
-          {error ? (
+          {rejected ? (
+            <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              Tu usuario no tiene autorización para consultar el catálogo.
+            </div>
+          ) : null}
+          {(error || loadError) && !rejected ? (
             <div
               role="alert"
               className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             >
-              {error}
+              {error || loadError}
             </div>
+          ) : null}
+          {serverView && catalogQuery.isError ? (
+            <p className="mb-4 text-sm text-red-700">
+              No se pudo actualizar. Se muestran los últimos precios de esta sesión.
+            </p>
           ) : null}
           {saveOk ? (
             <p className="mb-4 text-sm font-medium text-emerald-700" role="status">

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
   MessageCircle,
@@ -7,10 +8,26 @@ import {
   Search,
 } from 'lucide-react';
 import { apiFetchWebhook, expireAuthSession } from './apiClient.js';
+import { useAuth } from './AuthContext.jsx';
 import { getAuthTallerId } from './authStorage.js';
 import { connectWorkshopSocket } from './realtimeSocket.js';
 import { formatCents } from './crmMoney.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  beginQueryEpoch,
+  finishQueryEpoch,
+  hasSessionScope,
+  isAuthRejection,
+  patchCachedAppointment,
+  readWorkshopResponse,
+  rejectCachedSession,
+  scheduleSchedulingRefresh,
+  schedulingEventMatches,
+  sessionScope,
+  upsertCachedAppointment,
+  workshopKey,
+} from './sessionQuery.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
 const WORKSHOP_TZ = 'America/Mexico_City';
@@ -358,9 +375,34 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
 }
 
 export default function CalendarPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const queryClient = useQueryClient();
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const enabled = hasSessionScope(scope) && !rejected;
+  const appointmentKey = workshopKey(scope, 'appointments');
+  const appointmentsQuery = useQuery({
+    queryKey: appointmentKey,
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const epoch = beginQueryEpoch(queryClient, 'appointments');
+      const response = await apiFetchWebhook('/appointments');
+      const data = await readWorkshopResponse(response);
+      const rows = Array.isArray(data) ? data : [];
+      return finishQueryEpoch(
+        queryClient,
+        'appointments',
+        epoch,
+        rows,
+        queryClient.getQueryData(appointmentKey),
+      );
+    },
+  });
+  const items = useMemo(
+    () => (rejected ? [] : (appointmentsQuery.data ?? null)),
+    [rejected, appointmentsQuery.data],
+  );
   const [query, setQuery] = useState('');
   const [range, setRange] = useState('semana');
   const [statusFilter, setStatusFilter] = useState('todas');
@@ -370,40 +412,16 @@ export default function CalendarPage() {
   const tomorrowYmd = addDaysYmd(todayYmdValue, 1);
   const yesterdayYmd = addDaysYmd(todayYmdValue, -1);
 
-  const load = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const aptRes = await apiFetchWebhook('/appointments');
-      if (!aptRes.ok) throw new Error(`HTTP ${aptRes.status}`);
-      const data = await aptRes.json();
-      const appointments = Array.isArray(data) ? data : [];
-      setItems(appointments);
-    } catch (e) {
-      if (!silent) {
-        setError(e?.message ?? 'Error al cargar citas');
-        setItems([]);
-      }
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   useEffect(() => {
     const socket = connectWorkshopSocket({
       onUnauthorized: () => expireAuthSession(),
     });
     if (!socket) return undefined;
+    const liveScope = sessionScope(user, taller);
     const onRefresh = (payload) => {
-      const tallerId = getAuthTallerId();
-      if (!payload?.tallerId || payload.tallerId !== tallerId) return;
-      void load({ silent: true });
+      if (!schedulingEventMatches(payload, getAuthTallerId())) return;
+      upsertCachedAppointment(queryClient, liveScope, payload);
+      scheduleSchedulingRefresh(queryClient, liveScope);
     };
     socket.on('appointmentCreated', onRefresh);
     socket.on('appointmentUpdated', onRefresh);
@@ -412,13 +430,14 @@ export default function CalendarPage() {
       socket.off('appointmentUpdated', onRefresh);
       socket.disconnect();
     };
-  }, [load]);
+  }, [queryClient, user, taller]);
 
   const metrics = useMemo(() => {
     const weekEnd = addDaysYmd(todayYmdValue, 6);
     let todayCount = 0;
     let weekUpcoming = 0;
-    for (const a of items) {
+    const rows = Array.isArray(items) ? items : [];
+    for (const a of rows) {
       const when = new Date(a.scheduledAt);
       if (Number.isNaN(when.getTime())) continue;
       const ymd = ymdInTz(when);
@@ -429,7 +448,7 @@ export default function CalendarPage() {
   }, [items, todayYmdValue]);
 
   const grouped = useMemo(() => {
-    const sorted = [...items].sort((a, b) => {
+    const sorted = [...(Array.isArray(items) ? items : [])].sort((a, b) => {
       const ta = new Date(a.scheduledAt).getTime();
       const tb = new Date(b.scheduledAt).getTime();
       return (Number.isFinite(ta) ? ta : 0) - (Number.isFinite(tb) ? tb : 0);
@@ -475,23 +494,18 @@ export default function CalendarPage() {
         method: 'PATCH',
         body: JSON.stringify({ visitStatus: action }),
       });
-      if (!r.ok) throw new Error('patch');
-      const updated = await r.json();
-      setItems((prev) =>
-        prev.map((a) =>
-          a.id === appointment.id
-            ? {
-                ...a,
-                status: updated?.status ?? a.status,
-                visitStatus: updated?.visitStatus ?? action,
-              }
-            : a,
-        ),
-      );
-      await load({ silent: true });
-    } catch {
+      const updated = await readWorkshopResponse(r);
+      patchCachedAppointment(queryClient, scope, appointment.id, {
+        status: updated?.status ?? appointment.status,
+        visitStatus: updated?.visitStatus ?? action,
+      });
+      scheduleSchedulingRefresh(queryClient, scope);
+    } catch (err) {
+      if (isAuthRejection(err)) {
+        rejectCachedSession(queryClient);
+        return;
+      }
       alert('No se pudo actualizar el estado');
-      await load({ silent: true });
     } finally {
       setBusyId(null);
     }
@@ -522,7 +536,7 @@ export default function CalendarPage() {
                   Citas hoy
                 </p>
                 <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                  {loading ? '…' : metrics.todayCount}
+                  {items == null ? '…' : metrics.todayCount}
                 </p>
               </div>
               <div className="min-w-[7.5rem] rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -530,7 +544,7 @@ export default function CalendarPage() {
                   Próximas en la semana
                 </p>
                 <p className="mt-0.5 text-xl font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                  {loading ? '…' : metrics.weekUpcoming}
+                  {items == null ? '…' : metrics.weekUpcoming}
                 </p>
               </div>
             </div>
@@ -565,16 +579,21 @@ export default function CalendarPage() {
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-          {loading ? (
+          {items != null && appointmentsQuery.isError ? (
+            <p className="mb-4 text-sm text-red-700">No se pudo actualizar. Se muestra la última agenda de esta sesión.</p>
+          ) : null}
+          {rejected ? (
+            <p className="py-16 text-center text-sm text-gray-500">Tu usuario no tiene autorización para ver la agenda.</p>
+          ) : items == null ? (
             <p className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
               Cargando agenda…
             </p>
-          ) : error ? (
+          ) : appointmentsQuery.isError && items.length === 0 ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {error}
+              {appointmentsQuery.error?.message || 'Error al cargar citas'}
               <button
                 type="button"
-                onClick={() => void load()}
+                onClick={() => void appointmentsQuery.refetch()}
                 className="ml-3 font-medium underline underline-offset-2"
               >
                 Reintentar

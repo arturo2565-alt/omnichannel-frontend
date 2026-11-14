@@ -5,9 +5,17 @@ import { useSessionCacheStatus } from './sessionCacheStatus.js';
 import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
-import { hasSessionScope, readWorkshopResponse, sessionScope, workshopKey } from './sessionQuery.js';
+import {
+  beginQueryEpoch,
+  finishQueryEpoch,
+  hasSessionScope,
+  normalizeCatalogView,
+  readWorkshopResponse,
+  sessionScope,
+  workshopKey,
+} from './sessionQuery.js';
 import LabClientComposer from './LabClientComposer.jsx';
 import { isLabChannel } from './labInbox.js';
 import {
@@ -1266,24 +1274,25 @@ function ChatView({
 }) {
 
   const { logout, user, taller } = useAuth();
+  const queryClient = useQueryClient();
   const { rejected } = useSessionCacheStatus();
   const scope = sessionScope(user, taller);
+  const catalogKey = workshopKey(scope, 'catalog-view');
   const catalogQuery = useQuery({
-    queryKey: workshopKey(scope, 'catalog-view'),
+    queryKey: catalogKey,
     enabled: hasSessionScope(scope) && !rejected,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
+      const epoch = beginQueryEpoch(queryClient, 'catalog-view');
       const response = await apiFetchOrigin('/catalog/catalog-view');
-      if (response.status === 401 || response.status === 403) {
-        return readWorkshopResponse(response);
-      }
-      if (!response.ok) return { pieceBases: [], integralBases: [], rules: null };
       const data = await readWorkshopResponse(response);
-      return {
-        pieceBases: Array.isArray(data.pieceBases) ? data.pieceBases : [],
-        integralBases: Array.isArray(data.integralBases) ? data.integralBases : [],
-        rules: data.rules ?? null,
-      };
+      return finishQueryEpoch(
+        queryClient,
+        'catalog-view',
+        epoch,
+        normalizeCatalogView(data),
+        queryClient.getQueryData(catalogKey),
+      );
     },
   });
   const catalogPieceBases = useMemo(
@@ -2143,11 +2152,26 @@ function ChatView({
     const ac = new AbortController();
     void (async () => {
       try {
-        const r = await apiFetchWebhook('/appointments', {
-          signal: ac.signal,
+        const liveScope = sessionScope(user, taller);
+        const appointmentKey = workshopKey(liveScope, 'appointments');
+        const list = await queryClient.fetchQuery({
+          queryKey: appointmentKey,
+          staleTime: 30_000,
+          queryFn: async () => {
+            const epoch = beginQueryEpoch(queryClient, 'appointments');
+            const response = await apiFetchWebhook('/appointments');
+            const data = await readWorkshopResponse(response);
+            const rows = Array.isArray(data) ? data : [];
+            return finishQueryEpoch(
+              queryClient,
+              'appointments',
+              epoch,
+              rows,
+              queryClient.getQueryData(appointmentKey),
+            );
+          },
         });
-        const data = r.ok ? await r.json() : [];
-        const list = Array.isArray(data) ? data : [];
+        if (ac.signal.aborted) return;
         const active = list
           .filter(
             (a) =>
@@ -2173,7 +2197,7 @@ function ChatView({
       }
     })();
     return () => ac.abort();
-  }, [selectedConvId, apiBaseUrl, leadStatusForQuote]);
+  }, [selectedConvId, apiBaseUrl, leadStatusForQuote, queryClient, user, taller]);
 
   const panelBackendClienteNarrative = useMemo(
     () =>

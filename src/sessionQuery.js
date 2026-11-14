@@ -86,6 +86,7 @@ export function rejectCachedSession(client) {
   revokeTrackedObjectUrls(client);
   client.cancelQueries();
   client.clear();
+  client.__pegazuzOnReject?.();
 }
 
 export function sessionWasRejected(client) {
@@ -190,6 +191,121 @@ export function calibrationRefreshIndicator({
   }
   if (isError) return 'stale';
   return 'quiet';
+}
+
+export const SCHEDULING_REFRESH_MS = 80;
+
+export function beginQueryEpoch(client, name) {
+  if (!client.__pegazuzEpoch) client.__pegazuzEpoch = {};
+  client.__pegazuzEpoch[name] = (client.__pegazuzEpoch[name] ?? 0) + 1;
+  return client.__pegazuzEpoch[name];
+}
+
+export function queryEpoch(client, name) {
+  return client?.__pegazuzEpoch?.[name] ?? 0;
+}
+
+/** Una lectura vieja no sustituye un guardado o una lista más nueva. */
+export function finishQueryEpoch(client, name, epoch, value, current) {
+  if (sessionWasRejected(client)) {
+    const error = new Error('Sesión expirada.');
+    error.status = 401;
+    throw error;
+  }
+  if (queryEpoch(client, name) !== epoch) {
+    if (current !== undefined) return current;
+    const replaced = new Error('Consulta reemplazada.');
+    replaced.replaced = true;
+    throw replaced;
+  }
+  return value;
+}
+
+export function normalizeCatalogView(payload) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  return {
+    rules: source.rules ?? null,
+    pieceBases: Array.isArray(source.pieceBases) ? source.pieceBases : [],
+    integralBases: Array.isArray(source.integralBases) ? source.integralBases : [],
+    montajePinturaBases: Array.isArray(source.montajePinturaBases) ? source.montajePinturaBases : [],
+    montajeBases: Array.isArray(source.montajeBases) ? source.montajeBases : [],
+  };
+}
+
+export function publishCatalogView(client, scope, view) {
+  beginQueryEpoch(client, 'catalog-view');
+  const normalized = normalizeCatalogView(view);
+  client.setQueryData(workshopKey(scope, 'catalog-view'), normalized);
+  void client.invalidateQueries({ queryKey: workshopKey(scope, 'crm-catalog-offer') });
+  return normalized;
+}
+
+export function publishCatalogRules(client, scope, rules) {
+  beginQueryEpoch(client, 'catalog-view');
+  client.setQueryData(workshopKey(scope, 'catalog-view'), (current) => ({
+    ...normalizeCatalogView(current),
+    rules: rules ?? null,
+  }));
+  void client.invalidateQueries({ queryKey: workshopKey(scope, 'crm-catalog-offer') });
+}
+
+export function invalidateCatalogView(client, scope) {
+  beginQueryEpoch(client, 'catalog-view');
+  void client.invalidateQueries({ queryKey: workshopKey(scope, 'catalog-view') });
+  void client.invalidateQueries({ queryKey: workshopKey(scope, 'crm-catalog-offer') });
+}
+
+function appointmentKeys(scope, item) {
+  const keys = [workshopKey(scope, 'appointments')];
+  if (item?.source === 'manual') keys.push(workshopKey(scope, 'crm-appointments'));
+  return keys;
+}
+
+export function upsertCachedAppointment(client, scope, item) {
+  if (!item?.id || !hasSessionScope(scope)) return;
+  beginQueryEpoch(client, 'appointments');
+  beginQueryEpoch(client, 'crm-appointments');
+  for (const key of appointmentKeys(scope, item)) {
+    client.setQueryData(key, (current) => {
+      if (!Array.isArray(current)) return current;
+      const index = current.findIndex((row) => row.id === item.id);
+      if (index === -1) return [...current, item];
+      const next = current.slice();
+      next[index] = { ...current[index], ...item };
+      return next;
+    });
+  }
+}
+
+export function patchCachedAppointment(client, scope, id, patch) {
+  if (!id || !hasSessionScope(scope)) return;
+  beginQueryEpoch(client, 'appointments');
+  beginQueryEpoch(client, 'crm-appointments');
+  for (const key of [workshopKey(scope, 'appointments'), workshopKey(scope, 'crm-appointments')]) {
+    client.setQueryData(key, (current) => {
+      if (!Array.isArray(current)) return current;
+      return current.map((row) => (row.id === id ? { ...row, ...patch } : row));
+    });
+  }
+}
+
+/** Mutación y socket cercanos disparan una sola revalidación de agenda y CRM. */
+export function scheduleSchedulingRefresh(client, scope) {
+  if (!client || !hasSessionScope(scope) || sessionWasRejected(client)) return;
+  if (client.__schedulingRefresh) clearTimeout(client.__schedulingRefresh);
+  client.__schedulingRefresh = setTimeout(() => {
+    client.__schedulingRefresh = null;
+    if (sessionWasRejected(client)) return;
+    void client.invalidateQueries({ queryKey: workshopKey(scope, 'appointments') });
+    void client.invalidateQueries({ queryKey: workshopKey(scope, 'crm-appointments') });
+    void client.invalidateQueries({ queryKey: workshopKey(scope, 'crm-suggestions') });
+  }, SCHEDULING_REFRESH_MS);
+}
+
+export function schedulingEventMatches(payload, tallerId) {
+  const eventTaller = String(payload?.tallerId ?? '').trim();
+  const current = String(tallerId ?? '').trim();
+  return Boolean(eventTaller && current && eventTaller === current);
 }
 
 export async function readWorkshopResponse(response) {

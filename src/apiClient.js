@@ -238,22 +238,28 @@ export async function registerRequest(payload) {
   return res.json();
 }
 
+async function readCrmJson(res) {
+  if (!res.ok) {
+    const error = new Error(await parseApiError(res));
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
 export async function fetchCrmCatalogOffer() {
   const res = await apiFetchOrigin('/api/crm/appointments/catalog-offer');
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }
 
 export async function fetchCrmSuggestions() {
   const res = await apiFetchOrigin('/api/crm/appointments/suggestions');
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }
 
 export async function fetchCrmAppointments() {
   const res = await apiFetchOrigin('/api/crm/appointments');
-  if (!res.ok) throw new Error(await parseApiError(res));
-  const data = await res.json();
+  const data = await readCrmJson(res);
   return Array.isArray(data) ? data : [];
 }
 
@@ -262,8 +268,7 @@ export async function createCrmAppointment(payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }
 
 export async function patchCrmVisit(appointmentId, visitStatus) {
@@ -271,8 +276,7 @@ export async function patchCrmVisit(appointmentId, visitStatus) {
     method: 'PATCH',
     body: JSON.stringify({ visitStatus }),
   });
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }
 
 export async function saveCrmCommercial(appointmentId, payload) {
@@ -283,8 +287,7 @@ export async function saveCrmCommercial(appointmentId, payload) {
       body: JSON.stringify(payload),
     },
   );
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }
 
 export async function createLabConversation() {
@@ -322,6 +325,5 @@ export async function saveCrmContract(appointmentId, contractedAmount) {
       body: JSON.stringify({ contractedAmount }),
     },
   );
-  if (!res.ok) throw new Error(await parseApiError(res));
-  return res.json();
+  return readCrmJson(res);
 }

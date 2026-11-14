@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Plus, Users } from 'lucide-react';
 import {
   createCrmAppointment,
@@ -11,6 +12,23 @@ import {
   saveCrmCommercial,
   saveCrmContract,
 } from './apiClient.js';
+import { useAuth } from './AuthContext.jsx';
+import { getAuthTallerId } from './authStorage.js';
+import { connectWorkshopSocket } from './realtimeSocket.js';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  beginQueryEpoch,
+  finishQueryEpoch,
+  hasSessionScope,
+  isAuthRejection,
+  patchCachedAppointment,
+  rejectCachedSession,
+  scheduleSchedulingRefresh,
+  schedulingEventMatches,
+  sessionScope,
+  upsertCachedAppointment,
+  workshopKey,
+} from './sessionQuery.js';
 import { categoryFromStored, linePayload } from './crmCatalog.js';
 import { CrmServiceEditor } from './CrmServiceLine.jsx';
 import {
@@ -20,8 +38,6 @@ import {
   lineSubtotalCents,
   parseDecimalToScaled,
 } from './crmMoney.js';
-import { getAuthTallerId } from './authStorage.js';
-import { connectWorkshopSocket } from './realtimeSocket.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
@@ -187,39 +203,29 @@ function ManualAppointmentForm({ requestId, appointment, busy, error, onSubmit, 
   const [time, setTime] = useState('10:00');
   const [notes, setNotes] = useState(appointment?.notes ?? '');
   const [localError, setLocalError] = useState('');
-  const [suggestions, setSuggestions] = useState({ campaigns: [], ads: [], services: [] });
-  const [offer, setOffer] = useState(null);
-  const [offerState, setOfferState] = useState('loading');
-
-  useEffect(() => {
-    let active = true;
-    fetchCrmSuggestions()
-      .then((data) => {
-        if (!active) return;
-        setSuggestions({
-          campaigns: data?.campaigns ?? [],
-          ads: data?.ads ?? [],
-          services: data?.services ?? [],
-        });
-      })
-      .catch(() => {
-        if (active) setSuggestions({ campaigns: [], ads: [], services: [] });
-      });
-    fetchCrmCatalogOffer()
-      .then((data) => {
-        if (!active) return;
-        setOffer(data);
-        setOfferState('ready');
-      })
-      .catch(() => {
-        if (!active) return;
-        setOffer(null);
-        setOfferState('error');
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const formEnabled = hasSessionScope(scope) && !rejected;
+  const suggestionsQuery = useQuery({
+    queryKey: workshopKey(scope, 'crm-suggestions'),
+    enabled: formEnabled,
+    staleTime: 0,
+    queryFn: () => fetchCrmSuggestions(),
+  });
+  const offerQuery = useQuery({
+    queryKey: workshopKey(scope, 'crm-catalog-offer'),
+    enabled: formEnabled,
+    staleTime: 0,
+    queryFn: () => fetchCrmCatalogOffer(),
+  });
+  const suggestions = suggestionsQuery.data ?? { campaigns: [], ads: [], services: [] };
+  const offer = offerQuery.data ?? null;
+  const offerState = !formEnabled || offerQuery.isError
+    ? 'error'
+    : offerQuery.data
+      ? 'ready'
+      : 'loading';
   const prepared = lines.map((line) => {
     const empty = !line.name.trim() && !String(line.unitPrice).trim();
     const quantityHundredths = parseDecimalToScaled(line.quantity || '1');
@@ -749,42 +755,54 @@ function CrmAppointmentCard({ row, onVisit, onContract, onEdit }) {
   );
 }
 
+function noteCrmAuth(client, error) {
+  if (isAuthRejection(error)) rejectCachedSession(client);
+}
+
 export default function CrmPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const enabled = hasSessionScope(scope) && !rejected;
+  const crmKey = workshopKey(scope, 'crm-appointments');
+  const crmQuery = useQuery({
+    queryKey: crmKey,
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const epoch = beginQueryEpoch(queryClient, 'crm-appointments');
+      const rows = await fetchCrmAppointments();
+      return finishQueryEpoch(
+        queryClient,
+        'crm-appointments',
+        epoch,
+        rows,
+        queryClient.getQueryData(crmKey),
+      );
+    },
+  });
+  const items = useMemo(
+    () => (rejected ? [] : (crmQuery.data ?? null)),
+    [rejected, crmQuery.data],
+  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const requestIdRef = useRef('');
 
-  const load = useCallback(async () => {
-    setError('');
-    try {
-      const rows = await fetchCrmAppointments();
-      setItems(rows);
-    } catch (err) {
-      setError(err?.message || 'No se pudo cargar el CRM');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   useEffect(() => {
     const socket = connectWorkshopSocket({
       onUnauthorized: () => expireAuthSession(),
     });
     if (!socket) return undefined;
+    const liveScope = sessionScope(user, taller);
     const onRefresh = (payload) => {
       if (payload?.source && payload.source !== 'manual') return;
-      const tallerId = getAuthTallerId();
-      if (!payload?.tallerId || payload.tallerId !== tallerId) return;
-      void load();
+      if (!schedulingEventMatches(payload, getAuthTallerId())) return;
+      upsertCachedAppointment(queryClient, liveScope, payload);
+      scheduleSchedulingRefresh(queryClient, liveScope);
     };
     socket.on('appointmentCreated', onRefresh);
     socket.on('appointmentUpdated', onRefresh);
@@ -793,7 +811,7 @@ export default function CrmPage() {
       socket.off('appointmentUpdated', onRefresh);
       socket.disconnect();
     };
-  }, [load]);
+  }, [queryClient, user, taller]);
 
   const openForm = () => {
     requestIdRef.current = newRequestId();
@@ -808,13 +826,12 @@ export default function CrmPage() {
     setFormOpen(true);
   };
 
-  const sorted = useMemo(
-    () =>
-      [...items].sort(
-        (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
-      ),
-    [items],
-  );
+  const sorted = useMemo(() => {
+    const rows = Array.isArray(items) ? items : [];
+    return [...rows].sort(
+      (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
+    );
+  }, [items]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 pb-16 dark:bg-gray-950 lg:pb-0">
@@ -850,16 +867,17 @@ export default function CrmPage() {
         </header>
 
         <main className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-          {error ? (
+          {rejected ? (
+            <p className="py-16 text-center text-sm text-gray-500">Tu usuario no tiene autorización para ver el CRM.</p>
+          ) : items == null ? (
+            <p className="py-16 text-center text-sm text-gray-500">Cargando prospectos…</p>
+          ) : crmQuery.isError && sorted.length === 0 ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {error}
-              <button type="button" onClick={() => void load()} className="ml-3 font-medium underline">
+              {crmQuery.error?.message || 'No se pudo cargar el CRM'}
+              <button type="button" onClick={() => void crmQuery.refetch()} className="ml-3 font-medium underline">
                 Reintentar
               </button>
             </div>
-          ) : null}
-          {loading ? (
-            <p className="py-16 text-center text-sm text-gray-500">Cargando prospectos…</p>
           ) : sorted.length === 0 ? (
             <div className="flex flex-col items-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center dark:border-gray-700 dark:bg-gray-800">
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700">
@@ -881,17 +899,37 @@ export default function CrmPage() {
             </div>
           ) : (
             <div className="space-y-3">
+              {items != null && crmQuery.isError ? (
+                <p className="text-sm text-red-700">No se pudo actualizar. Se muestran los últimos prospectos de esta sesión.</p>
+              ) : null}
               {sorted.map((row) => (
                 <CrmAppointmentCard
                   key={row.id}
                   row={row}
                   onVisit={async (id, visitStatus) => {
-                    await patchCrmVisit(id, visitStatus);
-                    await load();
+                    try {
+                      const updated = await patchCrmVisit(id, visitStatus);
+                      patchCachedAppointment(queryClient, scope, id, {
+                        status: updated?.status,
+                        visitStatus: updated?.visitStatus ?? visitStatus,
+                      });
+                      scheduleSchedulingRefresh(queryClient, scope);
+                    } catch (err) {
+                      noteCrmAuth(queryClient, err);
+                      throw err;
+                    }
                   }}
                   onContract={async (id, contractedAmount) => {
-                    await saveCrmContract(id, contractedAmount);
-                    await load();
+                    try {
+                      const saved = await saveCrmContract(id, contractedAmount);
+                      patchCachedAppointment(queryClient, scope, id, {
+                        contractedAmount: saved?.contractedAmount ?? contractedAmount,
+                      });
+                      scheduleSchedulingRefresh(queryClient, scope);
+                    } catch (err) {
+                      noteCrmAuth(queryClient, err);
+                      throw err;
+                    }
                   }}
                   onEdit={openEdit}
                 />
@@ -927,11 +965,16 @@ export default function CrmPage() {
                 setSaving(true);
                 setFormError('');
                 try {
-                  if (editing?.id) await saveCrmCommercial(editing.id, payload);
-                  else await createCrmAppointment(payload);
+                  const saved = editing?.id
+                    ? await saveCrmCommercial(editing.id, payload)
+                    : await createCrmAppointment(payload);
+                  if (saved?.id) {
+                    upsertCachedAppointment(queryClient, scope, { ...saved, source: saved.source || 'manual' });
+                  }
+                  scheduleSchedulingRefresh(queryClient, scope);
                   setFormOpen(false);
-                  await load();
                 } catch (err) {
+                  noteCrmAuth(queryClient, err);
                   setFormError(err?.message || 'No se pudo guardar la cita');
                 } finally {
                   setSaving(false);
