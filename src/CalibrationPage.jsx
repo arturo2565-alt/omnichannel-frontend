@@ -178,7 +178,7 @@ export default function CalibrationPage() {
                   <Filter label="Servicio" value={service} onChange={(value) => { setService(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(SERVICES)]} />
                 )}
               </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
+              <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
                   <ListState
                     state={list}
@@ -424,39 +424,131 @@ function CalibrationPhoto({ caseId, photoId }) {
   );
 }
 
-function CommercialDetail({ record }) {
+export function CommercialDetail({ record }) {
+  const revisions = record.revisions ?? [];
+  const active = revisions.find((item) => item.id === record.headQuoteId) ?? revisions[revisions.length - 1] ?? null;
+  const quoteId = active?.id ?? record.headQuoteId;
   return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold">{record.headQuoteId}</h2>
-          <p className="text-xs text-gray-500">{SERVICES[record.service] ?? 'Servicio no registrado'}</p>
+    <div className="flex flex-col gap-4">
+      <header>
+        <h2 className="text-2xl font-semibold tracking-tight">{quoteId}</h2>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{vehicle(active ?? record) || 'Vehículo incompleto'}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <MetaChip>{SERVICES[record.service] ?? 'Servicio no registrado'}</MetaChip>
+          <Integrity value={record.integrity} />
+          <MetaChip>{active?.revision ? `Revisión ${active.revision}` : 'Sin revisión'}</MetaChip>
         </div>
-        <Integrity value={record.integrity} />
+      </header>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <PriceCard label="Cotizado" value={active?.quotedMxn} validation={active?.quotedValidation} />
+        <PriceCard label="Contratado" value={active?.contractedMxn} validation={active?.contractedValidation} />
+        <PriceCard label="Cobrado" value={active?.collectedMxn} validation={active?.collectedValidation} />
       </div>
-      <h3 className="mt-4 text-sm font-semibold">Historial de revisiones</h3>
-      <ol className="mt-2 space-y-3">
-        {(record.revisions ?? []).map((revision) => (
-          <li key={revision.id} className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
-            <p className="font-semibold">{revision.id} · revisión {revision.revision}</p>
-            <p className="mt-1 text-gray-500">{vehicle(revision) || 'Vehículo incompleto'}</p>
-            <p className="mt-2">Cotizado {price(revision.quotedMxn, revision.quotedValidation)}</p>
-            <p>Contratado {price(revision.contractedMxn, revision.contractedValidation)}</p>
-            <p>Cobrado {price(revision.collectedMxn, revision.collectedValidation)}</p>
-            <p className="mt-1 text-xs text-gray-500">
-              {(revision.workScope ?? []).map((item) => WORK[item] ?? item).join(', ') || 'Sin trabajos adicionales'}
-            </p>
-          </li>
-        ))}
-      </ol>
+      <section>
+        <h3 className="text-sm font-semibold">Alcance</h3>
+        <ScopeList items={active?.workScope} />
+      </section>
+      <section>
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-semibold">Historial de revisiones</h3>
+          <p className="text-xs text-gray-400">{revisionCount(revisions.length)}</p>
+        </div>
+        {revisions.length ? (
+          <ol className="mt-2 space-y-2">
+            {revisions.map((revision) => {
+              const current = revision.id === quoteId;
+              return (
+                <li
+                  key={revision.id}
+                  className={`rounded-xl border p-3 ${current ? 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950/30'}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{revision.id}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Revisión {revision.revision ?? '—'}
+                        {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+                      </p>
+                    </div>
+                    {current ? (
+                      <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                        Activa
+                      </span>
+                    ) : null}
+                  </div>
+                  <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <RevisionPrice label="Cotizado" value={revision.quotedMxn} validation={revision.quotedValidation} />
+                    <RevisionPrice label="Contratado" value={revision.contractedMxn} validation={revision.contractedValidation} />
+                    <RevisionPrice label="Cobrado" value={revision.collectedMxn} validation={revision.collectedValidation} />
+                  </dl>
+                  {(revision.workScope ?? []).length ? <ScopeList items={revision.workScope} compact /> : null}
+                </li>
+              );
+            })}
+          </ol>
+        ) : <p className="mt-2 text-sm text-gray-400">Sin revisiones.</p>}
+      </section>
     </div>
   );
+}
+
+function MetaChip({ children }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+      {children}
+    </span>
+  );
+}
+
+function PriceCard({ label, value, validation }) {
+  const missing = validation === 'not_provided' || value == null;
+  return (
+    <article className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950/50">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
+      <p className={`mt-1 text-sm tabular-nums ${missing ? 'font-medium text-gray-400 dark:text-gray-500' : 'font-semibold'}`}>
+        {price(value, validation)}
+      </p>
+    </article>
+  );
+}
+
+function RevisionPrice({ label, value, validation }) {
+  const missing = validation === 'not_provided' || value == null;
+  return (
+    <div>
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</dt>
+      <dd className={`mt-0.5 text-xs tabular-nums ${missing ? 'text-gray-400 dark:text-gray-500' : 'font-medium'}`}>
+        {price(value, validation)}
+      </dd>
+    </div>
+  );
+}
+
+function ScopeList({ items, compact = false }) {
+  const labels = (items ?? []).map((item) => WORK[item] ?? item);
+  if (labels.length === 0) {
+    return <p className={`${compact ? 'mt-3' : 'mt-2'} text-sm text-gray-400 dark:text-gray-500`}>Sin trabajos adicionales</p>;
+  }
+  return (
+    <ul className={`${compact ? 'mt-3' : 'mt-2'} flex flex-wrap gap-2`}>
+      {labels.map((label) => (
+        <li key={label} className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+          {label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function revisionCount(count) {
+  if (count === 1) return '1 revisión';
+  return `${count} revisiones`;
 }
 
 function Integrity({ value }) {
   const complete = value === 'complete';
   return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${complete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100'}`}>
+    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${complete ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100'}`}>
       {complete ? 'Íntegro' : 'Incompleto'}
     </span>
   );
