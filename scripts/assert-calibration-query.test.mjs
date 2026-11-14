@@ -23,6 +23,11 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /object-contain/);
   assert.match(page, /flex-wrap/);
   assert.match(page, /overflow-x-hidden/);
+  assert.match(page, /aria-expanded=\{expanded\}/);
+  assert.match(page, /aria-controls=\{panelId\}/);
+  assert.match(page, /focus-visible:outline-sky-500/);
+  assert.match(page, /grid-cols-1 gap-3 min-\[390px\]:grid-cols-2 lg:grid-cols-3/);
+  assert.doesNotMatch(page, /lg:grid-cols-6/);
   assert.match(page, /Historial de revisiones/);
   assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);
   assert.match(page, /loadCalibrationPhoto/);

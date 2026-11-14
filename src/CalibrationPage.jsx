@@ -153,14 +153,7 @@ export default function CalibrationPage() {
           {!authRejected && summary?.status !== 'missing' ? (
             <>
               {summary?.status === 'ok' ? (
-                <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                  <Stat label="Expedientes" value={summary.data.visual.caseCount} />
-                  <Stat label="Archivados" value={summary.data.visual.archivedCount} />
-                  <Stat label="Pendientes" value={summary.data.visual.pendingCount} />
-                  <Stat label="Oportunidades" value={summary.data.commercial.opportunityCount} />
-                  <Stat label="Cotizaciones" value={summary.data.commercial.quoteCount} />
-                  <Stat label="Reparaciones" value={summary.data.repairs?.opportunityCount ?? 0} />
-                </section>
+                <CalibrationStats data={summary.data} />
               ) : null}
               <div className="mt-5 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
                 <div className="flex max-w-full flex-wrap gap-1 rounded-2xl bg-gray-100 p-1 dark:bg-gray-800" role="tablist" aria-label="Tipo de registro">
@@ -280,10 +273,23 @@ function Notice({ children }) {
   );
 }
 
+export function CalibrationStats({ data }) {
+  return (
+    <section className="grid min-w-0 grid-cols-1 gap-3 min-[390px]:grid-cols-2 lg:grid-cols-3">
+      <Stat label="Expedientes" value={data?.visual?.caseCount} />
+      <Stat label="Archivados" value={data?.visual?.archivedCount} />
+      <Stat label="Pendientes" value={data?.visual?.pendingCount} />
+      <Stat label="Oportunidades" value={data?.commercial?.opportunityCount} />
+      <Stat label="Cotizaciones" value={data?.commercial?.quoteCount} />
+      <Stat label="Reparaciones" value={data?.repairs?.opportunityCount ?? 0} />
+    </section>
+  );
+}
+
 function Stat({ label, value }) {
   return (
-    <article className="rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
+    <article className="min-w-0 rounded-2xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-900">
+      <p className="truncate text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums">{value ?? 0}</p>
     </article>
   );
@@ -493,6 +499,15 @@ export function RepairDetail({ record }) {
   const revisions = record.revisions ?? [];
   const active = revisions.find((item) => item.id === record.headQuoteId) ?? revisions[revisions.length - 1] ?? null;
   const quoteId = active?.id ?? record.headQuoteId;
+  const [openIds, setOpenIds] = useState(() => new Set());
+  const toggleRevision = (id) => {
+    setOpenIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const groups = groupRepairLines(active?.lines);
   const contracted = sumDeclared(active?.lines, 'contractedMxn', 'contractedValidation');
   const collected = sumDeclared(active?.lines, 'collectedMxn', 'collectedValidation');
@@ -533,30 +548,64 @@ export function RepairDetail({ record }) {
         </div>
         {revisions.length ? (
           <ol className="mt-2 space-y-2">
-            {revisions.map((revision) => {
-              const current = revision.id === quoteId;
-              return (
-                <li key={revision.id} className={`rounded-xl border p-3 ${current ? 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950/30'}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{revision.id}</p>
-                      <p className="mt-0.5 text-xs text-gray-500">
-                        Revisión {revision.revision ?? '—'}
-                        {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
-                      </p>
-                    </div>
-                    {current ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Activa</span> : null}
-                  </div>
-                  <p className="mt-2 text-sm font-medium tabular-nums">Cotizado {revision.quotedTotalMxn == null ? 'No proporcionado' : money.format(revision.quotedTotalMxn)}</p>
-                  <RepairLines title="Refacciones" lines={groupRepairLines(revision.lines).parts} compact />
-                  <RepairLines title="Mano de obra" lines={groupRepairLines(revision.lines).labor} compact />
-                </li>
-              );
-            })}
+            {revisions.map((revision) => (
+              <RepairRevision
+                key={revision.id}
+                revision={revision}
+                active={revision.id === quoteId}
+                expanded={openIds.has(revision.id)}
+                onToggle={() => toggleRevision(revision.id)}
+              />
+            ))}
           </ol>
         ) : <p className="mt-2 text-sm text-gray-400">Sin revisiones.</p>}
       </section>
     </div>
+  );
+}
+
+function RepairRevision({ revision, active, expanded, onToggle }) {
+  const panelId = `rq-revision-${revision.id}`;
+  const groups = groupRepairLines(revision.lines);
+  return (
+    <li className={`rounded-xl border p-3 ${active ? 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950/30'}`}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={onToggle}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          onToggle();
+        }}
+        className="flex w-full min-w-0 items-start justify-between gap-2 rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
+      >
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold">{revision.id}</span>
+          <span className="mt-0.5 block truncate text-xs text-gray-500">
+            Revisión {revision.revision ?? '—'}
+            {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+          </span>
+          <span className="mt-1 block text-sm font-medium tabular-nums">
+            Cotizado {revision.quotedTotalMxn == null ? 'No proporcionado' : money.format(revision.quotedTotalMxn)}
+          </span>
+        </span>
+        {active ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Activa</span> : null}
+      </button>
+      <div id={panelId} hidden={!expanded}>
+        <RepairLines title="Refacciones" lines={groups.parts} compact />
+        <RepairLines title="Mano de obra" lines={groups.labor} compact />
+        <div className="mt-3">
+          <h3 className="text-sm font-semibold">Condiciones</h3>
+          {revision.conditions?.length ? (
+            <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              {revision.conditions.map((condition) => <li key={condition} className="break-words">{condition}</li>)}
+            </ul>
+          ) : <p className="mt-2 text-sm text-gray-400">Sin condiciones declaradas.</p>}
+        </div>
+      </div>
+    </li>
   );
 }
 
