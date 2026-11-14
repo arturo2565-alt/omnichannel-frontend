@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Library } from 'lucide-react';
+import { CircleAlert, Library, RefreshCw } from 'lucide-react';
 import {
   calibrationDetailPath,
   calibrationListPath,
@@ -12,7 +12,9 @@ import { ThemeToggle } from './ThemeToggle.jsx';
 import { useAuth } from './AuthContext.jsx';
 import { useSessionCacheStatus } from './sessionCacheStatus.js';
 import {
-  dashboardVisitState,
+  CALIBRATION_SLOW_DELAY_MS,
+  CALIBRATION_SYNC_DELAY_MS,
+  calibrationRefreshIndicator,
   hasSessionScope,
   isAuthRejection,
   isSessionObjectUrl,
@@ -98,11 +100,19 @@ export default function CalibrationPage() {
   const summary = authRejected ? null : summaryQuery.data;
   const list = authRejected ? null : listQuery.data;
   const detail = authRejected || !selectedId ? null : detailQuery.data;
-  const summaryVisit = dashboardVisitState({
-    hasData: summary?.status === 'ok',
-    isFetching: summaryQuery.isFetching || listQuery.isFetching,
-    isError: summaryQuery.isError || listQuery.isError,
+  const refreshing = (summary?.status === 'ok' && summaryQuery.isFetching)
+    || (list?.status === 'ok' && listQuery.isFetching)
+    || (detail?.status === 'ok' && detailQuery.isFetching);
+  const refreshFailed = (summary?.status === 'ok' && summaryQuery.isError)
+    || (list?.status === 'ok' && listQuery.isError)
+    || (detail?.status === 'ok' && detailQuery.isError);
+  const elapsedMs = useCalibrationElapsed(refreshing);
+  const refreshMode = calibrationRefreshIndicator({
+    hasData: summary?.status === 'ok' || list?.status === 'ok' || detail?.status === 'ok',
+    isFetching: refreshing,
+    isError: refreshFailed,
     authRejected,
+    elapsedMs,
   });
   const clearSelection = () => setSelectedId('');
 
@@ -116,8 +126,11 @@ export default function CalibrationPage() {
               <span className="mt-0.5 hidden h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 sm:inline-flex">
                 <Library className="h-5 w-5" strokeWidth={2} aria-hidden />
               </span>
-              <div>
-                <h1 className="text-xl font-bold">Centro de Calibración</h1>
+              <div className="min-w-0 overflow-hidden">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold">Centro de Calibración</h1>
+                  <CalibrationRefreshMark mode={refreshMode} />
+                </div>
                 <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                   Consulta privada de expedientes visuales y cotizaciones comerciales.
                 </p>
@@ -134,16 +147,6 @@ export default function CalibrationPage() {
             pending={!summary && (summaryQuery.isPending || !enabled)}
             failed={!summary && summaryQuery.isError && !authRejected}
           />
-          {summaryVisit === 'unconfirmed' ? (
-            <p className="mb-3 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
-              Actualizando. Esta consulta aún no se confirma en esta visita.
-            </p>
-          ) : null}
-          {summaryVisit === 'stale-failed' ? (
-            <p className="mb-3 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
-              No se pudo actualizar. Se muestra la última consulta de esta sesión.
-            </p>
-          ) : null}
           {!authRejected && summary?.status !== 'missing' ? (
             <>
               {summary?.status === 'ok' ? (
@@ -180,6 +183,7 @@ export default function CalibrationPage() {
                   <ListState
                     state={list}
                     pending={!list && listQuery.isPending}
+                    failed={!list && listQuery.isError && !authRejected}
                     tab={tab}
                     onSelect={setSelectedId}
                     selectedId={selectedId}
@@ -189,6 +193,7 @@ export default function CalibrationPage() {
                   <Detail
                     state={detail}
                     pending={Boolean(selectedId) && detailQuery.isPending}
+                    failed={Boolean(selectedId) && !detail && detailQuery.isError && !authRejected}
                     tab={tab}
                   />
                 </section>
@@ -198,6 +203,54 @@ export default function CalibrationPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+function useCalibrationElapsed(active) {
+  const [previousActive, setPreviousActive] = useState(active);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  if (active !== previousActive) {
+    setPreviousActive(active);
+    setElapsedMs(0);
+  }
+  useEffect(() => {
+    if (!active) return undefined;
+    const started = Date.now();
+    const timers = [CALIBRATION_SYNC_DELAY_MS, CALIBRATION_SLOW_DELAY_MS].map((delay) => (
+      setTimeout(() => setElapsedMs(Math.max(delay, Date.now() - started)), delay)
+    ));
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [active]);
+  return active ? elapsedMs : 0;
+}
+
+function CalibrationRefreshMark({ mode }) {
+  const label = {
+    syncing: 'Actualizando',
+    slow: 'La actualización está tardando',
+    stale: 'Puede estar desactualizada',
+  }[mode] ?? '';
+  const warning = mode === 'slow' || mode === 'stale';
+  return (
+    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-live="polite">
+      {mode === 'syncing' || mode === 'slow' ? (
+        <RefreshCw
+          className={`h-3.5 w-3.5 animate-spin ${warning ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}
+          aria-hidden
+        />
+      ) : null}
+      {mode === 'stale' ? (
+        <CircleAlert className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" aria-hidden />
+      ) : null}
+      <span className="sr-only">{label}</span>
+      {warning ? (
+        <span className="pointer-events-none absolute left-5 top-1/2 hidden -translate-y-1/2 whitespace-nowrap text-xs font-medium text-amber-700 sm:block dark:text-amber-300" aria-hidden>
+          {label}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -259,9 +312,11 @@ function Filter({ label, value, onChange, options }) {
   );
 }
 
-function ListState({ state, pending, tab, onSelect, selectedId }) {
+function ListState({ state, pending, failed, tab, onSelect, selectedId }) {
+  if (failed || (state && state.status !== 'ok')) {
+    return <p className="p-4 text-sm text-gray-500">No se pudo cargar el listado.</p>;
+  }
   if (pending || !state) return <p className="p-4 text-sm text-gray-500">Buscando registros…</p>;
-  if (state.status !== 'ok') return <p className="p-4 text-sm text-gray-500">No se pudo cargar el listado.</p>;
   const items = state.data?.items ?? [];
   if (items.length === 0) return <p className="p-4 text-sm text-gray-500">No hay registros con este filtro.</p>;
   return (
@@ -291,11 +346,13 @@ function ListState({ state, pending, tab, onSelect, selectedId }) {
   );
 }
 
-function Detail({ state, pending, tab }) {
+function Detail({ state, pending, failed, tab }) {
+  if (failed || (state && state.status !== 'ok' && state.status !== 'missing')) {
+    return <p className="text-sm text-gray-500">No se pudo abrir el detalle.</p>;
+  }
   if (!state && !pending) return <p className="text-sm text-gray-500">Selecciona un registro para ver el detalle.</p>;
   if (pending || !state) return <p className="text-sm text-gray-500">Cargando el detalle…</p>;
   if (state.status === 'missing') return <p className="text-sm text-gray-500">No encontramos ese registro.</p>;
-  if (state.status !== 'ok') return <p className="text-sm text-gray-500">No se pudo abrir el detalle.</p>;
   return tab === 'visual' ? <VisualDetail record={state.data} /> : <CommercialDetail record={state.data} />;
 }
 

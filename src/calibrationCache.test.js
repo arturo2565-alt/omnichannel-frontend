@@ -5,6 +5,9 @@ import {
   calibrationListPath,
 } from './calibrationPaths.js';
 import {
+  CALIBRATION_SLOW_DELAY_MS,
+  CALIBRATION_SYNC_DELAY_MS,
+  calibrationRefreshIndicator,
   createSessionQueryClient,
   dashboardVisitState,
   isSessionObjectUrl,
@@ -98,6 +101,20 @@ test('la segunda visita conserva el centro mientras llega la actualización', as
     isError: false,
     authRejected: false,
   }), 'unconfirmed');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: true,
+    isFetching: true,
+    isError: false,
+    authRejected: false,
+    elapsedMs: 0,
+  }), 'quiet');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: true,
+    isFetching: true,
+    isError: false,
+    authRejected: false,
+    elapsedMs: CALIBRATION_SYNC_DELAY_MS,
+  }), 'syncing');
   release({ status: 'ok', data: { visual: { caseCount: 4 } } });
   await refreshing;
   assert.equal(client.getQueryData(summaryKey()).data.visual.caseCount, 4);
@@ -227,6 +244,32 @@ test('un fallo de la API conserva la última consulta y la marca sin confirmar',
     isError: true,
     authRejected: false,
   }), 'stale-failed');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: true,
+    isFetching: false,
+    isError: true,
+    authRejected: false,
+  }), 'stale');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: true,
+    isFetching: true,
+    isError: false,
+    authRejected: false,
+    elapsedMs: CALIBRATION_SLOW_DELAY_MS,
+  }), 'slow');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: false,
+    isFetching: true,
+    isError: false,
+    authRejected: false,
+    elapsedMs: CALIBRATION_SLOW_DELAY_MS,
+  }), 'quiet');
+  assert.equal(calibrationRefreshIndicator({
+    hasData: true,
+    isFetching: false,
+    isError: true,
+    authRejected: true,
+  }), 'quiet');
   rejectCachedSession(client);
   assert.equal(client.getQueryData(summaryKey()), undefined);
 });

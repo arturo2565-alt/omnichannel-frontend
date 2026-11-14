@@ -167,6 +167,31 @@ export function dashboardVisitState({ hasData, isFetching, isError, authRejected
   return 'loading';
 }
 
+/** Una actualización breve no alcanza a mostrarse. Una larga deja de parecer instantánea. */
+export const CALIBRATION_SYNC_DELAY_MS = 400;
+export const CALIBRATION_SLOW_DELAY_MS = 8000;
+
+/**
+ * El centro conserva los datos en silencio.
+ * El icono aparece solo si la actualización se nota, y el aviso solo si falla o se prolonga.
+ */
+export function calibrationRefreshIndicator({
+  hasData,
+  isFetching,
+  isError,
+  authRejected,
+  elapsedMs = 0,
+}) {
+  if (authRejected || !hasData) return 'quiet';
+  if (isFetching) {
+    if (elapsedMs >= CALIBRATION_SLOW_DELAY_MS) return 'slow';
+    if (elapsedMs >= CALIBRATION_SYNC_DELAY_MS) return 'syncing';
+    return 'quiet';
+  }
+  if (isError) return 'stale';
+  return 'quiet';
+}
+
 export async function readWorkshopResponse(response) {
   if (response?.status === 401 || response?.status === 403) {
     const error = new Error(response.status === 401 ? 'Sesión expirada.' : 'No autorizado');

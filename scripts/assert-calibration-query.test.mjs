@@ -17,6 +17,9 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Centro de Calibración/);
   assert.match(page, /loadCalibrationPhoto/);
   assert.match(page, /staleTime: Infinity/);
+  assert.match(page, /calibrationRefreshIndicator/);
+  assert.match(page, /Puede estar desactualizada/);
+  assert.doesNotMatch(page, /Esta consulta aún no se confirma/);
   assert.doesNotMatch(page, /localStorage|indexedDB/);
   assert.doesNotMatch(api, /CLOUDINARY|GITHUB|ghs_|localStorage|indexedDB/);
   assert.doesNotMatch(page, /res\.cloudinary\.com/);
