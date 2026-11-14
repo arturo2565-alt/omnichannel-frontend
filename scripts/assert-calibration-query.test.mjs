@@ -16,6 +16,18 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.doesNotMatch(bottom, /calibracion/);
   assert.match(page, /Centro de Calibración/);
   assert.match(page, /Reparaciones/);
+  assert.match(page, /Pintura integral/);
+  assert.match(page, /Con fotografías/);
+  assert.match(page, /Solo texto/);
+  assert.match(page, /Archivo pendiente/);
+  assert.match(page, /Más registros/);
+  assert.match(page, /repair-work/);
+  assert.match(page, /expedientes/);
+  assert.match(page, /cotizaciones/);
+  assert.match(page, /fotografías/);
+  assert.match(page, /recorrido parcial/);
+  assert.doesNotMatch(page, />Expedientes</);
+  assert.doesNotMatch(page, />Comercial</);
   assert.match(page, /Evidencia textual/);
   assert.match(page, /Sin fotografías/);
   assert.match(page, /Total cotizado/);
@@ -26,7 +38,7 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /aria-expanded=\{expanded\}/);
   assert.match(page, /aria-controls=\{panelId\}/);
   assert.match(page, /focus-visible:outline-sky-500/);
-  assert.match(page, /grid-cols-1 gap-3 min-\[390px\]:grid-cols-2 lg:grid-cols-3/);
+  assert.match(page, /grid-cols-1 gap-3 min-\[390px\]:grid-cols-2 lg:grid-cols-4/);
   assert.doesNotMatch(page, /lg:grid-cols-6/);
   assert.match(page, /Historial de revisiones/);
   assert.match(page, /presentation\?\.label/);

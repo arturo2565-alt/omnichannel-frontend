@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, Library, RefreshCw } from 'lucide-react';
 import {
   calibrationDetailPath,
@@ -42,6 +42,18 @@ const ARCHIVE = {
   pending_private_archive: 'Archivo pendiente',
   not_provided: 'Sin fotografías',
 };
+const EVIDENCE = {
+  photographs: 'Con fotografías',
+  text: 'Solo texto',
+  pending: 'Archivo pendiente',
+  not_provided: 'Sin fotografías',
+};
+const EVIDENCE_FILTERS = [
+  ['', 'Todos'],
+  ['photographs', 'Con fotografías'],
+  ['text', 'Solo texto'],
+  ['pending', 'Archivo pendiente'],
+];
 const WORK = {
   bodywork: 'Hojalatería',
   disassembly: 'Desarmado',
@@ -69,42 +81,55 @@ export default function CalibrationPage() {
   const { rejected } = useSessionCacheStatus();
   const scope = sessionScope(user, taller);
   const enabled = hasSessionScope(scope) && !rejected;
-  const [tab, setTab] = useState('visual');
+  const [tab, setTab] = useState('repairs');
   const [query, setQuery] = useState('');
-  const [archive, setArchive] = useState('');
+  const [evidence, setEvidence] = useState('');
   const [service, setService] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const trimmedQuery = query.trim();
-  const listKind = tab === 'visual' ? 'cases' : tab === 'repair' ? 'repairs' : 'opportunities';
-  const listFilter = tab === 'visual' ? archive : tab === 'commercial' ? service : '';
+  const detailTab = tab === 'paint' ? 'commercial' : calibrationContract(selectedId);
   const summaryQuery = useQuery({
     queryKey: workshopKey(scope, 'calibration', 'summary'),
     enabled,
     queryFn: () => fetchCalibrationDocument('/api/calibration/summary'),
   });
-  const listQuery = useQuery({
-    queryKey: workshopKey(scope, 'calibration', listKind, trimmedQuery, listFilter),
-    enabled,
-    queryFn: () => fetchCalibrationDocument(calibrationListPath(listKind, {
+  const repairList = useInfiniteQuery({
+    queryKey: workshopKey(scope, 'calibration', 'repair-work', trimmedQuery, evidence),
+    enabled: enabled && tab === 'repairs',
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => fetchCalibrationDocument(calibrationListPath('repair-work', {
       q: trimmedQuery,
-      archive,
+      evidence,
+      cursor: pageParam,
+    })),
+    getNextPageParam: (last) => (last?.status === 'ok' ? last.data?.nextCursor || undefined : undefined),
+  });
+  const paintList = useQuery({
+    queryKey: workshopKey(scope, 'calibration', 'opportunities', trimmedQuery, service),
+    enabled: enabled && tab === 'paint',
+    queryFn: () => fetchCalibrationDocument(calibrationListPath('opportunities', {
+      q: trimmedQuery,
       service,
     })),
   });
   const detailQuery = useQuery({
-    queryKey: workshopKey(scope, 'calibration', 'detail', tab, selectedId),
+    queryKey: workshopKey(scope, 'calibration', 'detail', detailTab, selectedId),
     enabled: enabled && Boolean(selectedId),
-    queryFn: () => fetchCalibrationDocument(calibrationDetailPath(tab, selectedId)),
+    queryFn: () => fetchCalibrationDocument(calibrationDetailPath(detailTab, selectedId)),
   });
+  const listQuery = tab === 'paint' ? paintList : repairList;
   const authRejected = rejected
     || isAuthRejection(summaryQuery.error)
     || isAuthRejection(listQuery.error)
     || isAuthRejection(detailQuery.error);
   const summary = authRejected ? null : summaryQuery.data;
-  const list = authRejected ? null : listQuery.data;
+  const list = authRejected ? null : (tab === 'paint' ? paintList.data : repairPages(repairList.data));
   const detail = authRejected || !selectedId ? null : detailQuery.data;
+  const listFetching = tab === 'paint'
+    ? paintList.isFetching
+    : repairList.isFetching && !repairList.isFetchingNextPage;
   const refreshing = (summary?.status === 'ok' && summaryQuery.isFetching)
-    || (list?.status === 'ok' && listQuery.isFetching)
+    || (list?.status === 'ok' && listFetching)
     || (detail?.status === 'ok' && detailQuery.isFetching);
   const refreshFailed = (summary?.status === 'ok' && summaryQuery.isError)
     || (list?.status === 'ok' && listQuery.isError)
@@ -135,7 +160,7 @@ export default function CalibrationPage() {
                   <CalibrationRefreshMark mode={refreshMode} />
                 </div>
                 <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                  Consulta privada de expedientes, cotizaciones comerciales y reparaciones.
+                  Consulta privada de reparaciones y pintura integral.
                 </p>
               </div>
             </div>
@@ -157,9 +182,8 @@ export default function CalibrationPage() {
               ) : null}
               <div className="mt-5 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
                 <div className="flex max-w-full flex-wrap gap-1 rounded-2xl bg-gray-100 p-1 dark:bg-gray-800" role="tablist" aria-label="Tipo de registro">
-                  <TabButton active={tab === 'visual'} onClick={() => { setTab('visual'); clearSelection(); }}>Expedientes</TabButton>
-                  <TabButton active={tab === 'commercial'} onClick={() => { setTab('commercial'); clearSelection(); }}>Comercial</TabButton>
-                  <TabButton active={tab === 'repair'} onClick={() => { setTab('repair'); clearSelection(); }}>Reparaciones</TabButton>
+                  <TabButton active={tab === 'repairs'} onClick={() => { setTab('repairs'); clearSelection(); }}>Reparaciones</TabButton>
+                  <TabButton active={tab === 'paint'} onClick={() => { setTab('paint'); clearSelection(); }}>Pintura integral</TabButton>
                 </div>
                 <label className="min-w-0 flex-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Buscar
@@ -170,22 +194,24 @@ export default function CalibrationPage() {
                     className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-sky-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                   />
                 </label>
-                {tab === 'visual' ? (
-                  <Filter label="Archivo" value={archive} onChange={(value) => { setArchive(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(ARCHIVE)]} />
-                ) : null}
-                {tab === 'commercial' ? (
+                {tab === 'repairs' ? (
+                  <Filter label="Evidencia" value={evidence} onChange={(value) => { setEvidence(value); clearSelection(); }} options={EVIDENCE_FILTERS} />
+                ) : (
                   <Filter label="Servicio" value={service} onChange={(value) => { setService(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(SERVICES)]} />
-                ) : null}
+                )}
               </div>
               <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
                   <ListState
                     state={list}
-                    pending={!list && listQuery.isPending}
+                    pending={!list && (listQuery.isLoading || listQuery.isPending)}
                     failed={!list && listQuery.isError && !authRejected}
                     tab={tab}
                     onSelect={setSelectedId}
                     selectedId={selectedId}
+                    hasMore={tab === 'repairs' && repairList.hasNextPage}
+                    loadingMore={repairList.isFetchingNextPage}
+                    onMore={() => { repairList.fetchNextPage(); }}
                   />
                 </section>
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
@@ -193,7 +219,7 @@ export default function CalibrationPage() {
                     state={detail}
                     pending={Boolean(selectedId) && detailQuery.isPending}
                     failed={Boolean(selectedId) && !detail && detailQuery.isError && !authRejected}
-                    tab={tab}
+                    tab={detailTab}
                   />
                 </section>
               </div>
@@ -274,23 +300,46 @@ function Notice({ children }) {
 }
 
 export function CalibrationStats({ data }) {
+  const repairs = data?.repairs ?? {};
+  const paint = data?.paint ?? {};
   return (
-    <section className="grid min-w-0 grid-cols-1 gap-3 min-[390px]:grid-cols-2 lg:grid-cols-3">
-      <Stat label="Expedientes" value={data?.visual?.caseCount} />
-      <Stat label="Archivados" value={data?.visual?.archivedCount} />
-      <Stat label="Pendientes" value={data?.visual?.pendingCount} />
-      <Stat label="Oportunidades" value={data?.commercial?.opportunityCount} />
-      <Stat label="Cotizaciones" value={data?.commercial?.quoteCount} />
-      <Stat label="Reparaciones" value={data?.repairs?.opportunityCount ?? 0} />
+    <section className="grid min-w-0 grid-cols-1 gap-3 min-[390px]:grid-cols-2 lg:grid-cols-4">
+      <Stat
+        label="Reparaciones"
+        value={repairs.recordCount}
+        hint={`${repairs.caseCount ?? 0} expedientes · ${repairs.opportunityCount ?? 0} oportunidades`}
+        truncated={repairs.truncated}
+      />
+      <Stat
+        label="Pintura integral"
+        value={paint.opportunityCount}
+        hint={`${paint.quoteCount ?? 0} cotizaciones`}
+        truncated={paint.truncated}
+      />
+      <Stat
+        label="Evidencia archivada"
+        value={data?.evidence?.photoCount}
+        hint="fotografías"
+        truncated={data?.evidence?.truncated}
+      />
+      <Stat
+        label="Pendientes"
+        value={data?.pending?.caseCount}
+        hint="expedientes"
+        truncated={data?.pending?.truncated}
+      />
     </section>
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, hint, truncated = false }) {
   return (
     <article className="min-w-0 rounded-2xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-800 dark:bg-gray-900">
       <p className="truncate text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums">{value ?? 0}</p>
+      <p className="mt-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+        {hint}{truncated ? ' · recorrido parcial' : ''}
+      </p>
     </article>
   );
 }
@@ -324,42 +373,89 @@ function Filter({ label, value, onChange, options }) {
   );
 }
 
-function ListState({ state, pending, failed, tab, onSelect, selectedId }) {
+function ListState({ state, pending, failed, tab, onSelect, selectedId, hasMore = false, loadingMore = false, onMore }) {
   if (failed || (state && state.status !== 'ok')) {
     return <p className="p-4 text-sm text-gray-500">No se pudo cargar el listado.</p>;
   }
   if (pending || !state) return <p className="p-4 text-sm text-gray-500">Buscando registros…</p>;
   const items = state.data?.items ?? [];
-  if (items.length === 0) return <p className="p-4 text-sm text-gray-500">No hay registros con este filtro.</p>;
+  const truncated = Boolean(state.data?.truncated);
+  if (items.length === 0) {
+    return (
+      <p className="p-4 text-sm text-gray-500">
+        {truncated
+          ? 'Ningún registro del recorrido coincide. El archivo continúa fuera de esta consulta.'
+          : 'No hay registros con este filtro.'}
+      </p>
+    );
+  }
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-      {items.map((item) => {
-        const id = tab === 'visual' ? item.id : item.headQuoteId;
-        const title = vehicle(item) || id;
-        const amount = listAmount(item, tab);
-        return (
-          <li key={id}>
-            <button
-              type="button"
-              onClick={() => onSelect(id)}
-              className={`flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left ${selectedId === id ? 'bg-sky-50 dark:bg-sky-950/40' : ''}`}
-            >
-              <span className="min-w-0">
-                <span className="flex min-w-0 items-baseline gap-1.5">
-                  <span className="truncate text-sm font-semibold">{title}</span>
-                  <CatalogMark record={item} />
+    <div>
+      {truncated ? (
+        <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          El recorrido no incluye todo el archivo. Puede haber registros fuera de esta consulta.
+        </p>
+      ) : null}
+      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+        {items.map((item) => {
+          const id = tab === 'paint' ? item.headQuoteId : item.id;
+          const kind = tab === 'paint' ? 'commercial' : (item.contract === 'visual' ? 'visual' : 'repair');
+          const title = vehicle(item) || id;
+          const amount = listAmount(item, kind);
+          return (
+            <li key={id}>
+              <button
+                type="button"
+                onClick={() => onSelect(id)}
+                className={`flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left ${selectedId === id ? 'bg-sky-50 dark:bg-sky-950/40' : ''}`}
+              >
+                <span className="min-w-0">
+                  <span className="flex min-w-0 items-baseline gap-1.5">
+                    <span className="truncate text-sm font-semibold">{title}</span>
+                    <CatalogMark record={item} />
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-gray-500">
+                    {id}
+                    {tab === 'repairs' ? ` · ${EVIDENCE[item.evidence] ?? 'Sin fotografías'}` : ''}
+                    {amount == null ? '' : ` · ${money.format(amount)}`}
+                  </span>
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-gray-500">
-                  {id}{amount == null ? '' : ` · ${money.format(amount)}`}
-                </span>
-              </span>
-              <Integrity value={item.integrity} />
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+                <Integrity value={item.integrity} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={onMore}
+          disabled={loadingMore}
+          className="w-full border-t border-gray-100 px-4 py-3 text-sm font-medium text-sky-800 disabled:opacity-60 dark:border-gray-800 dark:text-sky-200"
+        >
+          {loadingMore ? 'Cargando…' : 'Más registros'}
+        </button>
+      ) : null}
+    </div>
   );
+}
+
+function repairPages(data) {
+  const pages = data?.pages ?? [];
+  if (pages.length === 0) return null;
+  const ready = pages.filter((page) => page?.status === 'ok');
+  if (ready.length === 0) return pages[0];
+  return {
+    status: 'ok',
+    data: {
+      items: ready.flatMap((page) => page.data?.items ?? []),
+      truncated: ready.some((page) => page.data?.truncated),
+    },
+  };
+}
+
+function calibrationContract(id) {
+  return /^AF-\d{6}$/.test(id) ? 'visual' : 'repair';
 }
 
 function Detail({ state, pending, failed, tab }) {

@@ -73,6 +73,13 @@ test('las rutas de calibración no apuntan a un almacenamiento externo', () => {
   assert.equal(calibrationListPath('cases', { q: ' AF-000002 ', archive: 'archived_private' }), '/api/calibration/cases?q=AF-000002&archive=archived_private');
   assert.equal(calibrationListPath('opportunities', { q: '', service: 'bath_with_bodywork' }), '/api/calibration/opportunities?service=bath_with_bodywork');
   assert.equal(calibrationListPath('repairs', { q: ' fascia ' }), '/api/calibration/repairs?q=fascia');
+  assert.equal(
+    calibrationListPath('repair-work', { q: ' Aveo ', evidence: 'text', cursor: 'RQ-000001' }),
+    '/api/calibration/repair-work?q=Aveo&cursor=RQ-000001&evidence=text',
+  );
+  const repairWorkKey = workshopKey(scope, 'calibration', 'repair-work', 'aveo', 'text');
+  assert.notDeepEqual(repairWorkKey, photoKey('AF-000002', 'IMG-000001'));
+  assert.notDeepEqual(repairWorkKey, quotesKey());
   assert.equal(calibrationDetailPath('visual', 'AF-000002'), '/api/calibration/cases/AF-000002');
   assert.equal(calibrationDetailPath('commercial', 'CQ-000001'), '/api/calibration/quotes/CQ-000001');
   assert.equal(calibrationDetailPath('repair', 'RQ-000001'), '/api/calibration/repairs/RQ-000001');
@@ -226,6 +233,7 @@ test('401, 403, cierre de sesión y otro usuario sueltan datos y URLs', async ()
     const client = createSessionQueryClient();
     client.setQueryData(summaryKey(), { status: 'ok', data: { visual: { caseCount: 3 } } });
     client.setQueryData(casesKey(), { status: 'ok', data: { items: [{ id: 'AF-000001' }] } });
+    client.setQueryData(workshopKey(scope, 'calibration', 'repair-work', '', ''), { status: 'ok', data: { items: [{ id: 'RQ-000001' }] } });
     retainPhotoUrl(client, null, 'blob:http://local/IMG-000001');
     await assert.rejects(
       () => client.fetchQuery({
@@ -240,6 +248,7 @@ test('401, 403, cierre de sesión y otro usuario sueltan datos y URLs', async ()
     );
     assert.equal(client.getQueryData(summaryKey()), undefined);
     assert.equal(client.getQueryData(casesKey()), undefined);
+    assert.equal(client.getQueryData(workshopKey(scope, 'calibration', 'repair-work', '', '')), undefined);
     assert.deepEqual(revoked, ['blob:http://local/IMG-000001']);
 
     const again = createSessionQueryClient();
