@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   calibrationDetailPath,
+  calibrationEvidencePath,
   calibrationListPath,
 } from './calibrationPaths.js';
 import {
@@ -77,7 +78,17 @@ test('las rutas de calibración no apuntan a un almacenamiento externo', () => {
     calibrationListPath('repair-work', { q: ' Aveo ', evidence: 'text', cursor: 'RQ-000001' }),
     '/api/calibration/repair-work?q=Aveo&cursor=RQ-000001&evidence=text',
   );
+  assert.equal(
+    calibrationEvidencePath('repair', 'RQ-000001', 'EV-000001'),
+    '/api/calibration/repairs/RQ-000001/evidence/EV-000001',
+  );
+  assert.equal(
+    calibrationEvidencePath('commercial', 'CQ-000006'),
+    '/api/calibration/quotes/CQ-000006/evidence',
+  );
   const repairWorkKey = workshopKey(scope, 'calibration', 'repair-work', 'aveo', 'text');
+  const evidencePhotoKey = workshopKey(scope, 'calibration', 'evidence-photo', 'RQ-000001', 'EV-000001');
+  assert.notDeepEqual(evidencePhotoKey, workshopKey(scope, 'calibration', 'photo', 'RQ-000001', 'EV-000001'));
   assert.notDeepEqual(repairWorkKey, photoKey('AF-000002', 'IMG-000001'));
   assert.notDeepEqual(repairWorkKey, quotesKey());
   assert.equal(calibrationDetailPath('visual', 'AF-000002'), '/api/calibration/cases/AF-000002');
@@ -234,6 +245,7 @@ test('401, 403, cierre de sesión y otro usuario sueltan datos y URLs', async ()
     client.setQueryData(summaryKey(), { status: 'ok', data: { visual: { caseCount: 3 } } });
     client.setQueryData(casesKey(), { status: 'ok', data: { items: [{ id: 'AF-000001' }] } });
     client.setQueryData(workshopKey(scope, 'calibration', 'repair-work', '', ''), { status: 'ok', data: { items: [{ id: 'RQ-000001' }] } });
+    client.setQueryData(workshopKey(scope, 'calibration', 'evidence', 'repair', 'RQ-000001'), { status: 'ok', data: { items: [] } });
     retainPhotoUrl(client, null, 'blob:http://local/IMG-000001');
     await assert.rejects(
       () => client.fetchQuery({
@@ -249,6 +261,7 @@ test('401, 403, cierre de sesión y otro usuario sueltan datos y URLs', async ()
     assert.equal(client.getQueryData(summaryKey()), undefined);
     assert.equal(client.getQueryData(casesKey()), undefined);
     assert.equal(client.getQueryData(workshopKey(scope, 'calibration', 'repair-work', '', '')), undefined);
+    assert.equal(client.getQueryData(workshopKey(scope, 'calibration', 'evidence', 'repair', 'RQ-000001')), undefined);
     assert.deepEqual(revoked, ['blob:http://local/IMG-000001']);
 
     const again = createSessionQueryClient();

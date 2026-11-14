@@ -17,6 +17,12 @@ export function calibrationListPath(kind, filters = {}) {
   return `${base}${suffix ? `?${suffix}` : ''}`;
 }
 
+export function calibrationEvidencePath(kind, id, evidenceId) {
+  const root = kind === 'repair' ? 'repairs' : 'quotes';
+  const base = `/api/calibration/${root}/${encodeURIComponent(id)}/evidence`;
+  return evidenceId ? `${base}/${encodeURIComponent(evidenceId)}` : base;
+}
+
 export function calibrationDetailPath(tab, id) {
   const encoded = encodeURIComponent(id);
   if (tab === 'visual') return `/api/calibration/cases/${encoded}`;

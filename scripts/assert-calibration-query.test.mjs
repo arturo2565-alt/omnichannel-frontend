@@ -30,6 +30,11 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.doesNotMatch(page, />Comercial</);
   assert.match(page, /Evidencia textual/);
   assert.match(page, /Sin fotografías/);
+  assert.match(page, /Cotización sin fotografías/);
+  assert.match(page, /Fotografía archivada/);
+  assert.match(page, /Evidencia pendiente de privacidad/);
+  assert.match(page, /Evidencia pendiente de vinculación/);
+  assert.match(page, /evidence-photo/);
   assert.match(page, /Total cotizado/);
   assert.match(page, /role="dialog"/);
   assert.match(page, /object-contain/);

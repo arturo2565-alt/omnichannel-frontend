@@ -3,8 +3,10 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { CircleAlert, Library, RefreshCw } from 'lucide-react';
 import {
   calibrationDetailPath,
+  calibrationEvidencePath,
   calibrationListPath,
   fetchCalibrationDocument,
+  loadCalibrationEvidencePhoto,
   loadCalibrationPhoto,
 } from './calibrationApi.js';
 import { declaredAmount, galleryMove, groupRepairLines, listAmount, sumDeclared } from './calibrationView.js';
@@ -47,6 +49,11 @@ const EVIDENCE = {
   text: 'Solo texto',
   pending: 'Archivo pendiente',
   not_provided: 'Sin fotografías',
+};
+const LINKED_EVIDENCE = {
+  verified: 'Fotografía archivada',
+  privacy_pending: 'Evidencia pendiente de privacidad',
+  link_pending: 'Evidencia pendiente de vinculación',
 };
 const EVIDENCE_FILTERS = [
   ['', 'Todos'],
@@ -594,6 +601,87 @@ function CalibrationPhoto({ caseId, photoId, frame = 'thumb' }) {
   );
 }
 
+function EvidencePhoto({ kind, quoteId, evidenceId, frame = 'thumb' }) {
+  const queryClient = useQueryClient();
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const photoKey = workshopKey(scope, 'calibration', 'evidence-photo', quoteId, evidenceId);
+  const photoQuery = useQuery({
+    queryKey: photoKey,
+    enabled: hasSessionScope(scope) && !rejected,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const previous = queryClient.getQueryData(photoKey);
+      const url = await loadCalibrationEvidencePhoto(kind, quoteId, evidenceId);
+      return retainPhotoUrl(queryClient, previous, url);
+    },
+  });
+  const src = !rejected && isSessionObjectUrl(photoQuery.data) ? photoQuery.data : '';
+  const frameClass = frame === 'stage'
+    ? 'max-h-[70vh] w-full rounded-xl bg-black object-contain'
+    : 'h-28 w-full object-cover';
+  if (src) return <img src={src} alt="" className={frameClass} />;
+  return (
+    <div className={`flex items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800 ${frame === 'stage' ? 'h-64 w-full rounded-xl' : 'h-28'}`}>
+      {photoQuery.isFetching ? 'Cargando…' : 'No disponible'}
+    </div>
+  );
+}
+
+function LinkedEvidence({ kind, quoteId }) {
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const evidenceQuery = useQuery({
+    queryKey: workshopKey(scope, 'calibration', 'evidence', kind, quoteId),
+    enabled: hasSessionScope(scope) && !rejected && Boolean(quoteId),
+    queryFn: () => fetchCalibrationDocument(calibrationEvidencePath(kind, quoteId)),
+  });
+  const items = evidenceQuery.data?.status === 'ok' ? (evidenceQuery.data.data?.items ?? []) : [];
+  const verified = items.filter((item) => item.state === 'verified');
+  const pending = items.filter((item) => item.state === 'privacy_pending' || item.state === 'link_pending');
+  const [galleryId, setGalleryId] = useState(null);
+  const open = galleryId && verified.some((item) => item.id === galleryId) ? galleryId : null;
+  const empty = kind === 'commercial' ? 'Cotización sin fotografías' : 'Sin fotografías';
+  return (
+    <section>
+      <h3 className="text-sm font-semibold">Fotografías vinculadas</h3>
+      {evidenceQuery.isError ? <p className="mt-2 text-sm text-gray-500">No se pudo consultar la evidencia.</p> : null}
+      {!evidenceQuery.isError && items.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-500">{evidenceQuery.isFetching ? 'Cargando…' : empty}</p>
+      ) : null}
+      {verified.length ? (
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {verified.map((item) => (
+            <figure key={item.id} className="min-w-0 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+              <button type="button" className="block w-full" onClick={() => setGalleryId(item.id)} aria-label={`Ampliar ${item.id}`}>
+                <EvidencePhoto kind={kind} quoteId={quoteId} evidenceId={item.id} />
+              </button>
+              <figcaption className="truncate px-2 py-1 text-[11px] text-gray-500">{LINKED_EVIDENCE.verified}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : null}
+      {pending.length ? (
+        <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+          {pending.map((item) => (
+            <li key={item.id}>{LINKED_EVIDENCE[item.state] ?? item.state}</li>
+          ))}
+        </ul>
+      ) : null}
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/80 p-3" role="dialog" aria-modal="true" aria-label="Fotografía vinculada">
+          <button type="button" className="absolute inset-0" aria-label="Cerrar fotografía" onClick={() => setGalleryId(null)} />
+          <div className="relative z-10 w-full max-w-3xl min-w-0">
+            <EvidencePhoto kind={kind} quoteId={quoteId} evidenceId={open} frame="stage" />
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function RepairDetail({ record }) {
   const revisions = record.revisions ?? [];
   const active = revisions.find((item) => item.id === record.headQuoteId) ?? revisions[revisions.length - 1] ?? null;
@@ -620,7 +708,6 @@ export function RepairDetail({ record }) {
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>Evidencia textual</MetaChip>
-          <MetaChip>Sin fotografías</MetaChip>
           <Integrity value={record.integrity} />
           <MetaChip>{active?.revision ? `Revisión ${active.revision}` : 'Sin revisión'}</MetaChip>
         </div>
@@ -633,6 +720,7 @@ export function RepairDetail({ record }) {
         {contracted == null ? null : <PriceCard label="Contratado" value={contracted} validation="human_confirmed" />}
         {collected == null ? null : <PriceCard label="Cobrado" value={collected} validation="human_confirmed" />}
       </div>
+      <LinkedEvidence kind="repair" quoteId={quoteId} />
       <RepairLines title="Refacciones" lines={groups.parts} />
       <RepairLines title="Mano de obra" lines={groups.labor} />
       <section>
@@ -763,6 +851,7 @@ export function CommercialDetail({ record }) {
         <PriceCard label="Contratado" value={active?.contractedMxn} validation={active?.contractedValidation} />
         <PriceCard label="Cobrado" value={active?.collectedMxn} validation={active?.collectedValidation} />
       </div>
+      <LinkedEvidence kind="commercial" quoteId={quoteId} />
       <section>
         <h3 className="text-sm font-semibold">Alcance</h3>
         <ScopeList items={active?.workScope} />
