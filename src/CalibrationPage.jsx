@@ -1,8 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Library } from 'lucide-react';
-import { loadCalibration, loadCalibrationPhoto } from './calibrationApi.js';
+import {
+  calibrationDetailPath,
+  calibrationListPath,
+  fetchCalibrationDocument,
+  loadCalibrationPhoto,
+} from './calibrationApi.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { useAuth } from './AuthContext.jsx';
+import { useSessionCacheStatus } from './sessionCacheStatus.js';
+import {
+  dashboardVisitState,
+  hasSessionScope,
+  isAuthRejection,
+  isSessionObjectUrl,
+  retainPhotoUrl,
+  sessionScope,
+  workshopKey,
+} from './sessionQuery.js';
 
 const SERVICES = {
   exterior_bath: 'Baño exterior',
@@ -40,88 +57,54 @@ function price(value, validation) {
 }
 
 export default function CalibrationPage() {
-  const [summaryState, setSummaryState] = useState({ status: 'loading', data: null });
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const enabled = hasSessionScope(scope) && !rejected;
   const [tab, setTab] = useState('visual');
   const [query, setQuery] = useState('');
   const [archive, setArchive] = useState('');
   const [service, setService] = useState('');
-  const [listState, setListState] = useState({ status: 'loading', items: [] });
   const [selectedId, setSelectedId] = useState('');
-  const [detailState, setDetailState] = useState({ status: 'idle', data: null });
-  const [photos, setPhotos] = useState({});
-
-  useEffect(() => {
-    let active = true;
-    setSummaryState({ status: 'loading', data: null });
-    loadCalibration('/api/calibration/summary').then((result) => {
-      if (active) setSummaryState(result.status === 'ok' ? { status: 'ready', data: result.data } : { status: result.status, data: null });
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (summaryState.status !== 'ready') return undefined;
-    let active = true;
-    const params = new URLSearchParams();
-    if (query.trim()) params.set('q', query.trim());
-    if (tab === 'visual' && archive) params.set('archive', archive);
-    if (tab === 'commercial' && service) params.set('service', service);
-    const suffix = params.toString();
-    const path = tab === 'visual' ? '/api/calibration/cases' : '/api/calibration/opportunities';
-    setListState({ status: 'loading', items: [] });
-    setSelectedId('');
-    setDetailState({ status: 'idle', data: null });
-    loadCalibration(`${path}${suffix ? `?${suffix}` : ''}`).then((result) => {
-      if (!active) return;
-      setListState(result.status === 'ok'
-        ? { status: 'ready', items: result.data.items ?? [] }
-        : { status: result.status, items: [] });
-    });
-    return () => {
-      active = false;
-    };
-  }, [summaryState.status, tab, query, archive, service]);
-
-  useEffect(() => {
-    if (!selectedId) {
-      setDetailState({ status: 'idle', data: null });
-      return undefined;
-    }
-    let active = true;
-    const path = tab === 'visual'
-      ? `/api/calibration/cases/${selectedId}`
-      : `/api/calibration/quotes/${selectedId}`;
-    setDetailState({ status: 'loading', data: null });
-    loadCalibration(path).then((result) => {
-      if (!active) return;
-      setDetailState(result.status === 'ok' ? { status: 'ready', data: result.data } : { status: result.status, data: null });
-    });
-    return () => {
-      active = false;
-    };
-  }, [selectedId, tab]);
-
-  useEffect(() => {
-    const detail = detailState.data;
-    if (!detail?.photos) return undefined;
-    let active = true;
-    Promise.all(detail.photos.filter((photo) => photo.verified).map(async (photo) => {
-      const url = await loadCalibrationPhoto(detail.id, photo.id);
-      return [photo.id, url];
-    })).then((entries) => {
-      const created = entries.flatMap(([, url]) => (url ? [url] : []));
-      if (!active) {
-        created.forEach((url) => URL.revokeObjectURL(url));
-        return;
-      }
-      setPhotos(Object.fromEntries(entries));
-    });
-    return () => {
-      active = false;
-    };
-  }, [detailState.data]);
+  const trimmedQuery = query.trim();
+  const summaryQuery = useQuery({
+    queryKey: workshopKey(scope, 'calibration', 'summary'),
+    enabled,
+    queryFn: () => fetchCalibrationDocument('/api/calibration/summary'),
+  });
+  const listQuery = useQuery({
+    queryKey: workshopKey(
+      scope,
+      'calibration',
+      tab === 'visual' ? 'cases' : 'opportunities',
+      trimmedQuery,
+      tab === 'visual' ? archive : service,
+    ),
+    enabled,
+    queryFn: () => fetchCalibrationDocument(calibrationListPath(
+      tab === 'visual' ? 'cases' : 'opportunities',
+      { q: trimmedQuery, archive, service },
+    )),
+  });
+  const detailQuery = useQuery({
+    queryKey: workshopKey(scope, 'calibration', 'detail', tab, selectedId),
+    enabled: enabled && Boolean(selectedId),
+    queryFn: () => fetchCalibrationDocument(calibrationDetailPath(tab, selectedId)),
+  });
+  const authRejected = rejected
+    || isAuthRejection(summaryQuery.error)
+    || isAuthRejection(listQuery.error)
+    || isAuthRejection(detailQuery.error);
+  const summary = authRejected ? null : summaryQuery.data;
+  const list = authRejected ? null : listQuery.data;
+  const detail = authRejected || !selectedId ? null : detailQuery.data;
+  const summaryVisit = dashboardVisitState({
+    hasData: summary?.status === 'ok',
+    isFetching: summaryQuery.isFetching || listQuery.isFetching,
+    isError: summaryQuery.isError || listQuery.isError,
+    authRejected,
+  });
+  const clearSelection = () => setSelectedId('');
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 pb-16 text-gray-900 dark:bg-gray-950 dark:text-gray-100 lg:pb-0">
@@ -146,42 +129,68 @@ export default function CalibrationPage() {
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-          <StatusNotice status={summaryState.status} />
-          {summaryState.status === 'ready' ? (
+          <StatusNotice
+            status={authRejected ? 'forbidden' : summary?.status}
+            pending={!summary && (summaryQuery.isPending || !enabled)}
+            failed={!summary && summaryQuery.isError && !authRejected}
+          />
+          {summaryVisit === 'unconfirmed' ? (
+            <p className="mb-3 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
+              Actualizando. Esta consulta aún no se confirma en esta visita.
+            </p>
+          ) : null}
+          {summaryVisit === 'stale-failed' ? (
+            <p className="mb-3 text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
+              No se pudo actualizar. Se muestra la última consulta de esta sesión.
+            </p>
+          ) : null}
+          {!authRejected && summary?.status !== 'missing' ? (
             <>
-              <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-                <Stat label="Expedientes" value={summaryState.data.visual.caseCount} />
-                <Stat label="Archivados" value={summaryState.data.visual.archivedCount} />
-                <Stat label="Pendientes" value={summaryState.data.visual.pendingCount} />
-                <Stat label="Oportunidades" value={summaryState.data.commercial.opportunityCount} />
-                <Stat label="Cotizaciones" value={summaryState.data.commercial.quoteCount} />
-              </section>
+              {summary?.status === 'ok' ? (
+                <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                  <Stat label="Expedientes" value={summary.data.visual.caseCount} />
+                  <Stat label="Archivados" value={summary.data.visual.archivedCount} />
+                  <Stat label="Pendientes" value={summary.data.visual.pendingCount} />
+                  <Stat label="Oportunidades" value={summary.data.commercial.opportunityCount} />
+                  <Stat label="Cotizaciones" value={summary.data.commercial.quoteCount} />
+                </section>
+              ) : null}
               <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-end">
                 <div className="flex rounded-full bg-gray-100 p-1 dark:bg-gray-800" role="tablist" aria-label="Tipo de registro">
-                  <TabButton active={tab === 'visual'} onClick={() => { setTab('visual'); setSelectedId(''); }}>Expedientes</TabButton>
-                  <TabButton active={tab === 'commercial'} onClick={() => { setTab('commercial'); setSelectedId(''); }}>Comercial</TabButton>
+                  <TabButton active={tab === 'visual'} onClick={() => { setTab('visual'); clearSelection(); }}>Expedientes</TabButton>
+                  <TabButton active={tab === 'commercial'} onClick={() => { setTab('commercial'); clearSelection(); }}>Comercial</TabButton>
                 </div>
                 <label className="min-w-0 flex-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Buscar
                   <input
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => { setQuery(event.target.value); clearSelection(); }}
                     placeholder="Identificador, marca o modelo"
                     className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-sky-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                   />
                 </label>
                 {tab === 'visual' ? (
-                  <Filter label="Archivo" value={archive} onChange={setArchive} options={[['', 'Todos'], ...Object.entries(ARCHIVE)]} />
+                  <Filter label="Archivo" value={archive} onChange={(value) => { setArchive(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(ARCHIVE)]} />
                 ) : (
-                  <Filter label="Servicio" value={service} onChange={setService} options={[['', 'Todos'], ...Object.entries(SERVICES)]} />
+                  <Filter label="Servicio" value={service} onChange={(value) => { setService(value); clearSelection(); }} options={[['', 'Todos'], ...Object.entries(SERVICES)]} />
                 )}
               </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-                  <ListState state={listState} tab={tab} onSelect={setSelectedId} selectedId={selectedId} />
+                  <ListState
+                    state={list}
+                    pending={!list && listQuery.isPending}
+                    tab={tab}
+                    onSelect={setSelectedId}
+                    selectedId={selectedId}
+                  />
                 </section>
                 <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-                  <Detail state={detailState} tab={tab} photos={photos} />
+                  <Detail
+                    state={detail}
+                    pending={Boolean(selectedId) && detailQuery.isPending}
+                    tab={tab}
+                  />
                 </section>
               </div>
             </>
@@ -192,15 +201,15 @@ export default function CalibrationPage() {
   );
 }
 
-function StatusNotice({ status }) {
-  if (status === 'loading') return <p className="text-sm text-gray-500">Cargando la consulta…</p>;
+function StatusNotice({ status, pending, failed }) {
   if (status === 'forbidden') {
     return <Notice>Tu usuario no tiene autorización para consultar la calibración.</Notice>;
   }
+  if (pending) return <p className="mb-3 text-sm text-gray-500">Cargando la consulta…</p>;
   if (status === 'missing') {
     return <Notice>La consulta todavía no está conectada en este entorno.</Notice>;
   }
-  if (status === 'error') return <Notice>No se pudo consultar la calibración.</Notice>;
+  if (failed) return <Notice>No se pudo consultar la calibración.</Notice>;
   return null;
 }
 
@@ -250,13 +259,14 @@ function Filter({ label, value, onChange, options }) {
   );
 }
 
-function ListState({ state, tab, onSelect, selectedId }) {
-  if (state.status === 'loading') return <p className="p-4 text-sm text-gray-500">Buscando registros…</p>;
-  if (state.status !== 'ready') return <p className="p-4 text-sm text-gray-500">No se pudo cargar el listado.</p>;
-  if (state.items.length === 0) return <p className="p-4 text-sm text-gray-500">No hay registros con este filtro.</p>;
+function ListState({ state, pending, tab, onSelect, selectedId }) {
+  if (pending || !state) return <p className="p-4 text-sm text-gray-500">Buscando registros…</p>;
+  if (state.status !== 'ok') return <p className="p-4 text-sm text-gray-500">No se pudo cargar el listado.</p>;
+  const items = state.data?.items ?? [];
+  if (items.length === 0) return <p className="p-4 text-sm text-gray-500">No hay registros con este filtro.</p>;
   return (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-      {state.items.map((item) => {
+      {items.map((item) => {
         const id = tab === 'visual' ? item.id : item.headQuoteId;
         const title = tab === 'visual'
           ? vehicle(item) || item.id
@@ -281,15 +291,15 @@ function ListState({ state, tab, onSelect, selectedId }) {
   );
 }
 
-function Detail({ state, tab, photos }) {
-  if (state.status === 'idle') return <p className="text-sm text-gray-500">Selecciona un registro para ver el detalle.</p>;
-  if (state.status === 'loading') return <p className="text-sm text-gray-500">Cargando el detalle…</p>;
+function Detail({ state, pending, tab }) {
+  if (!state && !pending) return <p className="text-sm text-gray-500">Selecciona un registro para ver el detalle.</p>;
+  if (pending || !state) return <p className="text-sm text-gray-500">Cargando el detalle…</p>;
   if (state.status === 'missing') return <p className="text-sm text-gray-500">No encontramos ese registro.</p>;
-  if (state.status !== 'ready') return <p className="text-sm text-gray-500">No se pudo abrir el detalle.</p>;
-  return tab === 'visual' ? <VisualDetail record={state.data} photos={photos} /> : <CommercialDetail record={state.data} />;
+  if (state.status !== 'ok') return <p className="text-sm text-gray-500">No se pudo abrir el detalle.</p>;
+  return tab === 'visual' ? <VisualDetail record={state.data} /> : <CommercialDetail record={state.data} />;
 }
 
-function VisualDetail({ record, photos }) {
+function VisualDetail({ record }) {
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -316,11 +326,11 @@ function VisualDetail({ record, photos }) {
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {record.photos.map((photo) => (
             <figure key={photo.id} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-              {photos[photo.id] ? (
-                <img src={photos[photo.id]} alt="" className="h-28 w-full object-cover" />
+              {photo.verified ? (
+                <CalibrationPhoto caseId={record.id} photoId={photo.id} />
               ) : (
                 <div className="flex h-28 items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800">
-                  {photo.verified ? 'Cargando…' : 'No disponible'}
+                  No disponible
                 </div>
               )}
               <figcaption className="px-2 py-1 text-[11px] text-gray-500">{photo.id}</figcaption>
@@ -328,6 +338,31 @@ function VisualDetail({ record, photos }) {
           ))}
         </div>
       ) : <p className="mt-2 text-sm text-gray-500">Este expediente no tiene fotografías.</p>}
+    </div>
+  );
+}
+
+function CalibrationPhoto({ caseId, photoId }) {
+  const queryClient = useQueryClient();
+  const { user, taller } = useAuth();
+  const { rejected } = useSessionCacheStatus();
+  const scope = sessionScope(user, taller);
+  const photoKey = workshopKey(scope, 'calibration', 'photo', caseId, photoId);
+  const photoQuery = useQuery({
+    queryKey: photoKey,
+    enabled: hasSessionScope(scope) && !rejected,
+    staleTime: Infinity,
+    queryFn: async () => {
+      const previous = queryClient.getQueryData(photoKey);
+      const url = await loadCalibrationPhoto(caseId, photoId);
+      return retainPhotoUrl(queryClient, previous, url);
+    },
+  });
+  const src = !rejected && isSessionObjectUrl(photoQuery.data) ? photoQuery.data : '';
+  if (src) return <img src={src} alt="" className="h-28 w-full object-cover" />;
+  return (
+    <div className="flex h-28 items-center justify-center bg-gray-50 text-xs text-gray-500 dark:bg-gray-800">
+      {photoQuery.isPending ? 'Cargando…' : 'No disponible'}
     </div>
   );
 }

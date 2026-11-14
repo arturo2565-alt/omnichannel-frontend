@@ -46,8 +46,44 @@ export function createSessionQueryClient() {
   return client;
 }
 
+export function isSessionObjectUrl(value) {
+  return typeof value === 'string' && value.startsWith('blob:');
+}
+
+export function trackObjectUrl(client, url) {
+  if (!client || !isSessionObjectUrl(url)) return null;
+  if (!client.__pegazuzObjectUrls) client.__pegazuzObjectUrls = new Set();
+  client.__pegazuzObjectUrls.add(url);
+  return url;
+}
+
+export function retainPhotoUrl(client, previous, next) {
+  if (isSessionObjectUrl(previous) && previous !== next) forgetObjectUrl(client, previous);
+  return trackObjectUrl(client, next);
+}
+
+export function forgetObjectUrl(client, url) {
+  if (!isSessionObjectUrl(url)) return;
+  client?.__pegazuzObjectUrls?.delete(url);
+  if (typeof URL.revokeObjectURL !== 'function') return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    /* La URL ya no estaba activa. */
+  }
+}
+
+export function revokeTrackedObjectUrls(client) {
+  const urls = client?.__pegazuzObjectUrls;
+  if (!urls) return [];
+  const revoked = [...urls];
+  for (const url of revoked) forgetObjectUrl(client, url);
+  return revoked;
+}
+
 export function rejectCachedSession(client) {
   client.__pegazuzAuthRejected = true;
+  revokeTrackedObjectUrls(client);
   client.cancelQueries();
   client.clear();
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createSessionQueryClient } from './sessionQuery.js';
+import { createSessionQueryClient, revokeTrackedObjectUrls } from './sessionQuery.js';
 import { SessionCacheContext } from './sessionCacheStatus.js';
 
 /**
@@ -20,6 +20,7 @@ export function SessionQueryProvider({ children }) {
     });
     return () => {
       unsubscribe();
+      revokeTrackedObjectUrls(client);
       client.clear();
     };
   }, [client]);

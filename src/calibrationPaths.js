@@ -1,0 +1,17 @@
+export function calibrationListPath(kind, filters = {}) {
+  const params = new URLSearchParams();
+  const q = String(filters.q ?? '').trim();
+  if (q) params.set('q', q);
+  if (kind === 'cases' && filters.archive) params.set('archive', filters.archive);
+  if (kind === 'opportunities' && filters.service) params.set('service', filters.service);
+  const suffix = params.toString();
+  const base = kind === 'cases' ? '/api/calibration/cases' : '/api/calibration/opportunities';
+  return `${base}${suffix ? `?${suffix}` : ''}`;
+}
+
+export function calibrationDetailPath(tab, id) {
+  const encoded = encodeURIComponent(id);
+  return tab === 'visual'
+    ? `/api/calibration/cases/${encoded}`
+    : `/api/calibration/quotes/${encoded}`;
+}
