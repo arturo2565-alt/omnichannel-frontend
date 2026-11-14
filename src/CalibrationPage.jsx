@@ -345,7 +345,10 @@ function ListState({ state, pending, failed, tab, onSelect, selectedId }) {
               className={`flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left ${selectedId === id ? 'bg-sky-50 dark:bg-sky-950/40' : ''}`}
             >
               <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold">{title}</span>
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  <span className="truncate text-sm font-semibold">{title}</span>
+                  <CatalogMark record={item} />
+                </span>
                 <span className="mt-0.5 block truncate text-xs text-gray-500">
                   {id}{amount == null ? '' : ` · ${money.format(amount)}`}
                 </span>
@@ -515,7 +518,10 @@ export function RepairDetail({ record }) {
     <div className="flex min-w-0 flex-col gap-4">
       <header>
         <h2 className="break-all text-2xl font-semibold tracking-tight">{quoteId}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{vehicle(active ?? record) || 'Vehículo incompleto'}</p>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+          {vehicle(active ?? record) || 'Vehículo incompleto'}
+          <CatalogMark record={active ?? record} />
+        </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>Evidencia textual</MetaChip>
           <MetaChip>Sin fotografías</MetaChip>
@@ -586,6 +592,7 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
           <span className="mt-0.5 block truncate text-xs text-gray-500">
             Revisión {revision.revision ?? '—'}
             {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+            <CatalogMark record={revision} />
           </span>
           <span className="mt-1 block text-sm font-medium tabular-nums">
             Cotizado {revision.quotedTotalMxn == null ? 'No proporcionado' : money.format(revision.quotedTotalMxn)}
@@ -645,7 +652,10 @@ export function CommercialDetail({ record }) {
     <div className="flex flex-col gap-4">
       <header>
         <h2 className="text-2xl font-semibold tracking-tight">{quoteId}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{vehicle(active ?? record) || 'Vehículo incompleto'}</p>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+          {vehicle(active ?? record) || 'Vehículo incompleto'}
+          <CatalogMark record={active ?? record} />
+        </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>{SERVICES[record.service] ?? 'Servicio no registrado'}</MetaChip>
           <Integrity value={record.integrity} />
@@ -681,6 +691,7 @@ export function CommercialDetail({ record }) {
                       <p className="mt-0.5 text-xs text-gray-500">
                         Revisión {revision.revision ?? '—'}
                         {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+                        <CatalogMark record={revision} />
                       </p>
                     </div>
                     {current ? (
@@ -768,5 +779,10 @@ function Integrity({ value }) {
 }
 
 function vehicle(record) {
-  return [record.make, record.model, record.year].filter(Boolean).join(' ');
+  return record?.presentation?.label || [record?.make, record?.model, record?.year].filter(Boolean).join(' ');
+}
+
+function CatalogMark({ record }) {
+  if (record?.presentation?.provenance !== 'catalog_inferred') return null;
+  return <span className="shrink-0 text-[11px] font-normal text-gray-400">Catálogo</span>;
 }

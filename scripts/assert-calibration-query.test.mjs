@@ -29,6 +29,9 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /grid-cols-1 gap-3 min-\[390px\]:grid-cols-2 lg:grid-cols-3/);
   assert.doesNotMatch(page, /lg:grid-cols-6/);
   assert.match(page, /Historial de revisiones/);
+  assert.match(page, /presentation\?\.label/);
+  assert.match(page, /provenance !== 'catalog_inferred'/);
+  assert.match(page, /Catálogo/);
   assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);
   assert.match(page, /loadCalibrationPhoto/);
   assert.match(page, /staleTime: Infinity/);
