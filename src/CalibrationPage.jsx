@@ -326,7 +326,7 @@ export function CalibrationStats({ data }) {
       <Stat
         label="Evidencia archivada"
         value={data?.evidence?.photoCount}
-        hint="fotografías"
+        hint="fotografías verificadas"
         truncated={data?.evidence?.truncated}
       />
       <Stat

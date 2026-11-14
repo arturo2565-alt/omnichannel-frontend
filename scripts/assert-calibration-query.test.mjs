@@ -24,7 +24,7 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /repair-work/);
   assert.match(page, /expedientes/);
   assert.match(page, /cotizaciones/);
-  assert.match(page, /fotografías/);
+  assert.match(page, /fotografías verificadas/);
   assert.match(page, /recorrido parcial/);
   assert.doesNotMatch(page, />Expedientes</);
   assert.doesNotMatch(page, />Comercial</);
