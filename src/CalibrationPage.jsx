@@ -514,6 +514,16 @@ export function VisualDetail({ record }) {
         </div>
       </header>
       <WorkBoard lines={record.lines} documentTotal={record.quotedTotalMxn} subjectId={record.id} />
+      {record.observations?.length ? (
+        <section>
+          <h3 className="text-sm font-semibold">Observaciones</h3>
+          <ul className="mt-2 flex flex-col gap-2">
+            {record.observations.map((item) => (
+              <li key={item} className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-300">{item}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section>
         <h3 className="text-sm font-semibold">Fotografías</h3>
         {record.photos?.length ? (

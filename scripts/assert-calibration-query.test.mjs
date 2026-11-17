@@ -20,6 +20,8 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Con fotografías/);
   assert.match(page, /Solo texto/);
   assert.match(page, /Archivo pendiente/);
+  assert.match(page, /record\.observations/);
+  assert.match(page, /Observaciones/);
   assert.match(page, /Más registros/);
   assert.match(page, /repair-work/);
   assert.match(page, /expedientes/);
