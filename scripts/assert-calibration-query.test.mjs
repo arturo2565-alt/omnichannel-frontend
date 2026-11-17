@@ -30,7 +30,10 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.doesNotMatch(page, />Comercial</);
   assert.match(page, /Evidencia textual/);
   assert.match(page, /Sin fotografías/);
-  assert.match(page, /Cotización sin fotografías/);
+  assert.match(page, /Añadir fotografía/);
+  assert.match(page, /Seleccionar copia/);
+  assert.doesNotMatch(page, /Cotización sin fotografías/);
+  assert.doesNotMatch(page, /Hash de la fotografía de origen/);
   assert.match(page, /Fotografía archivada/);
   assert.match(page, /Evidencia pendiente de privacidad/);
   assert.match(page, /Evidencia pendiente de vinculación/);
@@ -65,9 +68,12 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Archivo en curso/);
   assert.match(page, /Fotografía verificada/);
   assert.match(page, /Error recuperable/);
-  assert.match(page, /Archivar en privado/);
+  assert.match(page, /Confirmar y archivar/);
   assert.match(api, /evidence-previews/);
+  assert.match(api, /role: 'copy'/);
+  assert.match(api, /role: 'origin'/);
   assert.match(api, /visibleIdentifiersReviewed: true/);
+  assert.doesNotMatch(api, /receivedSha256/);
   assert.doesNotMatch(page, /operatorRole|validated:\s*true/);
   assert.doesNotMatch(api, /operatorRole|validated:\s*true/);
   assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);

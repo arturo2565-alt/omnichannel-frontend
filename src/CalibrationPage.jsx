@@ -9,6 +9,7 @@ import {
   confirmCalibrationSeverity,
   confirmEvidenceArchive,
   fetchCalibrationDocument,
+  holdEvidenceOrigin,
   holdEvidencePreview,
   loadCalibrationEvidencePhoto,
   loadCalibrationPhoto,
@@ -678,12 +679,17 @@ async function digestHex(bytes) {
 
 function EvidenceCopy({ quoteId }) {
   const client = useQueryClient();
-  const [originHash, setOriginHash] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [wantOrigin, setWantOrigin] = useState(false);
+  const [provenanceId, setProvenanceId] = useState('');
+  const [originNote, setOriginNote] = useState('');
   const [phase, setPhase] = useState('idle');
   const [preview, setPreview] = useState(null);
   const [seen, setSeen] = useState(false);
   const [notice, setNotice] = useState('');
   const previewRef = useRef(null);
+  const originRef = useRef(null);
+  const copyRef = useRef(null);
   const remember = (next) => {
     if (previewRef.current?.url && previewRef.current.url !== next?.url) URL.revokeObjectURL(previewRef.current.url);
     previewRef.current = next;
@@ -696,6 +702,10 @@ function EvidenceCopy({ quoteId }) {
     const current = preview;
     remember(null);
     setSeen(false);
+    setAdding(false);
+    setWantOrigin(false);
+    setProvenanceId('');
+    setOriginNote('');
     setPhase('idle');
     if (remote && current?.previewId) {
       try {
@@ -705,24 +715,27 @@ function EvidenceCopy({ quoteId }) {
       }
     }
   };
-  const load = async (file) => {
+  const prepare = async (file, kind) => {
     if (!file || !quoteId || phase === 'archiving') return;
     setNotice('');
-    const hash = originHash.trim().toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(hash)) {
-      setNotice('Error recuperable');
-      return;
-    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.length < 1 || bytes.length > 5 * 1024 * 1024) {
+      setPhase('error');
       setNotice('Error recuperable');
       return;
     }
+    const imageBase64 = bytesToBase64(bytes);
     try {
+      if (kind === 'origin') {
+        const noted = await holdEvidenceOrigin({ subjectId: quoteId, imageBase64 });
+        setProvenanceId(noted.provenanceId);
+        setNotice('La fotografía original quedó registrada. Selecciona una copia distinta.');
+        return;
+      }
       const held = await holdEvidencePreview({
         subjectId: quoteId,
-        receivedSha256: hash,
-        imageBase64: bytesToBase64(bytes),
+        imageBase64,
+        provenanceId: provenanceId || undefined,
       });
       const blob = await loadEvidencePreview(held.previewId);
       const served = new Uint8Array(await blob.arrayBuffer());
@@ -730,11 +743,16 @@ function EvidenceCopy({ quoteId }) {
       if (digest !== held.sha256) throw new Error('bytes');
       const url = URL.createObjectURL(new Blob([served], { type: blob.type || 'image/png' }));
       remember({ previewId: held.previewId, sha256: held.sha256, url });
+      setOriginNote(held.originProvenance === 'unavailable'
+        ? 'No hay fotografía de origen. La procedencia queda registrada como no disponible.'
+        : '');
       setSeen(false);
       setPhase('pending');
-    } catch {
+    } catch (error) {
       setPhase('error');
-      setNotice('Error recuperable');
+      setNotice(error?.code === 'distinct_copy'
+        ? 'Hace falta una copia distinta de la fotografía original. Error recuperable'
+        : 'Error recuperable');
     }
   };
   const archive = async () => {
@@ -757,6 +775,9 @@ function EvidenceCopy({ quoteId }) {
       }
       remember(null);
       setSeen(false);
+      setAdding(false);
+      setWantOrigin(false);
+      setProvenanceId('');
       setPhase('verified');
       setNotice('Revisión aprobada. Fotografía verificada');
     } catch {
@@ -772,37 +793,71 @@ function EvidenceCopy({ quoteId }) {
         if (phase === 'pending' || phase === 'error') archive();
       }}
     >
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        Revisa los identificadores visibles en la copia que devuelve el servidor. Esa revisión no demuestra, por sí sola, que la copia esté anonimizada.
-      </p>
-      <div className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row">
-        <label className="min-w-0 flex-1 text-xs text-gray-600 dark:text-gray-300">
-          Hash de la fotografía de origen
+      {preview ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Revisa los identificadores visibles en la copia que devuelve el servidor. Esa revisión no demuestra, por sí sola, que la copia esté anonimizada.
+        </p>
+      ) : null}
+      {!adding && !preview ? (
+        <button
+          type="button"
+          onClick={() => {
+            setAdding(true);
+            setPhase('idle');
+            setNotice('');
+          }}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium min-[390px]:w-auto dark:border-gray-600"
+        >
+          Añadir fotografía
+        </button>
+      ) : null}
+      {adding && !preview ? (
+        <div className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row">
           <input
-            value={originHash}
-            onChange={(event) => setOriginHash(event.target.value.trim().toLowerCase())}
-            autoComplete="off"
-            spellCheck="false"
-            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-2 font-mono text-xs dark:border-gray-700 dark:bg-gray-950"
-          />
-        </label>
-        <label className="min-w-0 text-xs text-gray-600 dark:text-gray-300">
-          Copia a revisar
-          <input
+            ref={originRef}
             type="file"
             accept="image/png,image/jpeg,image/webp"
-            className="mt-1 block w-full text-xs"
+            hidden
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = '';
-              if (file) load(file);
+              if (file) prepare(file, 'origin');
             }}
           />
-        </label>
-      </div>
+          <input
+            ref={copyRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) prepare(file, 'copy');
+            }}
+          />
+          {wantOrigin && !provenanceId ? (
+            <button type="button" onClick={() => originRef.current?.click()} className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600">
+              Seleccionar la fotografía original
+            </button>
+          ) : (
+            <button type="button" onClick={() => copyRef.current?.click()} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white">
+              Seleccionar copia
+            </button>
+          )}
+          {!wantOrigin && !provenanceId ? (
+            <button type="button" onClick={() => setWantOrigin(true)} className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600">
+              Tengo la fotografía original
+            </button>
+          ) : null}
+          <button type="button" onClick={() => clear(false)} className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600">
+            Cancelar
+          </button>
+        </div>
+      ) : null}
       {phase === 'pending' || (phase === 'error' && preview) ? (
         <div className="min-w-0">
           <p className="text-sm font-medium">Copia pendiente de revisión</p>
+          {originNote ? <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{originNote}</p> : null}
           <img src={preview.url} alt="" className="mt-2 max-h-64 w-full rounded-xl bg-black object-contain" />
           <label className="mt-2 flex items-start gap-2 text-sm">
             <input type="checkbox" checked={seen} onChange={(event) => setSeen(event.target.checked)} />
@@ -813,23 +868,25 @@ function EvidenceCopy({ quoteId }) {
       {phase === 'archiving' ? <p className="text-sm font-medium">Archivo en curso</p> : null}
       {phase === 'verified' ? <p className="text-sm font-medium">Fotografía verificada</p> : null}
       {notice ? <p className="text-sm text-amber-700 dark:text-amber-300">{notice}</p> : null}
-      <div className="flex flex-col gap-2 min-[390px]:flex-row">
-        <button
-          type="submit"
-          disabled={!preview || !seen || phase === 'archiving'}
-          className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
-        >
-          Archivar en privado
-        </button>
-        <button
-          type="button"
-          disabled={!preview || phase === 'archiving'}
-          onClick={() => clear(true)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600"
-        >
-          Cancelar copia
-        </button>
-      </div>
+      {preview ? (
+        <div className="flex flex-col gap-2 min-[390px]:flex-row">
+          <button
+            type="submit"
+            disabled={!seen || phase === 'archiving'}
+            className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+          >
+            Confirmar y archivar
+          </button>
+          <button
+            type="button"
+            disabled={phase === 'archiving'}
+            onClick={() => clear(true)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600"
+          >
+            Cancelar
+          </button>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -848,7 +905,7 @@ function LinkedEvidence({ kind, quoteId }) {
   const pending = items.filter((item) => item.state === 'privacy_pending' || item.state === 'link_pending');
   const [galleryId, setGalleryId] = useState(null);
   const open = galleryId && verified.some((item) => item.id === galleryId) ? galleryId : null;
-  const empty = kind === 'commercial' ? 'Cotización sin fotografías' : 'Sin fotografías';
+  const empty = 'Sin fotografías';
   return (
     <section>
       <h3 className="text-sm font-semibold">Fotografías vinculadas</h3>

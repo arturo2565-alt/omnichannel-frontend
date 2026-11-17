@@ -49,12 +49,40 @@ export async function confirmCalibrationSeverity({ subjectId, lineId, level }) {
   return res.json();
 }
 
-export async function holdEvidencePreview({ subjectId, receivedSha256, imageBase64 }) {
+async function rejectPreview(res) {
+  let code = '';
+  try {
+    const body = await res.json();
+    if (typeof body?.code === 'string') code = body.code;
+    else if (typeof body?.message === 'string') code = body.message;
+  } catch {
+    code = '';
+  }
+  const error = httpError(res.status);
+  error.code = code;
+  throw error;
+}
+
+export async function holdEvidenceOrigin({ subjectId, imageBase64 }) {
   const res = await apiFetchOrigin('/api/calibration/evidence-previews', {
     method: 'POST',
-    body: JSON.stringify({ subjectId, receivedSha256, imageBase64 }),
+    body: JSON.stringify({ subjectId, imageBase64, role: 'origin' }),
   });
-  if (!res.ok) throw httpError(res.status);
+  if (!res.ok) await rejectPreview(res);
+  return res.json();
+}
+
+export async function holdEvidencePreview({ subjectId, imageBase64, provenanceId }) {
+  const res = await apiFetchOrigin('/api/calibration/evidence-previews', {
+    method: 'POST',
+    body: JSON.stringify({
+      subjectId,
+      imageBase64,
+      role: 'copy',
+      ...(provenanceId ? { provenanceId } : {}),
+    }),
+  });
+  if (!res.ok) await rejectPreview(res);
   return res.json();
 }
 
