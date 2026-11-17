@@ -49,8 +49,8 @@ function severityState(annotation) {
   if (!annotation) return 'Sin clasificación';
   if (annotation.status === 'validated' && annotation.provenance === 'authenticated_owner') return 'Validado';
   if (annotation.status === 'unknown' && annotation.provenance === 'insufficient_evidence') return 'Desconocido';
-  if (annotation.status === 'proposed' && annotation.provenance === 'human_declaration') return 'Pendiente de validación';
-  if (annotation.status === 'proposed' && annotation.provenance === 'visual_inference') return 'Propuesta IA';
+  if (annotation.status === 'proposed' && annotation.provenance === 'human_declaration' && annotation.inferenceMethod == null) return 'Pendiente de validación';
+  if (annotation.status === 'proposed' && annotation.provenance === 'visual_inference' && annotation.inferenceMethod === 'visual_assessment') return 'Propuesta IA';
   return 'Sin clasificación';
 }
 
@@ -752,7 +752,7 @@ export function RepairDetail({ record }) {
       </div>
       <LinkedEvidence kind="repair" quoteId={quoteId} />
       <RepairLines title="Refacciones" subjectId={quoteId} lines={groups.parts} />
-      <RepairLines title="Mano de obra" lines={groups.labor} />
+      <RepairLines title="Mano de obra" subjectId={quoteId} lines={groups.labor} />
       <section>
         <h3 className="text-sm font-semibold">Condiciones</h3>
         {active?.conditions?.length ? (
@@ -816,7 +816,7 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
       </button>
       <div id={panelId} hidden={!expanded}>
         <RepairLines title="Refacciones" subjectId={revision.id} lines={groups.parts} compact />
-        <RepairLines title="Mano de obra" lines={groups.labor} compact />
+        <RepairLines title="Mano de obra" subjectId={revision.id} lines={groups.labor} compact />
         <div className="mt-3">
           <h3 className="text-sm font-semibold">Condiciones</h3>
           {revision.conditions?.length ? (
@@ -909,8 +909,8 @@ function RepairLines({ title, subjectId, lines, compact = false }) {
                   {collected == null ? null : <span className="block text-gray-500">Cobrado {money.format(collected)}</span>}
                 </span>
               </span>
-              {line.role === 'part' ? (
-                <SeverityNote subjectId={subjectId} lineId={line.lineId} annotation={line.severityAnnotation} compact={compact} />
+              {line.severityZone ? (
+                <SeverityNote subjectId={subjectId} lineId={line.lineId} annotation={line.severityAnnotation} compact={compact || !line.severityAnchor} />
               ) : null}
             </li>
           );

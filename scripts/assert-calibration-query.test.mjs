@@ -55,6 +55,8 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Validado/);
   assert.match(page, /Desconocido/);
   assert.match(page, /severity-v1/);
+  assert.match(page, /visual_assessment/);
+  assert.match(page, /severityZone/);
   assert.match(page, /Nivel de daño/);
   assert.match(page, /min-\[390px\]:flex-row/);
   assert.match(api, /lineReviewed: true/);
