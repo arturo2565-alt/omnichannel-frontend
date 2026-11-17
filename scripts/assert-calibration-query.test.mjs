@@ -54,6 +54,11 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Advertencia de conciliación/);
   assert.match(page, /Advertencia de severidad/);
   assert.match(page, /confirmZoneLines/);
+  assert.match(page, /Validar severidades declaradas/);
+  assert.match(page, /Reintentar declaraciones pendientes/);
+  assert.match(page, /declaredSeverityReview/);
+  assert.match(api, /severity-declarations/);
+  assert.match(api, /declarationsReviewed: true/);
   const view = read('../src/calibrationView.js');
   assert.match(view, /groupObservations/);
   assert.match(view, /financialPresentation/);

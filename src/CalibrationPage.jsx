@@ -7,6 +7,7 @@ import {
   calibrationListPath,
   cancelEvidencePreview,
   confirmCalibrationSeverity,
+  confirmDeclaredSeverities,
   confirmEvidenceArchive,
   fetchCalibrationDocument,
   holdEvidenceOrigin,
@@ -20,6 +21,7 @@ import {
   confirmZoneLines,
   correspondencePending,
   declaredAmount,
+  declaredSeverityReview,
   financialPresentation,
   galleryMove,
   groupObservations,
@@ -27,7 +29,9 @@ import {
   lineAmount,
   listAmount,
   presentedAmountLabel,
+  retryDeclarations,
   severityChangeRequested,
+  severityLevelLabel,
   severityHistoryRows,
   severityPresentation,
   sumDeclared,
@@ -1281,6 +1285,53 @@ function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds, 
   );
 }
 
+function DeclarationReview({ subjectId, lines }) {
+  const client = useQueryClient();
+  const review = declaredSeverityReview(lines);
+  const [result, setResult] = useState(null);
+  const save = useMutation({
+    mutationFn: (items) => confirmDeclaredSeverities({ subjectId, items }),
+    onSuccess: async (report) => {
+      setResult(report);
+      await client.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
+      });
+    },
+  });
+  if (!subjectId || review.length === 0) return null;
+  const pending = result ? retryDeclarations(review, result.conflicts) : [];
+  const targets = pending.length > 0 ? pending : review;
+  return (
+    <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-800" aria-label="Severidades declaradas">
+      <h3 className="text-sm font-semibold">Severidades declaradas</h3>
+      <p className="mt-1 text-xs text-gray-500">{review.length === 1 ? '1 zona declarada' : `${review.length} zonas declaradas`}</p>
+      <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+        {review.map((item) => (
+          <li key={item.annotationId} className="flex min-w-0 flex-col gap-0.5 py-2 min-[390px]:flex-row min-[390px]:items-baseline min-[390px]:justify-between">
+            <span className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-200">{item.name}</span>
+            <span className="shrink-0 text-xs text-gray-500">{severityLevelLabel(item.level)} · {item.provenance}</span>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled={save.isPending}
+        onClick={() => save.mutate(targets)}
+        className="mt-2 rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 disabled:opacity-50"
+      >
+        {pending.length > 0 ? 'Reintentar declaraciones pendientes' : 'Validar severidades declaradas'}
+      </button>
+      {save.isError ? <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">La confirmación no se registró.</p> : null}
+      {result?.complete ? <p className="mt-2 text-xs text-gray-500">Declaraciones validadas.</p> : null}
+      {result && !result.complete ? (
+        <p className="mt-2 break-words text-xs text-amber-800 dark:text-amber-200">
+          La confirmación no cubre todas las declaraciones. Sin confirmar: {result.conflicts.map((item) => item.lineId).join(', ')}.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
   const zones = groupWorkZones(lines);
   const summary = financialPresentation(lines, documentTotal);
@@ -1291,6 +1342,7 @@ function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
   };
   return (
     <section className={compact ? 'mt-3' : 'flex flex-col gap-3'}>
+      {compact ? null : <DeclarationReview subjectId={subjectId} lines={lines} />}
       {compact ? (
         summary.reconciles ? null : (
           <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">

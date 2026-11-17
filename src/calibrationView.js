@@ -123,6 +123,44 @@ export function severityPresentation(annotation) {
   return { level: 'Sin clasificación', state: null };
 }
 
+export function severityLevelLabel(level) {
+  return SEVERITY_LEVEL_NAMES[level] ?? 'Desconocido';
+}
+
+export function declaredSeverityReview(lines = []) {
+  const review = [];
+  for (const zone of groupWorkZones(lines)) {
+    const notes = zone.lines.map((line) => line?.severityAnnotation).filter(Boolean);
+    if (notes.length !== zone.lines.length || notes.length === 0) continue;
+    const signatures = new Set(notes.map((note) => [
+      note.annotationId ?? '',
+      note.lineId ?? '',
+      note.level ?? '',
+      note.status ?? '',
+      note.provenance ?? '',
+      note.inferenceMethod ?? '',
+    ].join('\0')));
+    const note = notes[0];
+    if (signatures.size !== 1) continue;
+    if (note.status !== 'proposed' || note.provenance !== 'human_declaration' || note.inferenceMethod != null) continue;
+    if (!note.level || !note.annotationId || !note.lineId) continue;
+    review.push({
+      zoneId: zone.id,
+      name: zone.name,
+      level: note.level,
+      annotationId: note.annotationId,
+      lineId: note.lineId,
+      provenance: 'human_declaration',
+    });
+  }
+  return review;
+}
+
+export function retryDeclarations(review = [], conflicts = []) {
+  const pending = new Set((conflicts ?? []).map((item) => item?.lineId).filter(Boolean));
+  return (review ?? []).filter((item) => pending.has(item.lineId));
+}
+
 export function severityChangeRequested(annotation, level) {
   if (!level) return false;
   if (annotation?.status === 'validated' && annotation.provenance === 'authenticated_owner' && annotation.level === level) {

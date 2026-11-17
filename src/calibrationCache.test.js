@@ -11,6 +11,7 @@ import {
   confirmZoneLines,
   correspondencePending,
   declaredAmount,
+  declaredSeverityReview,
   economicSummary,
   financialPresentation,
   galleryMove,
@@ -19,6 +20,7 @@ import {
   groupWorkZones,
   listAmount,
   presentedAmountLabel,
+  retryDeclarations,
   severityChangeRequested,
   severityHistoryRows,
   severityPresentation,
@@ -654,4 +656,32 @@ test('el precio conjunto oculta subtotales vacíos y conserva el desglose real',
   assert.equal(rq.labor, 3600);
   assert.equal(rq.showParts, true);
   assert.equal(rq.showLabor, true);
+});
+
+test('la revisión agrupada toma solo declaraciones humanas pendientes', () => {
+  const human = (lineId, part, level) => afLine(lineId, part, 'repair_paint', 1000, {
+    annotationId: `SV-${lineId}`,
+    lineId,
+    level,
+    status: 'proposed',
+    provenance: 'human_declaration',
+    inferenceMethod: null,
+    history: [],
+  });
+  const lines = [
+    human('L1', 'salpicadera trasera izquierda', 'medio_leve'),
+    human('L2', 'fascia trasera', 'fuerte'),
+    afLine('L3', 'puerta', 'repair_paint', 1000, { annotationId: 'SV-L3', lineId: 'L3', level: 'leve', status: 'proposed', provenance: 'visual_inference', inferenceMethod: 'visual_assessment', history: [] }),
+    afLine('L4', 'cofre', 'repair_paint', 1000, { annotationId: 'SV-L4', lineId: 'L4', level: null, status: 'unknown', provenance: 'insufficient_evidence', history: [] }),
+    afLine('L5', 'costado', 'repair_paint', 1000, { annotationId: 'SV-L5', lineId: 'L5', level: 'medio', status: 'validated', provenance: 'authenticated_owner', history: [] }),
+  ];
+  const review = declaredSeverityReview(lines);
+  assert.deepEqual(review.map((item) => item.lineId), ['L1', 'L2']);
+  assert.deepEqual(review.map((item) => item.level), ['medio_leve', 'fuerte']);
+  assert.equal(review.every((item) => item.provenance === 'human_declaration'), true);
+  assert.equal(review.some((item) => item.lineId === 'L3' || item.lineId === 'L4' || item.lineId === 'L5'), false);
+  assert.equal(lines[0].priceMxn, 1000);
+  const retry = retryDeclarations(review, [{ lineId: 'L2' }]);
+  assert.deepEqual(retry.map((item) => item.lineId), ['L2']);
+  assert.deepEqual(declaredSeverityReview([]), []);
 });
