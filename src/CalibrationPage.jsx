@@ -1529,9 +1529,12 @@ export function VehicleIdentity({ record, subjectId, heading = false }) {
       </Tag>
       {color?.mode === 'change' ? (
         <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">
-          Color actual {color.current} → Color solicitado {color.requested}
+          {color.current ? `Color actual ${color.current} → ` : ''}Color solicitado {color.requested}
           {color.showProvenance ? <span className="ml-2 text-[11px] text-gray-400">{color.provenance}</span> : null}
         </p>
+      ) : null}
+      {color?.original ? (
+        <p className="mt-1 break-words text-xs text-gray-400">Color original {color.original}</p>
       ) : null}
       {color?.mode === 'unknown' ? (
         <p className="mt-1 break-words text-xs text-gray-400">
@@ -1546,6 +1549,7 @@ export function VehicleIdentity({ record, subjectId, heading = false }) {
 
 function ColorCorrection({ subjectId }) {
   const client = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [exteriorColor, setExteriorColor] = useState('');
   const [requestedColor, setRequestedColor] = useState('');
   const save = useMutation({
@@ -1562,6 +1566,17 @@ function ColorCorrection({ subjectId }) {
       });
     },
   });
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="mt-2 text-xs text-gray-500 underline decoration-gray-400 underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
+        onClick={() => setOpen(true)}
+      >
+        Corregir color
+      </button>
+    );
+  }
   return (
     <form
       className="mt-3 flex min-w-0 flex-col gap-2"

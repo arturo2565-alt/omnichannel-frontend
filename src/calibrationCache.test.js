@@ -294,6 +294,32 @@ test('el color declarado no se presenta como validado y el cambio conserva los d
   assert.equal(change.mode, 'change');
   assert.equal(change.current, 'Blanco');
   assert.equal(change.requested, 'Negro');
+  const bath = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: null,
+    exteriorProvenance: 'unknown',
+    requestedColor: 'plata',
+    requestedProvenance: 'human_declaration',
+    originalColor: null,
+  });
+  assert.equal(bath.mode, 'change');
+  assert.equal(bath.current, null);
+  assert.equal(bath.requested, 'Plata');
+  assert.equal(bath.provenance, 'human_declaration');
+  const original = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'rojo',
+    exteriorProvenance: 'human_declaration',
+    requestedColor: null,
+    originalColor: 'blanco',
+    originalProvenance: 'human_declaration',
+  });
+  assert.equal(original.mode, 'single');
+  assert.equal(original.label, 'Rojo');
+  assert.equal(original.original, 'Blanco');
+  assert.notEqual(original.original, original.label);
   assert.equal(vehicleColorSuffix({
     contractVersion: 'color-v1',
     status: 'proposed',

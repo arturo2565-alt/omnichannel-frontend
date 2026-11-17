@@ -134,39 +134,57 @@ export function colorPresentation(annotation) {
   if (annotation.contractVersion != null && annotation.contractVersion !== 'color-v1') return null;
   const exterior = typeof annotation.exteriorColor === 'string' ? annotation.exteriorColor.trim() : '';
   const requested = typeof annotation.requestedColor === 'string' ? annotation.requestedColor.trim() : '';
+  const original = typeof annotation.originalColor === 'string' ? annotation.originalColor.trim() : '';
   const provenance = COLOR_PROVENANCE.has(annotation.exteriorProvenance) ? annotation.exteriorProvenance : null;
   const requestedProvenance = COLOR_PROVENANCE.has(annotation.requestedProvenance) ? annotation.requestedProvenance : null;
+  const originalLabel = original ? colorLabel(original) : null;
   if (annotation.status === 'validated' && provenance !== 'authenticated_owner') return null;
   if ((annotation.status === 'proposed' || annotation.status === 'unknown') && provenance === 'authenticated_owner') return null;
-  if (annotation.status === 'unknown' || (!exterior && !requested)) {
+  if (annotation.status === 'unknown' || (!exterior && !requested && !original)) {
     return {
       mode: 'unknown',
       label: 'Color no determinado',
       current: null,
       requested: null,
+      original: null,
       provenance: 'unknown',
       showProvenance: true,
     };
   }
   if (requested) {
-    const shown = requestedProvenance && requestedProvenance !== provenance
-      ? `${provenance ?? 'unknown'} → ${requestedProvenance}`
-      : (provenance ?? requestedProvenance);
+    const shown = !exterior
+      ? (requestedProvenance ?? 'unknown')
+      : requestedProvenance && requestedProvenance !== provenance
+        ? `${provenance ?? 'unknown'} → ${requestedProvenance}`
+        : (provenance ?? requestedProvenance);
     return {
       mode: 'change',
       label: null,
-      current: exterior ? colorLabel(exterior) : 'No determinado',
+      current: exterior ? colorLabel(exterior) : null,
       requested: colorLabel(requested),
+      original: originalLabel,
       provenance: shown,
       showProvenance: true,
     };
   }
-  if (!provenance) return null;
+  if (!exterior && originalLabel) {
+    return {
+      mode: 'original',
+      label: null,
+      current: null,
+      requested: null,
+      original: originalLabel,
+      provenance: 'human_declaration',
+      showProvenance: true,
+    };
+  }
+  if (!provenance || !exterior) return null;
   return {
     mode: 'single',
     label: colorLabel(exterior),
     current: colorLabel(exterior),
     requested: null,
+    original: originalLabel,
     provenance,
     showProvenance: true,
   };
