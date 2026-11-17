@@ -24,6 +24,8 @@ import {
   severityChangeRequested,
   severityHistoryRows,
   severityPresentation,
+  colorPresentation,
+  vehicleColorSuffix,
   sumDeclared,
   workLabel,
 } from './calibrationView.js';
@@ -243,6 +245,63 @@ test('la severidad validada se distingue de la propuesta y el historial no inven
   assert.equal(rows[0].state, null);
   assert.equal(rows[1].lineId, 'L04');
   assert.equal(rows[1].state, 'Propuesta IA');
+});
+
+test('el color declarado no se presenta como validado y el cambio conserva los dos extremos', () => {
+  const declared = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'rojo',
+    exteriorProvenance: 'human_declaration',
+    requestedColor: null,
+    requestedProvenance: null,
+  });
+  assert.equal(declared.mode, 'single');
+  assert.equal(declared.label, 'Rojo');
+  assert.equal(declared.provenance, 'human_declaration');
+  assert.equal(vehicleColorSuffix({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'rojo',
+    exteriorProvenance: 'human_declaration',
+  }), ' · Rojo');
+  const inferred = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'blanco',
+    exteriorProvenance: 'visual_inference',
+    requestedColor: null,
+  });
+  assert.equal(inferred.provenance, 'visual_inference');
+  assert.notEqual(inferred.provenance, 'authenticated_owner');
+  const unknown = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'unknown',
+    exteriorColor: null,
+    exteriorProvenance: 'unknown',
+    requestedColor: null,
+  });
+  assert.equal(unknown.mode, 'unknown');
+  assert.equal(unknown.label, 'Color no determinado');
+  const change = colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'blanco',
+    exteriorProvenance: 'human_declaration',
+    requestedColor: 'negro',
+    requestedProvenance: 'human_declaration',
+  });
+  assert.equal(change.mode, 'change');
+  assert.equal(change.current, 'Blanco');
+  assert.equal(change.requested, 'Negro');
+  assert.equal(vehicleColorSuffix({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'blanco',
+    exteriorProvenance: 'human_declaration',
+    requestedColor: 'negro',
+    requestedProvenance: 'human_declaration',
+  }), '');
 });
 
 test('una confirmación parcial deja la zona sin cerrar', async () => {

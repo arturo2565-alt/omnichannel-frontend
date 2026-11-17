@@ -127,6 +127,60 @@ export function severityLevelLabel(level) {
   return SEVERITY_LEVEL_NAMES[level] ?? 'Desconocido';
 }
 
+const COLOR_PROVENANCE = new Set(['human_declaration', 'visual_inference', 'unknown', 'authenticated_owner']);
+
+export function colorPresentation(annotation) {
+  if (!annotation || typeof annotation !== 'object') return null;
+  if (annotation.contractVersion != null && annotation.contractVersion !== 'color-v1') return null;
+  const exterior = typeof annotation.exteriorColor === 'string' ? annotation.exteriorColor.trim() : '';
+  const requested = typeof annotation.requestedColor === 'string' ? annotation.requestedColor.trim() : '';
+  const provenance = COLOR_PROVENANCE.has(annotation.exteriorProvenance) ? annotation.exteriorProvenance : null;
+  const requestedProvenance = COLOR_PROVENANCE.has(annotation.requestedProvenance) ? annotation.requestedProvenance : null;
+  if (annotation.status === 'validated' && provenance !== 'authenticated_owner') return null;
+  if ((annotation.status === 'proposed' || annotation.status === 'unknown') && provenance === 'authenticated_owner') return null;
+  if (annotation.status === 'unknown' || (!exterior && !requested)) {
+    return {
+      mode: 'unknown',
+      label: 'Color no determinado',
+      current: null,
+      requested: null,
+      provenance: 'unknown',
+      showProvenance: true,
+    };
+  }
+  if (requested) {
+    const shown = requestedProvenance && requestedProvenance !== provenance
+      ? `${provenance ?? 'unknown'} → ${requestedProvenance}`
+      : (provenance ?? requestedProvenance);
+    return {
+      mode: 'change',
+      label: null,
+      current: exterior ? colorLabel(exterior) : 'No determinado',
+      requested: colorLabel(requested),
+      provenance: shown,
+      showProvenance: true,
+    };
+  }
+  if (!provenance) return null;
+  return {
+    mode: 'single',
+    label: colorLabel(exterior),
+    current: colorLabel(exterior),
+    requested: null,
+    provenance,
+    showProvenance: true,
+  };
+}
+
+export function vehicleColorSuffix(annotation) {
+  const view = colorPresentation(annotation);
+  return view?.mode === 'single' ? ` · ${view.label}` : '';
+}
+
+function colorLabel(value) {
+  return `${value.charAt(0).toLocaleUpperCase('es-MX')}${value.slice(1)}`;
+}
+
 export function declaredSeverityReview(lines = []) {
   const review = [];
   for (const zone of groupWorkZones(lines)) {

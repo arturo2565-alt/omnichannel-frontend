@@ -8,6 +8,7 @@ import {
   cancelEvidencePreview,
   confirmCalibrationSeverity,
   confirmDeclaredSeverities,
+  confirmVehicleColor,
   confirmEvidenceArchive,
   fetchCalibrationDocument,
   holdEvidenceOrigin,
@@ -34,6 +35,7 @@ import {
   severityLevelLabel,
   severityHistoryRows,
   severityPresentation,
+  colorPresentation,
   sumDeclared,
 } from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -510,8 +512,8 @@ export function VisualDetail({ record }) {
   const open = galleryId && verified.includes(galleryId) ? galleryId : null;
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <header>
-        <h2 className="text-2xl font-semibold tracking-tight">{vehicle(record) || record.id}</h2>
+      <header className="min-w-0">
+        <VehicleIdentity record={record} subjectId={record.id} heading />
         <p className="mt-1 text-sm text-gray-500">{record.id}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>{ARCHIVE[record.archiveStatus] ?? record.archiveStatus}</MetaChip>
@@ -941,10 +943,10 @@ export function RepairDetail({ record }) {
     <div className="flex min-w-0 flex-col gap-4">
       <header>
         <h2 className="break-all text-2xl font-semibold tracking-tight">{quoteId}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          {vehicle(active ?? record) || 'Vehículo incompleto'}
+        <div className="mt-1 min-w-0 text-sm text-gray-600 dark:text-gray-300">
+          <VehicleIdentity record={active ?? record} subjectId={quoteId} />
           <CatalogMark record={active ?? record} />
-        </p>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>Evidencia textual</MetaChip>
           <Integrity value={record.integrity} />
@@ -1012,7 +1014,7 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
           <span className="block truncate text-sm font-semibold">{revision.id}</span>
           <span className="mt-0.5 block truncate text-xs text-gray-500">
             Revisión {revision.revision ?? '—'}
-            {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+            {vehicle(revision) ? ` · ${vehicle(revision)}${vehicleColorText(revision)}` : ''}
             <CatalogMark record={revision} />
           </span>
           <span className="mt-1 block text-sm font-medium tabular-nums">
@@ -1371,13 +1373,13 @@ export function CommercialDetail({ record }) {
   const active = revisions.find((item) => item.id === record.headQuoteId) ?? revisions[revisions.length - 1] ?? null;
   const quoteId = active?.id ?? record.headQuoteId;
   return (
-    <div className="flex flex-col gap-4">
-      <header>
-        <h2 className="text-2xl font-semibold tracking-tight">{quoteId}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          {vehicle(active ?? record) || 'Vehículo incompleto'}
+    <div className="flex min-w-0 flex-col gap-4">
+      <header className="min-w-0">
+        <h2 className="break-words text-2xl font-semibold tracking-tight">{quoteId}</h2>
+        <div className="mt-1 min-w-0 text-sm text-gray-600 dark:text-gray-300">
+          <VehicleIdentity record={active ?? record} subjectId={quoteId} />
           <CatalogMark record={active ?? record} />
-        </p>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <MetaChip>{SERVICES[record.service] ?? 'Servicio no registrado'}</MetaChip>
           <Integrity value={record.integrity} />
@@ -1413,7 +1415,7 @@ export function CommercialDetail({ record }) {
                       <p className="truncate text-sm font-semibold">{revision.id}</p>
                       <p className="mt-0.5 text-xs text-gray-500">
                         Revisión {revision.revision ?? '—'}
-                        {vehicle(revision) ? ` · ${vehicle(revision)}` : ''}
+                        {vehicle(revision) ? ` · ${vehicle(revision)}${vehicleColorText(revision)}` : ''}
                         <CatalogMark record={revision} />
                       </p>
                     </div>
@@ -1503,6 +1505,101 @@ function Integrity({ value }) {
 
 function vehicle(record) {
   return record?.presentation?.label || [record?.make, record?.model, record?.year].filter(Boolean).join(' ');
+}
+
+function vehicleColorText(record) {
+  const color = colorPresentation(record?.colorAnnotation);
+  if (color?.mode === 'single') return ` · ${color.label}`;
+  if (color?.mode === 'change') return ` · ${color.current} → ${color.requested}`;
+  return '';
+}
+
+export function VehicleIdentity({ record, subjectId, heading = false }) {
+  const name = vehicle(record);
+  const color = colorPresentation(record?.colorAnnotation);
+  const title = name ? `${name}${color?.mode === 'single' ? ` · ${color.label}` : ''}` : '';
+  const Tag = heading ? 'h2' : 'p';
+  return (
+    <div className="min-w-0 break-words">
+      <Tag className={heading ? 'break-words text-2xl font-semibold tracking-tight' : 'break-words'}>
+        {title || (heading ? (record?.id || 'Vehículo incompleto') : 'Vehículo incompleto')}
+        {color?.showProvenance && color.mode === 'single' ? (
+          <span className="ml-2 align-middle text-[11px] font-normal text-gray-400">{color.provenance}</span>
+        ) : null}
+      </Tag>
+      {color?.mode === 'change' ? (
+        <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">
+          Color actual {color.current} → Color solicitado {color.requested}
+          {color.showProvenance ? <span className="ml-2 text-[11px] text-gray-400">{color.provenance}</span> : null}
+        </p>
+      ) : null}
+      {color?.mode === 'unknown' ? (
+        <p className="mt-1 break-words text-xs text-gray-400">
+          Color no determinado
+          <span className="ml-2 text-[11px]">{color.provenance}</span>
+        </p>
+      ) : null}
+      {subjectId ? <ColorCorrection subjectId={subjectId} /> : null}
+    </div>
+  );
+}
+
+function ColorCorrection({ subjectId }) {
+  const client = useQueryClient();
+  const [exteriorColor, setExteriorColor] = useState('');
+  const [requestedColor, setRequestedColor] = useState('');
+  const save = useMutation({
+    mutationFn: () => confirmVehicleColor({
+      subjectId,
+      exteriorColor: exteriorColor.trim(),
+      requestedColor: requestedColor.trim(),
+    }),
+    onSuccess: async () => {
+      setExteriorColor('');
+      setRequestedColor('');
+      await client.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
+      });
+    },
+  });
+  return (
+    <form
+      className="mt-3 flex min-w-0 flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!exteriorColor.trim()) return;
+        save.mutate();
+      }}
+    >
+      <label className="min-w-0 text-xs text-gray-500" htmlFor={`color-exterior-${subjectId}`}>
+        Color exterior
+        <input
+          id={`color-exterior-${subjectId}`}
+          value={exteriorColor}
+          onChange={(event) => setExteriorColor(event.target.value)}
+          className="mt-1 w-full min-w-0 break-words rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+        />
+      </label>
+      <label className="min-w-0 text-xs text-gray-500" htmlFor={`color-requested-${subjectId}`}>
+        Color solicitado
+        <input
+          id={`color-requested-${subjectId}`}
+          value={requestedColor}
+          onChange={(event) => setRequestedColor(event.target.value)}
+          className="mt-1 w-full min-w-0 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={save.isPending || !exteriorColor.trim()}
+        className="w-fit rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 disabled:opacity-50 dark:border-gray-700 dark:text-gray-100"
+      >
+        Corregir color
+      </button>
+      {save.isError ? <p className="break-words text-xs text-amber-800 dark:text-amber-200">La corrección de color no se registró.</p> : null}
+      {save.isSuccess ? <p className="text-xs text-gray-500">Color corregido.</p> : null}
+    </form>
+  );
 }
 
 function CatalogMark({ record }) {

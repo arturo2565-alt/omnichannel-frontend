@@ -57,6 +57,23 @@ export async function confirmDeclaredSeverities({ subjectId, items }) {
   return res.json();
 }
 
+export async function confirmVehicleColor({ subjectId, exteriorColor, requestedColor, finish, paintCode }) {
+  const body = {
+    subjectId,
+    exteriorColor,
+    colorReviewed: true,
+  };
+  if (requestedColor) body.requestedColor = requestedColor;
+  if (finish) body.finish = finish;
+  if (paintCode) body.paintCode = paintCode;
+  const res = await apiFetchOrigin('/api/calibration/color', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw httpError(res.status);
+  return res.json();
+}
+
 export async function confirmCalibrationSeverity({ subjectId, lineId, level }) {
   const res = await apiFetchOrigin('/api/calibration/severity', {
     method: 'POST',
