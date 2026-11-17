@@ -7,8 +7,10 @@ import {
 } from './calibrationPaths.js';
 import {
   declaredAmount,
+  economicSummary,
   galleryMove,
   groupRepairLines,
+  groupWorkZones,
   listAmount,
   sumDeclared,
 } from './calibrationView.js';
@@ -68,6 +70,131 @@ test('RQ separa partidas, oculta importes ausentes y la galería no sale del ran
   assert.equal(galleryMove(photos, 'IMG-000001', 1), 'IMG-000002');
   assert.equal(galleryMove(photos, 'IMG-000003', 1), 'IMG-000003');
   assert.equal(galleryMove([], 'IMG-000001', 1), null);
+});
+
+function afLine(lineId, part, treatment, priceMxn, annotation = null) {
+  return {
+    lineId,
+    part,
+    treatment,
+    priceMxn,
+    severityZone: `af:${lineId}`,
+    severityAnnotation: annotation,
+  };
+}
+
+function note(status, provenance, level, inferenceMethod = null) {
+  return { level, status, provenance, inferenceMethod, history: [] };
+}
+
+test('AF-000007 agrupa dos zonas y conserva cuatro partidas', () => {
+  const lines = [
+    afLine('L01', 'salpicadera izquierda', 'replace', 1900, note('unknown', 'insufficient_evidence', null)),
+    afLine('L02', 'salpicadera izquierda', 'paint', 3600, note('unknown', 'insufficient_evidence', null)),
+    afLine('L03', 'fascia delantera', 'replace', 2700, note('proposed', 'visual_inference', 'fuerte', 'visual_assessment')),
+    afLine('L04', 'fascia delantera', 'paint', 3600, note('proposed', 'visual_inference', 'fuerte', 'visual_assessment')),
+  ];
+  const zones = groupWorkZones(lines);
+  assert.equal(zones.length, 2);
+  assert.deepEqual(zones.map((zone) => zone.lines.map((line) => line.lineId)), [['L01', 'L02'], ['L03', 'L04']]);
+  assert.equal(zones[0].subtotal, 5500);
+  assert.equal(zones[1].subtotal, 6300);
+  assert.equal(zones[0].name, 'salpicadera izquierda');
+  assert.equal(zones[1].name, 'fascia delantera');
+  const summary = economicSummary(lines, 11800);
+  assert.equal(summary.parts, 4600);
+  assert.equal(summary.labor, 7200);
+  assert.equal(summary.documentTotal, 11800);
+  assert.equal(summary.zoneSum, 11800);
+  assert.equal(summary.unclassified, 0);
+  assert.equal(summary.reconciles, true);
+  assert.deepEqual(lines.map((line) => line.priceMxn), [1900, 3600, 2700, 3600]);
+});
+
+test('la agrupación exige la misma pieza y rechaza nombres parecidos o ambiguos', () => {
+  const similar = groupWorkZones([
+    afLine('L01', 'salpicadera izquierda', 'replace', 1900),
+    afLine('L02', 'Montaje y pintura de salpicadera izquierda', 'paint', 3600),
+    afLine('L03', 'salpicadera derecha', 'replace', 1800),
+    afLine('L04', 'salpicadera', 'paint', 900),
+  ]);
+  assert.equal(similar.length, 4);
+  assert.equal(similar.every((zone) => zone.grouped === false), true);
+
+  const duplicate = groupWorkZones([
+    afLine('L01', 'puerta delantera izquierda', 'replace', 1000),
+    afLine('L02', 'puerta delantera izquierda', 'replace', 1100),
+  ]);
+  assert.equal(duplicate.length, 2);
+
+  const generic = groupWorkZones([
+    { lineId: 'L01', part: 'Pintura', role: 'labor', labor: 'paint', quotedMxn: 1000, quotedValidation: 'human_confirmed' },
+    { lineId: 'L02', part: 'pintura', role: 'labor', labor: 'repair', quotedMxn: 800, quotedValidation: 'human_confirmed' },
+  ]);
+  assert.equal(generic.length, 2);
+  assert.equal(generic.every((zone) => zone.identity == null), true);
+
+  const conflict = groupWorkZones([
+    afLine('L01', 'fascia delantera', 'replace', 2700, note('validated', 'authenticated_owner', 'fuerte')),
+    afLine('L02', 'fascia delantera', 'paint', 3600, note('proposed', 'visual_inference', 'fuerte', 'visual_assessment')),
+  ]);
+  assert.equal(conflict.length, 2);
+
+  const combined = groupWorkZones([
+    afLine('L01', 'cofre', 'replace_paint', 1900),
+  ]);
+  assert.equal(combined.length, 1);
+  assert.equal(combined[0].grouped, false);
+  const combinedSummary = economicSummary(combined[0].lines, 1900);
+  assert.equal(combinedSummary.unclassified, 1);
+  assert.equal(combinedSummary.reconciles, true);
+  assert.equal(combinedSummary.documentTotal, 1900);
+});
+
+test('RQ agrupa refacción y montaje, y deja sola la mano de obra', () => {
+  const paired = [
+    { lineId: 'L01', part: 'Fascia delantera', role: 'part', labor: null, quotedMxn: 2700, quotedValidation: 'human_confirmed', severityZone: 'rq:fascia delantera' },
+    { lineId: 'L02', part: 'fascia delantera', role: 'labor', labor: 'mount_and_paint', quotedMxn: 3600, quotedValidation: 'human_confirmed', severityZone: 'rq:fascia delantera' },
+  ];
+  const zones = groupWorkZones(paired);
+  assert.equal(zones.length, 1);
+  assert.equal(zones[0].grouped, true);
+  assert.equal(zones[0].subtotal, 6300);
+  assert.equal(zones[0].lines.length, 2);
+  const summary = economicSummary(paired, 6300);
+  assert.equal(summary.parts, 2700);
+  assert.equal(summary.labor, 3600);
+  assert.equal(summary.reconciles, true);
+
+  const laborOnly = [
+    { lineId: 'L01', part: 'puerta trasera derecha', role: 'labor', labor: 'repair', quotedMxn: 2400, quotedValidation: 'human_confirmed', severityZone: 'rq:puerta trasera derecha' },
+  ];
+  const single = groupWorkZones(laborOnly);
+  assert.equal(single.length, 1);
+  assert.equal(single[0].lines.length, 1);
+  const laborSummary = economicSummary(laborOnly, 2400);
+  assert.equal(laborSummary.parts, 0);
+  assert.equal(laborSummary.labor, 2400);
+  assert.equal(laborSummary.reconciles, true);
+
+  const missing = economicSummary(paired, null);
+  assert.equal(missing.documentTotal, null);
+  assert.equal(missing.reconciles, false);
+  assert.equal(missing.zoneSum, 6300);
+  assert.equal(economicSummary(paired, 10000).reconciles, false);
+
+  const repairPaint = groupWorkZones([
+    afLine('L01', 'puerta trasera', 'repair', 800),
+    afLine('L02', 'puerta trasera', 'paint', 2200),
+  ]);
+  assert.equal(repairPaint.length, 1);
+  assert.equal(repairPaint[0].subtotal, 3000);
+  assert.equal(economicSummary(repairPaint[0].lines, 3000).labor, 3000);
+
+  const onePiece = groupWorkZones([afLine('L01', 'cofre', 'replace', 1900)]);
+  assert.equal(onePiece.length, 1);
+  assert.equal(onePiece[0].lines.length, 1);
+  assert.equal(onePiece[0].subtotal, 1900);
 });
 
 test('las rutas de calibración no apuntan a un almacenamiento externo', () => {

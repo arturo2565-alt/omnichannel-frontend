@@ -15,7 +15,16 @@ import {
   loadCalibrationPhoto,
   loadEvidencePreview,
 } from './calibrationApi.js';
-import { declaredAmount, galleryMove, groupRepairLines, listAmount, sumDeclared } from './calibrationView.js';
+import {
+  declaredAmount,
+  economicSummary,
+  galleryMove,
+  groupWorkZones,
+  lineAmount,
+  lineCharge,
+  listAmount,
+  sumDeclared,
+} from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { useAuth } from './AuthContext.jsx';
@@ -525,29 +534,7 @@ export function VisualDetail({ record }) {
           <Integrity value={record.integrity} />
         </div>
       </header>
-      <article className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-800 dark:bg-gray-950/50">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total cotizado</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums">{money.format(record.quotedTotalMxn || 0)}</p>
-      </article>
-      <section>
-        <h3 className="text-sm font-semibold">Piezas y tratamientos</h3>
-        {record.lines?.length ? (
-          <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-            {record.lines.map((line) => (
-              <li key={line.lineId ?? line.part} className="flex min-w-0 flex-col gap-2 py-2 text-sm">
-                <span className="flex min-w-0 items-center justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block truncate">{line.part}</span>
-                    <span className="block text-xs text-gray-500">{TREATMENTS[line.treatment] ?? line.treatment}</span>
-                  </span>
-                  <span className="shrink-0 tabular-nums">{money.format(line.priceMxn)}</span>
-                </span>
-                <SeverityNote subjectId={record.id} lineId={line.lineId} annotation={line.severityAnnotation} />
-              </li>
-            ))}
-          </ul>
-        ) : <p className="mt-2 text-sm text-gray-500">Sin piezas registradas.</p>}
-      </section>
+      <WorkBoard lines={record.lines} documentTotal={record.quotedTotalMxn} subjectId={record.id} />
       <section>
         <h3 className="text-sm font-semibold">Fotografías</h3>
         {record.photos?.length ? (
@@ -958,7 +945,6 @@ export function RepairDetail({ record }) {
       return next;
     });
   };
-  const groups = groupRepairLines(active?.lines);
   const contracted = sumDeclared(active?.lines, 'contractedMxn', 'contractedValidation');
   const collected = sumDeclared(active?.lines, 'collectedMxn', 'collectedValidation');
   return (
@@ -984,8 +970,7 @@ export function RepairDetail({ record }) {
         {collected == null ? null : <PriceCard label="Cobrado" value={collected} validation="human_confirmed" />}
       </div>
       <LinkedEvidence kind="repair" quoteId={quoteId} />
-      <RepairLines title="Refacciones" subjectId={quoteId} lines={groups.parts} />
-      <RepairLines title="Mano de obra" subjectId={quoteId} lines={groups.labor} />
+      <WorkBoard lines={active?.lines} documentTotal={active?.quotedTotalMxn} subjectId={quoteId} />
       <section>
         <h3 className="text-sm font-semibold">Condiciones</h3>
         {active?.conditions?.length ? (
@@ -1019,7 +1004,6 @@ export function RepairDetail({ record }) {
 
 function RepairRevision({ revision, active, expanded, onToggle }) {
   const panelId = `rq-revision-${revision.id}`;
-  const groups = groupRepairLines(revision.lines);
   return (
     <li className={`rounded-xl border p-3 ${active ? 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950/30'}`}>
       <button
@@ -1048,8 +1032,7 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
         {active ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Activa</span> : null}
       </button>
       <div id={panelId} hidden={!expanded}>
-        <RepairLines title="Refacciones" subjectId={revision.id} lines={groups.parts} compact />
-        <RepairLines title="Mano de obra" subjectId={revision.id} lines={groups.labor} compact />
+        <WorkBoard lines={revision.lines} documentTotal={revision.quotedTotalMxn} subjectId={revision.id} compact />
         <div className="mt-3">
           <h3 className="text-sm font-semibold">Condiciones</h3>
           {revision.conditions?.length ? (
@@ -1063,11 +1046,17 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
   );
 }
 
-function SeverityNote({ subjectId, lineId, annotation, compact = false }) {
+function SeverityNote({ subjectId, lineIds, annotation, compact = false }) {
   const client = useQueryClient();
+  const ids = [...new Set((lineIds ?? []).filter(Boolean))];
+  const formKey = ids.join('-') || 'zona';
   const [level, setLevel] = useState(annotation?.status === 'validated' ? annotation.level ?? '' : '');
   const save = useMutation({
-    mutationFn: (next) => confirmCalibrationSeverity({ subjectId, lineId, level: next }),
+    mutationFn: async (next) => {
+      for (const lineId of ids) {
+        await confirmCalibrationSeverity({ subjectId, lineId, level: next });
+      }
+    },
     onSuccess: async () => {
       await client.invalidateQueries({
         predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
@@ -1088,7 +1077,7 @@ function SeverityNote({ subjectId, lineId, annotation, compact = false }) {
           Historial: {history.map((item) => `${severityLabel(item.level)} · ${severityState(item)}`).join(' · ')}
         </p>
       ) : null}
-      {compact || !subjectId || !lineId ? null : (
+      {compact || !subjectId || ids.length === 0 ? null : (
         <form
           className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row min-[390px]:items-center"
           onSubmit={(event) => {
@@ -1096,9 +1085,9 @@ function SeverityNote({ subjectId, lineId, annotation, compact = false }) {
             if (level) save.mutate(level);
           }}
         >
-          <label className="sr-only" htmlFor={`severity-${subjectId}-${lineId}`}>Nivel de daño</label>
+          <label className="sr-only" htmlFor={`severity-${subjectId}-${formKey}`}>Nivel de daño</label>
           <select
-            id={`severity-${subjectId}-${lineId}`}
+            id={`severity-${subjectId}-${formKey}`}
             value={level}
             onChange={(event) => setLevel(event.target.value)}
             className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
@@ -1120,35 +1109,139 @@ function SeverityNote({ subjectId, lineId, annotation, compact = false }) {
   );
 }
 
-function RepairLines({ title, subjectId, lines, compact = false }) {
-  if (!lines?.length) return null;
+function workLabel(line) {
+  if (line?.role === 'labor') return LABOR[line.labor] ?? line.labor ?? 'Mano de obra';
+  if (line?.role === 'part') return 'Refacción';
+  if (line?.treatment) return TREATMENTS[line.treatment] ?? line.treatment;
+  return 'Partida';
+}
+
+function categoryAmount(summary, key) {
+  const count = summary[`${key}Count`];
+  const value = summary[key];
+  if (value == null) return 'No proporcionado';
+  if (count === 0 && summary.unclassified > 0) return '—';
+  return money.format(value);
+}
+
+function zoneSeverity(lines) {
+  const notes = lines.map((line) => line.severityAnnotation).filter(Boolean);
+  const signatures = new Set(notes.map((note) => [
+    note.level ?? '',
+    note.status ?? '',
+    note.provenance ?? '',
+    note.inferenceMethod ?? '',
+  ].join('\0')));
+  const history = [];
+  const seen = new Set();
+  for (const note of notes) {
+    for (const item of note.history ?? []) {
+      const key = item.annotationId ?? `${item.level}|${item.status}|${item.provenance}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      history.push(item);
+    }
+  }
+  return {
+    show: lines.some((line) => line.severityZone),
+    annotation: signatures.size <= 1 && notes[0] ? { ...notes[0], history } : null,
+    lineIds: lines.map((line) => line.lineId).filter(Boolean),
+  };
+}
+
+function EconomicSummary({ summary }) {
   return (
-    <section className={compact ? 'mt-3' : ''}>
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-        {lines.map((line) => {
-          const contracted = declaredAmount(line.contractedMxn, line.contractedValidation);
-          const collected = declaredAmount(line.collectedMxn, line.collectedValidation);
-          return (
-            <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 flex-col gap-2 py-2 text-sm">
-              <span className="flex min-w-0 items-start justify-between gap-3">
-                <span className="min-w-0">
-                  <span className="block truncate">{line.part}</span>
-                  <span className="block text-xs text-gray-500">{line.role === 'labor' ? (LABOR[line.labor] ?? line.labor) : 'Refacción'}</span>
+    <section className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+      <article className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-800 dark:bg-gray-950/50 min-[390px]:col-span-2">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total cotizado del documento</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.documentTotal == null ? 'No proporcionado' : money.format(summary.documentTotal)}</p>
+      </article>
+      <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Refacciones</p>
+        <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'parts')}</p>
+      </article>
+      <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Mano de obra y pintura</p>
+        <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'labor')}</p>
+      </article>
+      {summary.unclassified > 0 ? (
+        <p className="text-xs text-gray-500 min-[390px]:col-span-2">Partidas sin categoría inequívoca: {summary.unclassified}</p>
+      ) : null}
+      {summary.reconciles ? null : (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 min-[390px]:col-span-2 dark:bg-amber-950/50 dark:text-amber-100">
+          Advertencia de conciliación. El desglose no coincide con el total cotizado del documento.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ZoneCard({ zone, subjectId, compact = false }) {
+  const [open, setOpen] = useState(true);
+  const panelId = `zone-${subjectId}-${zone.id}`;
+  const labels = zone.lines.map(workLabel).filter(Boolean).join(' · ');
+  const severity = zoneSeverity(zone.lines);
+  return (
+    <li className="min-w-0 rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full min-w-0 flex-col gap-1 rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 min-[390px]:flex-row min-[390px]:items-start min-[390px]:justify-between"
+      >
+        <span className="min-w-0">
+          <span className="block break-words text-sm font-semibold">{zone.name}</span>
+          <span className="mt-0.5 block break-words text-xs text-gray-500">{labels}</span>
+        </span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">{zone.subtotal == null ? 'Incompleto' : money.format(zone.subtotal)}</span>
+      </button>
+      {severity.show ? (
+        <div className="mt-2">
+          <SeverityNote subjectId={subjectId} lineIds={severity.lineIds} annotation={severity.annotation} compact={compact} />
+        </div>
+      ) : null}
+      <div id={panelId} hidden={!open} className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+        <ul className="space-y-2">
+          {zone.lines.map((line) => {
+            const contracted = declaredAmount(line.contractedMxn, line.contractedValidation);
+            const collected = declaredAmount(line.collectedMxn, line.collectedValidation);
+            const amount = lineAmount(line);
+            return (
+              <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 flex-col gap-0.5 text-sm">
+                <span className="flex min-w-0 items-start justify-between gap-3">
+                  <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{workLabel(line)}</span>
+                  <span className="shrink-0 tabular-nums">{amount == null ? 'No proporcionado' : money.format(amount)}</span>
                 </span>
-                <span className="shrink-0 text-right text-xs tabular-nums">
-                  <span className="block text-sm font-medium">{money.format(line.quotedMxn)}</span>
-                  {contracted == null ? null : <span className="block text-gray-500">Contratado {money.format(contracted)}</span>}
-                  {collected == null ? null : <span className="block text-gray-500">Cobrado {money.format(collected)}</span>}
-                </span>
-              </span>
-              {line.severityZone ? (
-                <SeverityNote subjectId={subjectId} lineId={line.lineId} annotation={line.severityAnnotation} compact={compact || !line.severityAnchor} />
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+                {lineCharge(line) === 'part' ? <span className="text-[11px] text-gray-400">Procedencia no registrada</span> : null}
+                {contracted == null ? null : <span className="text-xs text-gray-500">Contratado {money.format(contracted)}</span>}
+                {collected == null ? null : <span className="text-xs text-gray-500">Cobrado {money.format(collected)}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </li>
+  );
+}
+
+function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
+  const zones = groupWorkZones(lines);
+  const summary = economicSummary(lines, documentTotal);
+  return (
+    <section className={compact ? 'mt-3' : 'flex flex-col gap-3'}>
+      {compact ? (
+        summary.reconciles ? null : (
+          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+            Advertencia de conciliación. El desglose no coincide con el total cotizado del documento.
+          </p>
+        )
+      ) : <EconomicSummary summary={summary} />}
+      {zones.length ? (
+        <ul className="flex flex-col gap-3">
+          {zones.map((zone) => <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} />)}
+        </ul>
+      ) : <p className="text-sm text-gray-500">Sin piezas registradas.</p>}
     </section>
   );
 }

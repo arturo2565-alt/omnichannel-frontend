@@ -39,6 +39,14 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Evidencia pendiente de vinculación/);
   assert.match(page, /evidence-photo/);
   assert.match(page, /Total cotizado/);
+  assert.match(page, /Total cotizado del documento/);
+  assert.match(page, /groupWorkZones/);
+  assert.match(page, /Mano de obra y pintura/);
+  assert.match(page, /Advertencia de conciliación/);
+  assert.match(page, /Procedencia no registrada/);
+  assert.doesNotMatch(page, /compra confirmada|precio de mercado/i);
+  const commercial = page.slice(page.indexOf('export function CommercialDetail'));
+  assert.doesNotMatch(commercial, /groupWorkZones|WorkBoard|Procedencia no registrada/);
   assert.match(page, /role="dialog"/);
   assert.match(page, /object-contain/);
   assert.match(page, /flex-wrap/);
