@@ -49,6 +49,41 @@ export async function confirmCalibrationSeverity({ subjectId, lineId, level }) {
   return res.json();
 }
 
+export async function holdEvidencePreview({ subjectId, receivedSha256, imageBase64 }) {
+  const res = await apiFetchOrigin('/api/calibration/evidence-previews', {
+    method: 'POST',
+    body: JSON.stringify({ subjectId, receivedSha256, imageBase64 }),
+  });
+  if (!res.ok) throw httpError(res.status);
+  return res.json();
+}
+
+export async function loadEvidencePreview(previewId) {
+  const res = await apiFetchOrigin(`/api/calibration/evidence-previews/${encodeURIComponent(previewId)}`);
+  if (!res.ok) throw httpError(res.status);
+  const type = res.headers.get('content-type') ?? '';
+  if (!type.startsWith('image/')) throw httpError(res.status || 502);
+  return res.blob();
+}
+
+export async function confirmEvidenceArchive({ previewId, subjectId, sha256 }) {
+  const res = await apiFetchOrigin(`/api/calibration/evidence-previews/${encodeURIComponent(previewId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ subjectId, sha256, visibleIdentifiersReviewed: true }),
+  });
+  if (!res.ok) throw httpError(res.status);
+  return res.json();
+}
+
+export async function cancelEvidencePreview(previewId) {
+  const res = await apiFetchOrigin(`/api/calibration/evidence-previews/${encodeURIComponent(previewId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw httpError(res.status);
+  return res.json();
+}
+
 export async function loadCalibrationEvidencePhoto(kind, quoteId, evidenceId) {
   const res = await apiFetchOrigin(calibrationEvidencePath(kind, quoteId, evidenceId));
   if (res.status === 403) throw httpError(403);

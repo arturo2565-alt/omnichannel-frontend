@@ -60,6 +60,14 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Nivel de daño/);
   assert.match(page, /min-\[390px\]:flex-row/);
   assert.match(api, /lineReviewed: true/);
+  assert.match(page, /Copia pendiente de revisión/);
+  assert.match(page, /Revisión aprobada/);
+  assert.match(page, /Archivo en curso/);
+  assert.match(page, /Fotografía verificada/);
+  assert.match(page, /Error recuperable/);
+  assert.match(page, /Archivar en privado/);
+  assert.match(api, /evidence-previews/);
+  assert.match(api, /visibleIdentifiersReviewed: true/);
   assert.doesNotMatch(page, /operatorRole|validated:\s*true/);
   assert.doesNotMatch(api, /operatorRole|validated:\s*true/);
   assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);

@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, Library, RefreshCw } from 'lucide-react';
 import {
   calibrationDetailPath,
   calibrationEvidencePath,
   calibrationListPath,
+  cancelEvidencePreview,
   confirmCalibrationSeverity,
+  confirmEvidenceArchive,
   fetchCalibrationDocument,
+  holdEvidencePreview,
   loadCalibrationEvidencePhoto,
   loadCalibrationPhoto,
+  loadEvidencePreview,
 } from './calibrationApi.js';
 import { declaredAmount, galleryMove, groupRepairLines, listAmount, sumDeclared } from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
@@ -659,6 +663,177 @@ function EvidencePhoto({ kind, quoteId, evidenceId, frame = 'thumb' }) {
   );
 }
 
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+async function digestHex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2, '0')).join('');
+}
+
+function EvidenceCopy({ quoteId }) {
+  const client = useQueryClient();
+  const [originHash, setOriginHash] = useState('');
+  const [phase, setPhase] = useState('idle');
+  const [preview, setPreview] = useState(null);
+  const [seen, setSeen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const previewRef = useRef(null);
+  const remember = (next) => {
+    if (previewRef.current?.url && previewRef.current.url !== next?.url) URL.revokeObjectURL(previewRef.current.url);
+    previewRef.current = next;
+    setPreview(next);
+  };
+  useEffect(() => () => {
+    if (previewRef.current?.url) URL.revokeObjectURL(previewRef.current.url);
+  }, []);
+  const clear = async (remote) => {
+    const current = preview;
+    remember(null);
+    setSeen(false);
+    setPhase('idle');
+    if (remote && current?.previewId) {
+      try {
+        await cancelEvidencePreview(current.previewId);
+      } catch {
+        setNotice('Error recuperable');
+      }
+    }
+  };
+  const load = async (file) => {
+    if (!file || !quoteId || phase === 'archiving') return;
+    setNotice('');
+    const hash = originHash.trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(hash)) {
+      setNotice('Error recuperable');
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length < 1 || bytes.length > 5 * 1024 * 1024) {
+      setNotice('Error recuperable');
+      return;
+    }
+    try {
+      const held = await holdEvidencePreview({
+        subjectId: quoteId,
+        receivedSha256: hash,
+        imageBase64: bytesToBase64(bytes),
+      });
+      const blob = await loadEvidencePreview(held.previewId);
+      const served = new Uint8Array(await blob.arrayBuffer());
+      const digest = await digestHex(served);
+      if (digest !== held.sha256) throw new Error('bytes');
+      const url = URL.createObjectURL(new Blob([served], { type: blob.type || 'image/png' }));
+      remember({ previewId: held.previewId, sha256: held.sha256, url });
+      setSeen(false);
+      setPhase('pending');
+    } catch {
+      setPhase('error');
+      setNotice('Error recuperable');
+    }
+  };
+  const archive = async () => {
+    if (!preview || !seen) return;
+    setPhase('archiving');
+    setNotice('');
+    try {
+      const saved = await confirmEvidenceArchive({
+        previewId: preview.previewId,
+        subjectId: quoteId,
+        sha256: preview.sha256,
+      });
+      await client.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('evidence'),
+      });
+      if (saved.archive === 'link_pending') {
+        setPhase('error');
+        setNotice('Revisión aprobada. Error recuperable');
+        return;
+      }
+      remember(null);
+      setSeen(false);
+      setPhase('verified');
+      setNotice('Revisión aprobada. Fotografía verificada');
+    } catch {
+      setPhase('error');
+      setNotice('Error recuperable');
+    }
+  };
+  return (
+    <form
+      className="mt-3 flex w-full min-w-0 flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (phase === 'pending' || phase === 'error') archive();
+      }}
+    >
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Revisa los identificadores visibles en la copia que devuelve el servidor. Esa revisión no demuestra, por sí sola, que la copia esté anonimizada.
+      </p>
+      <div className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row">
+        <label className="min-w-0 flex-1 text-xs text-gray-600 dark:text-gray-300">
+          Hash de la fotografía de origen
+          <input
+            value={originHash}
+            onChange={(event) => setOriginHash(event.target.value.trim().toLowerCase())}
+            autoComplete="off"
+            spellCheck="false"
+            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-2 font-mono text-xs dark:border-gray-700 dark:bg-gray-950"
+          />
+        </label>
+        <label className="min-w-0 text-xs text-gray-600 dark:text-gray-300">
+          Copia a revisar
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="mt-1 block w-full text-xs"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) load(file);
+            }}
+          />
+        </label>
+      </div>
+      {phase === 'pending' || (phase === 'error' && preview) ? (
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Copia pendiente de revisión</p>
+          <img src={preview.url} alt="" className="mt-2 max-h-64 w-full rounded-xl bg-black object-contain" />
+          <label className="mt-2 flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={seen} onChange={(event) => setSeen(event.target.checked)} />
+            Revisé los identificadores visibles en esta copia
+          </label>
+        </div>
+      ) : null}
+      {phase === 'archiving' ? <p className="text-sm font-medium">Archivo en curso</p> : null}
+      {phase === 'verified' ? <p className="text-sm font-medium">Fotografía verificada</p> : null}
+      {notice ? <p className="text-sm text-amber-700 dark:text-amber-300">{notice}</p> : null}
+      <div className="flex flex-col gap-2 min-[390px]:flex-row">
+        <button
+          type="submit"
+          disabled={!preview || !seen || phase === 'archiving'}
+          className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+        >
+          Archivar en privado
+        </button>
+        <button
+          type="button"
+          disabled={!preview || phase === 'archiving'}
+          onClick={() => clear(true)}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-xs dark:border-gray-600"
+        >
+          Cancelar copia
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function LinkedEvidence({ kind, quoteId }) {
   const { user, taller } = useAuth();
   const { rejected } = useSessionCacheStatus();
@@ -677,6 +852,7 @@ function LinkedEvidence({ kind, quoteId }) {
   return (
     <section>
       <h3 className="text-sm font-semibold">Fotografías vinculadas</h3>
+      <EvidenceCopy quoteId={quoteId} />
       {evidenceQuery.isError ? <p className="mt-2 text-sm text-gray-500">No se pudo consultar la evidencia.</p> : null}
       {!evidenceQuery.isError && items.length === 0 ? (
         <p className="mt-2 text-sm text-gray-500">{evidenceQuery.isFetching ? 'Cargando…' : empty}</p>
