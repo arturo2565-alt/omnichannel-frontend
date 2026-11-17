@@ -40,6 +40,15 @@ export async function loadCalibrationPhoto(caseId, photoId) {
   return URL.createObjectURL(await res.blob());
 }
 
+export async function confirmCalibrationSeverity({ subjectId, lineId, level }) {
+  const res = await apiFetchOrigin('/api/calibration/severity', {
+    method: 'POST',
+    body: JSON.stringify({ subjectId, lineId, level, lineReviewed: true }),
+  });
+  if (!res.ok) throw httpError(res.status);
+  return res.json();
+}
+
 export async function loadCalibrationEvidencePhoto(kind, quoteId, evidenceId) {
   const res = await apiFetchOrigin(calibrationEvidencePath(kind, quoteId, evidenceId));
   if (res.status === 403) throw httpError(403);

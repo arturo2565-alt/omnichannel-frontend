@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, Library, RefreshCw } from 'lucide-react';
 import {
   calibrationDetailPath,
   calibrationEvidencePath,
   calibrationListPath,
+  confirmCalibrationSeverity,
   fetchCalibrationDocument,
   loadCalibrationEvidencePhoto,
   loadCalibrationPhoto,
@@ -31,6 +32,32 @@ const SERVICES = {
   bath_with_bodywork: 'Baño con hojalatería',
   color_change: 'Cambio de color',
 };
+const SEVERITY_SCALE = 'severity-v1';
+const SEVERITY_LEVELS = [
+  ['leve', 'Leve'],
+  ['medio_leve', 'Medio-leve'],
+  ['medio', 'Medio'],
+  ['medio_fuerte', 'Medio-fuerte'],
+  ['fuerte', 'Fuerte'],
+];
+
+function severityLabel(level) {
+  return SEVERITY_LEVELS.find(([code]) => code === level)?.[1] ?? 'Desconocido';
+}
+
+function severityState(annotation) {
+  if (!annotation) return 'Sin clasificación';
+  if (annotation.status === 'validated' && annotation.provenance === 'authenticated_owner') return 'Validado';
+  if (annotation.status === 'unknown' && annotation.provenance === 'insufficient_evidence') return 'Desconocido';
+  if (annotation.status === 'proposed' && annotation.provenance === 'human_declaration') return 'Pendiente de validación';
+  if (annotation.status === 'proposed' && annotation.provenance === 'visual_inference') return 'Propuesta IA';
+  return 'Sin clasificación';
+}
+
+function scaleLabel(annotation) {
+  return annotation?.scaleVersion === SEVERITY_SCALE ? ` · ${SEVERITY_SCALE}` : '';
+}
+
 const TREATMENTS = {
   repair_paint: 'Reparar y pintar',
   paint: 'Pintar',
@@ -502,12 +529,15 @@ export function VisualDetail({ record }) {
         {record.lines?.length ? (
           <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
             {record.lines.map((line) => (
-              <li key={line.lineId ?? line.part} className="flex min-w-0 items-center justify-between gap-3 py-2 text-sm">
-                <span className="min-w-0">
-                  <span className="block truncate">{line.part}</span>
-                  <span className="block text-xs text-gray-500">{TREATMENTS[line.treatment] ?? line.treatment}</span>
+              <li key={line.lineId ?? line.part} className="flex min-w-0 flex-col gap-2 py-2 text-sm">
+                <span className="flex min-w-0 items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block truncate">{line.part}</span>
+                    <span className="block text-xs text-gray-500">{TREATMENTS[line.treatment] ?? line.treatment}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums">{money.format(line.priceMxn)}</span>
                 </span>
-                <span className="shrink-0 tabular-nums">{money.format(line.priceMxn)}</span>
+                <SeverityNote subjectId={record.id} lineId={line.lineId} annotation={line.severityAnnotation} />
               </li>
             ))}
           </ul>
@@ -721,7 +751,7 @@ export function RepairDetail({ record }) {
         {collected == null ? null : <PriceCard label="Cobrado" value={collected} validation="human_confirmed" />}
       </div>
       <LinkedEvidence kind="repair" quoteId={quoteId} />
-      <RepairLines title="Refacciones" lines={groups.parts} />
+      <RepairLines title="Refacciones" subjectId={quoteId} lines={groups.parts} />
       <RepairLines title="Mano de obra" lines={groups.labor} />
       <section>
         <h3 className="text-sm font-semibold">Condiciones</h3>
@@ -785,7 +815,7 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
         {active ? <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-900 dark:text-sky-100">Activa</span> : null}
       </button>
       <div id={panelId} hidden={!expanded}>
-        <RepairLines title="Refacciones" lines={groups.parts} compact />
+        <RepairLines title="Refacciones" subjectId={revision.id} lines={groups.parts} compact />
         <RepairLines title="Mano de obra" lines={groups.labor} compact />
         <div className="mt-3">
           <h3 className="text-sm font-semibold">Condiciones</h3>
@@ -800,7 +830,64 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
   );
 }
 
-function RepairLines({ title, lines, compact = false }) {
+function SeverityNote({ subjectId, lineId, annotation, compact = false }) {
+  const client = useQueryClient();
+  const [level, setLevel] = useState(annotation?.status === 'validated' ? annotation.level ?? '' : '');
+  const save = useMutation({
+    mutationFn: (next) => confirmCalibrationSeverity({ subjectId, lineId, level: next }),
+    onSuccess: async () => {
+      await client.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
+      });
+    },
+  });
+  const history = Array.isArray(annotation?.history) ? annotation.history : [];
+  return (
+    <div className="min-w-0 space-y-2">
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Severidad: {annotation ? severityLabel(annotation.level) : 'Sin clasificación'}
+        {' · '}
+        {severityState(annotation)}
+        {scaleLabel(annotation)}
+      </p>
+      {history.length > 0 ? (
+        <p className="text-[11px] leading-4 text-gray-400">
+          Historial: {history.map((item) => `${severityLabel(item.level)} · ${severityState(item)}`).join(' · ')}
+        </p>
+      ) : null}
+      {compact || !subjectId || !lineId ? null : (
+        <form
+          className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row min-[390px]:items-center"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (level) save.mutate(level);
+          }}
+        >
+          <label className="sr-only" htmlFor={`severity-${subjectId}-${lineId}`}>Nivel de daño</label>
+          <select
+            id={`severity-${subjectId}-${lineId}`}
+            value={level}
+            onChange={(event) => setLevel(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+          >
+            <option value="">Elegir nivel</option>
+            {SEVERITY_LEVELS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+          </select>
+          <button
+            type="submit"
+            disabled={!level || save.isPending}
+            className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+          >
+            Confirmar
+          </button>
+        </form>
+      )}
+      {save.isError ? <p className="text-xs text-amber-700 dark:text-amber-300">La confirmación no se registró.</p> : null}
+    </div>
+  );
+}
+
+function RepairLines({ title, subjectId, lines, compact = false }) {
   if (!lines?.length) return null;
   return (
     <section className={compact ? 'mt-3' : ''}>
@@ -810,16 +897,21 @@ function RepairLines({ title, lines, compact = false }) {
           const contracted = declaredAmount(line.contractedMxn, line.contractedValidation);
           const collected = declaredAmount(line.collectedMxn, line.collectedValidation);
           return (
-            <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 items-start justify-between gap-3 py-2 text-sm">
-              <span className="min-w-0">
-                <span className="block truncate">{line.part}</span>
-                <span className="block text-xs text-gray-500">{line.role === 'labor' ? (LABOR[line.labor] ?? line.labor) : 'Refacción'}</span>
+            <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 flex-col gap-2 py-2 text-sm">
+              <span className="flex min-w-0 items-start justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block truncate">{line.part}</span>
+                  <span className="block text-xs text-gray-500">{line.role === 'labor' ? (LABOR[line.labor] ?? line.labor) : 'Refacción'}</span>
+                </span>
+                <span className="shrink-0 text-right text-xs tabular-nums">
+                  <span className="block text-sm font-medium">{money.format(line.quotedMxn)}</span>
+                  {contracted == null ? null : <span className="block text-gray-500">Contratado {money.format(contracted)}</span>}
+                  {collected == null ? null : <span className="block text-gray-500">Cobrado {money.format(collected)}</span>}
+                </span>
               </span>
-              <span className="shrink-0 text-right text-xs tabular-nums">
-                <span className="block text-sm font-medium">{money.format(line.quotedMxn)}</span>
-                {contracted == null ? null : <span className="block text-gray-500">Contratado {money.format(contracted)}</span>}
-                {collected == null ? null : <span className="block text-gray-500">Cobrado {money.format(collected)}</span>}
-              </span>
+              {line.role === 'part' ? (
+                <SeverityNote subjectId={subjectId} lineId={line.lineId} annotation={line.severityAnnotation} compact={compact} />
+              ) : null}
             </li>
           );
         })}

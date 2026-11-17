@@ -49,6 +49,17 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /presentation\?\.label/);
   assert.match(page, /provenance !== 'catalog_inferred'/);
   assert.match(page, /Catálogo/);
+  assert.match(page, /Severidad/);
+  assert.match(page, /Propuesta IA/);
+  assert.match(page, /Pendiente de validación/);
+  assert.match(page, /Validado/);
+  assert.match(page, /Desconocido/);
+  assert.match(page, /severity-v1/);
+  assert.match(page, /Nivel de daño/);
+  assert.match(page, /min-\[390px\]:flex-row/);
+  assert.match(api, /lineReviewed: true/);
+  assert.doesNotMatch(page, /operatorRole|validated:\s*true/);
+  assert.doesNotMatch(api, /operatorRole|validated:\s*true/);
   assert.doesNotMatch(page, /cloudinary|localStorage|indexedDB|GITHUB|ghs_/);
   assert.match(page, /loadCalibrationPhoto/);
   assert.match(page, /staleTime: Infinity/);
