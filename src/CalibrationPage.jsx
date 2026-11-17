@@ -16,14 +16,18 @@ import {
   loadEvidencePreview,
 } from './calibrationApi.js';
 import {
+  amountLabel,
+  confirmTargets,
   confirmZoneLines,
   declaredAmount,
   economicSummary,
   galleryMove,
   groupWorkZones,
   lineAmount,
-  lineCharge,
   listAmount,
+  severityChangeRequested,
+  severityHistoryRows,
+  severityPresentation,
   sumDeclared,
   workLabel,
 } from './calibrationView.js';
@@ -57,21 +61,8 @@ const SEVERITY_LEVELS = [
   ['fuerte', 'Fuerte'],
 ];
 
-function severityLabel(level) {
-  return SEVERITY_LEVELS.find(([code]) => code === level)?.[1] ?? 'Desconocido';
-}
-
-function severityState(annotation) {
-  if (!annotation) return 'Sin clasificación';
-  if (annotation.status === 'validated' && annotation.provenance === 'authenticated_owner') return 'Validado';
-  if (annotation.status === 'unknown' && annotation.provenance === 'insufficient_evidence') return 'Desconocido';
-  if (annotation.status === 'proposed' && annotation.provenance === 'human_declaration' && annotation.inferenceMethod == null) return 'Pendiente de validación';
-  if (annotation.status === 'proposed' && annotation.provenance === 'visual_inference' && annotation.inferenceMethod === 'visual_assessment') return 'Propuesta IA';
-  return 'Sin clasificación';
-}
-
-function scaleLabel(annotation) {
-  return annotation?.scaleVersion === SEVERITY_SCALE ? ` · ${SEVERITY_SCALE}` : '';
+function historyText(row) {
+  return [row.lineId, row.level, row.state, row.when].filter(Boolean).join(' · ');
 }
 
 const ARCHIVE = {
@@ -1034,41 +1025,77 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
   );
 }
 
-function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneResult }) {
+function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneResult, pendingIds }) {
   const client = useQueryClient();
   const ids = [...new Set((lineIds ?? []).filter(Boolean))];
   const formKey = ids.join('-') || 'zona';
-  const [level, setLevel] = useState(annotation?.status === 'validated' ? annotation.level ?? '' : '');
+  const historyId = `severity-history-${subjectId}-${formKey}`;
+  const validated = annotation?.status === 'validated' && annotation?.provenance === 'authenticated_owner';
+  const [editing, setEditing] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [level, setLevel] = useState('');
+  const headline = severityPresentation(annotation);
+  const history = severityHistoryRows(annotation?.history);
+  const showEditor = !compact && Boolean(subjectId) && ids.length > 0 && (!validated || editing);
+  const showConfirm = severityChangeRequested(annotation, level);
   const save = useMutation({
-    mutationFn: (next) => confirmZoneLines(ids, (lineId) => confirmCalibrationSeverity({ subjectId, lineId, level: next })),
+    mutationFn: (next) => confirmZoneLines(
+      confirmTargets(ids, pendingIds),
+      (lineId) => confirmCalibrationSeverity({ subjectId, lineId, level: next }),
+    ),
     onSuccess: async (result) => {
       onZoneResult?.(result);
       if (result.recorded.length === 0) return;
+      setEditing(false);
+      setLevel('');
       await client.invalidateQueries({
         predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
       });
     },
   });
-  const history = Array.isArray(annotation?.history) ? annotation.history : [];
   return (
     <div className="min-w-0 space-y-2">
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        Severidad: {annotation ? severityLabel(annotation.level) : 'Sin clasificación'}
-        {' · '}
-        {severityState(annotation)}
-        {scaleLabel(annotation)}
-      </p>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Severidad</p>
+          <p className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-gray-100">{headline.level}</p>
+          {headline.state ? <p className="text-xs text-gray-500 dark:text-gray-400">{headline.state}</p> : null}
+        </div>
+        {validated && !editing && !compact && subjectId ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-sky-800 hover:bg-sky-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-sky-200 dark:hover:bg-sky-950"
+          >
+            Modificar
+          </button>
+        ) : null}
+      </div>
       {history.length > 0 ? (
-        <p className="text-[11px] leading-4 text-gray-400">
-          Historial: {history.map((item) => `${severityLabel(item.level)} · ${severityState(item)}`).join(' · ')}
-        </p>
+        <div>
+          <button
+            type="button"
+            aria-expanded={historyOpen}
+            aria-controls={historyId}
+            onClick={() => setHistoryOpen((current) => !current)}
+            className="text-xs font-medium text-sky-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-sky-200"
+          >
+            Ver historial de severidad
+          </button>
+          <ul id={historyId} hidden={!historyOpen} className="mt-1 space-y-1">
+            {history.map((row) => (
+              <li key={row.key} className="break-words text-[11px] leading-4 text-gray-500 dark:text-gray-400">{historyText(row)}</li>
+            ))}
+          </ul>
+        </div>
       ) : null}
-      {compact || !subjectId || ids.length === 0 ? null : (
+      {showEditor ? (
         <form
           className="flex w-full min-w-0 flex-col gap-2 min-[390px]:flex-row min-[390px]:items-center"
           onSubmit={(event) => {
             event.preventDefault();
-            if (level) save.mutate(level);
+            if (!showConfirm || save.isPending) return;
+            save.mutate(level);
           }}
         >
           <label className="sr-only" htmlFor={`severity-${subjectId}-${formKey}`}>Nivel de daño</label>
@@ -1081,15 +1108,17 @@ function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneR
             <option value="">Elegir nivel</option>
             {SEVERITY_LEVELS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
           </select>
-          <button
-            type="submit"
-            disabled={!level || save.isPending}
-            className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
-          >
-            Confirmar
-          </button>
+          {showConfirm ? (
+            <button
+              type="submit"
+              disabled={save.isPending}
+              className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+            >
+              Confirmar
+            </button>
+          ) : null}
         </form>
-      )}
+      ) : null}
       {save.data?.pending.length > 0 && save.data.recorded.length === 0 ? <p className="text-xs text-amber-700 dark:text-amber-300">La confirmación no se registró.</p> : null}
       {save.isError ? <p className="text-xs text-amber-700 dark:text-amber-300">La confirmación no se registró.</p> : null}
     </div>
@@ -1116,10 +1145,10 @@ function zoneSeverity(lines) {
   const seen = new Set();
   for (const note of notes) {
     for (const item of note.history ?? []) {
-      const key = item.annotationId ?? `${item.level}|${item.status}|${item.provenance}`;
+      const key = item.annotationId ? `${note.lineId}:${item.annotationId}` : `${note.lineId}|${item.level}|${item.status}|${item.provenance}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      history.push(item);
+      history.push({ ...item, lineId: note.lineId });
     }
   }
   return {
@@ -1156,7 +1185,7 @@ function EconomicSummary({ summary }) {
   );
 }
 
-function ZoneCard({ zone, subjectId, compact = false, onZoneResult }) {
+function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds }) {
   const [open, setOpen] = useState(true);
   const panelId = `zone-${subjectId}-${zone.id}`;
   const labels = zone.lines.map(workLabel).filter(Boolean).join(' · ');
@@ -1178,7 +1207,7 @@ function ZoneCard({ zone, subjectId, compact = false, onZoneResult }) {
       </button>
       {severity.show ? (
         <div className="mt-2">
-          <SeverityNote subjectId={subjectId} lineIds={severity.lineIds} annotation={severity.annotation} compact={compact} onZoneResult={onZoneResult} />
+          <SeverityNote subjectId={subjectId} lineIds={severity.lineIds} annotation={severity.annotation} compact={compact} onZoneResult={onZoneResult} pendingIds={pendingIds} />
         </div>
       ) : null}
       <div id={panelId} hidden={!open} className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
@@ -1190,10 +1219,9 @@ function ZoneCard({ zone, subjectId, compact = false, onZoneResult }) {
             return (
               <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 flex-col gap-0.5 text-sm">
                 <span className="flex min-w-0 items-start justify-between gap-3">
-                  <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{workLabel(line)}</span>
+                  <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{amountLabel(line)}</span>
                   <span className="shrink-0 tabular-nums">{amount == null ? 'No proporcionado' : money.format(amount)}</span>
                 </span>
-                {lineCharge(line) === 'part' ? <span className="text-[11px] text-gray-400">Procedencia no registrada</span> : null}
                 {contracted == null ? null : <span className="text-xs text-gray-500">Contratado {money.format(contracted)}</span>}
                 {collected == null ? null : <span className="text-xs text-gray-500">Cobrado {money.format(collected)}</span>}
               </li>
@@ -1230,7 +1258,7 @@ function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
       {zones.length ? (
         <ul className="flex flex-col gap-3">
           {zones.map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} onZoneResult={compact ? undefined : onZoneResult} />
+            <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} onZoneResult={compact ? undefined : onZoneResult} pendingIds={severityNotice?.pending} />
           ))}
         </ul>
       ) : <p className="text-sm text-gray-500">Sin piezas registradas.</p>}

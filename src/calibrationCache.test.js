@@ -6,6 +6,8 @@ import {
   calibrationListPath,
 } from './calibrationPaths.js';
 import {
+  amountLabel,
+  confirmTargets,
   confirmZoneLines,
   declaredAmount,
   economicSummary,
@@ -13,6 +15,9 @@ import {
   groupRepairLines,
   groupWorkZones,
   listAmount,
+  severityChangeRequested,
+  severityHistoryRows,
+  severityPresentation,
   sumDeclared,
   workLabel,
 } from './calibrationView.js';
@@ -104,7 +109,11 @@ test('AF-000007 agrupa dos zonas y conserva cuatro partidas', () => {
   assert.equal(zones[0].name, 'salpicadera izquierda');
   assert.equal(zones[1].name, 'fascia delantera');
   assert.deepEqual(zones[0].lines.map(workLabel), ['Sustituir', 'Pintar']);
-  assert.equal(zones[0].lines.map(workLabel).join(' ').includes('ontaje'), false);
+  assert.deepEqual(zones[0].lines.map(amountLabel), ['Costo de refacción estimado', 'Pintar']);
+  assert.equal(zones[0].lines.map(amountLabel).join(' ').includes('ontaje'), false);
+  assert.equal(severityPresentation(zones[0].lines[0].severityAnnotation).level, 'Desconocido');
+  assert.equal(severityPresentation(zones[0].lines[0].severityAnnotation).state, null);
+  assert.deepEqual(severityPresentation(zones[1].lines[0].severityAnnotation), { level: 'Fuerte', state: 'Propuesta IA' });
   const summary = economicSummary(lines, 11800);
   assert.equal(summary.parts, 4600);
   assert.equal(summary.labor, 7200);
@@ -166,7 +175,10 @@ test('RQ agrupa refacción y montaje, y deja sola la mano de obra', () => {
   assert.equal(zones[0].subtotal, 6300);
   assert.equal(zones[0].lines.length, 2);
   assert.deepEqual(zones[0].lines.map(workLabel), ['Refacción', 'Montaje y pintura']);
+  assert.deepEqual(zones[0].lines.map(amountLabel), ['Refacción · procedencia no registrada', 'Montaje y pintura']);
   assert.equal(workLabel({ role: 'labor', labor: 'paint', part: 'fascia delantera' }), 'Pintura');
+  assert.equal(amountLabel({ treatment: 'replace', partProvenance: 'supplier_confirmed' }), 'Costo de refacción');
+  assert.equal(amountLabel({ treatment: 'replace_paint' }), 'Sustituir y pintar');
   const summary = economicSummary(paired, 6300);
   assert.equal(summary.parts, 2700);
   assert.equal(summary.labor, 3600);
@@ -201,6 +213,30 @@ test('RQ agrupa refacción y montaje, y deja sola la mano de obra', () => {
   assert.equal(onePiece.length, 1);
   assert.equal(onePiece[0].lines.length, 1);
   assert.equal(onePiece[0].subtotal, 1900);
+});
+
+test('la severidad validada se distingue de la propuesta y el historial no inventa fechas', () => {
+  const proposal = severityPresentation({ status: 'proposed', provenance: 'visual_inference', inferenceMethod: 'visual_assessment', level: 'fuerte' });
+  const validated = severityPresentation({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' });
+  assert.deepEqual(proposal, { level: 'Fuerte', state: 'Propuesta IA' });
+  assert.deepEqual(validated, { level: 'Medio', state: 'Validado' });
+  assert.equal(severityChangeRequested({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' }, 'medio'), false);
+  assert.equal(severityChangeRequested({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' }, 'fuerte'), true);
+  assert.equal(severityChangeRequested({ status: 'proposed', provenance: 'visual_inference', inferenceMethod: 'visual_assessment', level: 'fuerte' }, ''), false);
+  assert.deepEqual(confirmTargets(['L03', 'L04'], ['L04']), ['L04']);
+  assert.deepEqual(confirmTargets(['L01', 'L02'], ['L04']), ['L01', 'L02']);
+  const rows = severityHistoryRows([
+    { annotationId: 'SV-000001', lineId: 'L03', level: null, status: 'unknown', provenance: 'insufficient_evidence' },
+    { annotationId: 'SV-000001', lineId: 'L03', level: null, status: 'unknown', provenance: 'insufficient_evidence' },
+    { annotationId: 'SV-000002', lineId: 'L04', level: 'fuerte', status: 'proposed', provenance: 'visual_inference', inferenceMethod: 'visual_assessment' },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].when, null);
+  assert.equal(rows[0].lineId, 'L03');
+  assert.equal(rows[0].level, 'Desconocido');
+  assert.equal(rows[0].state, null);
+  assert.equal(rows[1].lineId, 'L04');
+  assert.equal(rows[1].state, 'Propuesta IA');
 });
 
 test('una confirmación parcial deja la zona sin cerrar', async () => {

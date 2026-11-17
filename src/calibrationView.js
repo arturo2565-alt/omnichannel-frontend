@@ -78,6 +78,88 @@ export function workLabel(line) {
   return 'Partida';
 }
 
+const CONFIRMED_PART_COST = new Set(['supplier_confirmed', 'purchase_cost', 'confirmed']);
+
+function partProvenance(line) {
+  return typeof line?.partProvenance === 'string' ? line.partProvenance : null;
+}
+
+export function amountLabel(line) {
+  if (line?.role === 'part') {
+    return CONFIRMED_PART_COST.has(partProvenance(line))
+      ? 'Costo de refacción'
+      : 'Refacción · procedencia no registrada';
+  }
+  if (line?.role == null && line?.treatment === 'replace') {
+    return CONFIRMED_PART_COST.has(partProvenance(line))
+      ? 'Costo de refacción'
+      : 'Costo de refacción estimado';
+  }
+  return workLabel(line);
+}
+
+const SEVERITY_LEVEL_NAMES = {
+  leve: 'Leve',
+  medio_leve: 'Medio-leve',
+  medio: 'Medio',
+  medio_fuerte: 'Medio-fuerte',
+  fuerte: 'Fuerte',
+};
+
+export function severityPresentation(annotation) {
+  if (!annotation) return { level: 'Sin clasificación', state: null };
+  if (annotation.status === 'validated' && annotation.provenance === 'authenticated_owner') {
+    return { level: SEVERITY_LEVEL_NAMES[annotation.level] ?? 'Desconocido', state: 'Validado' };
+  }
+  if (annotation.status === 'unknown' && annotation.provenance === 'insufficient_evidence') {
+    return { level: 'Desconocido', state: null };
+  }
+  if (annotation.status === 'proposed' && annotation.provenance === 'human_declaration' && annotation.inferenceMethod == null) {
+    return { level: SEVERITY_LEVEL_NAMES[annotation.level] ?? 'Desconocido', state: 'Pendiente de validación' };
+  }
+  if (annotation.status === 'proposed' && annotation.provenance === 'visual_inference' && annotation.inferenceMethod === 'visual_assessment') {
+    return { level: SEVERITY_LEVEL_NAMES[annotation.level] ?? 'Desconocido', state: 'Propuesta IA' };
+  }
+  return { level: 'Sin clasificación', state: null };
+}
+
+export function severityChangeRequested(annotation, level) {
+  if (!level) return false;
+  if (annotation?.status === 'validated' && annotation.provenance === 'authenticated_owner' && annotation.level === level) {
+    return false;
+  }
+  return true;
+}
+
+export function confirmTargets(lineIds, pendingIds) {
+  const ids = [...new Set((lineIds ?? []).filter(Boolean))];
+  const pending = [...new Set((pendingIds ?? []).filter((id) => ids.includes(id)))];
+  return pending.length > 0 ? pending : ids;
+}
+
+export function severityHistoryRows(entries = []) {
+  const seen = new Set();
+  const rows = [];
+  for (const item of entries) {
+    if (!item) continue;
+    const key = item.annotationId
+      ? `${item.lineId ?? ''}:${item.annotationId}`
+      : [item.lineId, item.level, item.status, item.provenance].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const presentation = severityPresentation(item);
+    const when = typeof item.recordedAt === 'string' && item.recordedAt.trim() ? item.recordedAt.trim() : null;
+    rows.push({
+      key,
+      lineId: item.lineId ?? null,
+      level: presentation.level,
+      state: presentation.state,
+      when,
+    });
+  }
+  return rows;
+}
+
 export async function confirmZoneLines(lineIds, confirm) {
   const recorded = [];
   const pending = [];
