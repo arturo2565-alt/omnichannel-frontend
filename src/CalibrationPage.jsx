@@ -16,6 +16,7 @@ import {
   loadEvidencePreview,
 } from './calibrationApi.js';
 import {
+  confirmZoneLines,
   declaredAmount,
   economicSummary,
   galleryMove,
@@ -24,6 +25,7 @@ import {
   lineCharge,
   listAmount,
   sumDeclared,
+  workLabel,
 } from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
@@ -72,14 +74,6 @@ function scaleLabel(annotation) {
   return annotation?.scaleVersion === SEVERITY_SCALE ? ` · ${SEVERITY_SCALE}` : '';
 }
 
-const TREATMENTS = {
-  repair_paint: 'Reparar y pintar',
-  paint: 'Pintar',
-  replace_paint: 'Sustituir y pintar',
-  replace: 'Sustituir',
-  other: 'Otro',
-  uncertain: 'Incierto',
-};
 const ARCHIVE = {
   archived_private: 'Archivado en privado',
   pending_private_archive: 'Archivo pendiente',
@@ -107,12 +101,6 @@ const WORK = {
   disassembly: 'Desarmado',
   interior_frames: 'Marcos interiores',
 };
-const LABOR = {
-  mount_and_paint: 'Montaje y pintura',
-  paint: 'Pintura',
-  repair: 'Reparación',
-};
-
 const money = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',
@@ -1046,18 +1034,16 @@ function RepairRevision({ revision, active, expanded, onToggle }) {
   );
 }
 
-function SeverityNote({ subjectId, lineIds, annotation, compact = false }) {
+function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneResult }) {
   const client = useQueryClient();
   const ids = [...new Set((lineIds ?? []).filter(Boolean))];
   const formKey = ids.join('-') || 'zona';
   const [level, setLevel] = useState(annotation?.status === 'validated' ? annotation.level ?? '' : '');
   const save = useMutation({
-    mutationFn: async (next) => {
-      for (const lineId of ids) {
-        await confirmCalibrationSeverity({ subjectId, lineId, level: next });
-      }
-    },
-    onSuccess: async () => {
+    mutationFn: (next) => confirmZoneLines(ids, (lineId) => confirmCalibrationSeverity({ subjectId, lineId, level: next })),
+    onSuccess: async (result) => {
+      onZoneResult?.(result);
+      if (result.recorded.length === 0) return;
       await client.invalidateQueries({
         predicate: (query) => Array.isArray(query.queryKey) && query.queryKey.includes('calibration') && query.queryKey.includes('detail'),
       });
@@ -1104,16 +1090,10 @@ function SeverityNote({ subjectId, lineIds, annotation, compact = false }) {
           </button>
         </form>
       )}
+      {save.data?.pending.length > 0 && save.data.recorded.length === 0 ? <p className="text-xs text-amber-700 dark:text-amber-300">La confirmación no se registró.</p> : null}
       {save.isError ? <p className="text-xs text-amber-700 dark:text-amber-300">La confirmación no se registró.</p> : null}
     </div>
   );
-}
-
-function workLabel(line) {
-  if (line?.role === 'labor') return LABOR[line.labor] ?? line.labor ?? 'Mano de obra';
-  if (line?.role === 'part') return 'Refacción';
-  if (line?.treatment) return TREATMENTS[line.treatment] ?? line.treatment;
-  return 'Partida';
 }
 
 function categoryAmount(summary, key) {
@@ -1176,7 +1156,7 @@ function EconomicSummary({ summary }) {
   );
 }
 
-function ZoneCard({ zone, subjectId, compact = false }) {
+function ZoneCard({ zone, subjectId, compact = false, onZoneResult }) {
   const [open, setOpen] = useState(true);
   const panelId = `zone-${subjectId}-${zone.id}`;
   const labels = zone.lines.map(workLabel).filter(Boolean).join(' · ');
@@ -1198,7 +1178,7 @@ function ZoneCard({ zone, subjectId, compact = false }) {
       </button>
       {severity.show ? (
         <div className="mt-2">
-          <SeverityNote subjectId={subjectId} lineIds={severity.lineIds} annotation={severity.annotation} compact={compact} />
+          <SeverityNote subjectId={subjectId} lineIds={severity.lineIds} annotation={severity.annotation} compact={compact} onZoneResult={onZoneResult} />
         </div>
       ) : null}
       <div id={panelId} hidden={!open} className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
@@ -1228,6 +1208,11 @@ function ZoneCard({ zone, subjectId, compact = false }) {
 function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
   const zones = groupWorkZones(lines);
   const summary = economicSummary(lines, documentTotal);
+  const [severityNotice, setSeverityNotice] = useState(null);
+  const onZoneResult = (result) => {
+    if (result?.complete) setSeverityNotice(null);
+    else if (result?.recorded.length > 0 && result.pending.length > 0) setSeverityNotice(result);
+  };
   return (
     <section className={compact ? 'mt-3' : 'flex flex-col gap-3'}>
       {compact ? (
@@ -1237,9 +1222,16 @@ function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
           </p>
         )
       ) : <EconomicSummary summary={summary} />}
+      {severityNotice ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          Advertencia de severidad. La confirmación no cubre toda la zona. Sin confirmar: {severityNotice.pending.join(', ')}.
+        </p>
+      ) : null}
       {zones.length ? (
         <ul className="flex flex-col gap-3">
-          {zones.map((zone) => <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} />)}
+          {zones.map((zone) => (
+            <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} onZoneResult={compact ? undefined : onZoneResult} />
+          ))}
         </ul>
       ) : <p className="text-sm text-gray-500">Sin piezas registradas.</p>}
     </section>

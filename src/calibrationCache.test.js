@@ -6,6 +6,7 @@ import {
   calibrationListPath,
 } from './calibrationPaths.js';
 import {
+  confirmZoneLines,
   declaredAmount,
   economicSummary,
   galleryMove,
@@ -13,6 +14,7 @@ import {
   groupWorkZones,
   listAmount,
   sumDeclared,
+  workLabel,
 } from './calibrationView.js';
 import {
   CALIBRATION_SLOW_DELAY_MS,
@@ -101,6 +103,8 @@ test('AF-000007 agrupa dos zonas y conserva cuatro partidas', () => {
   assert.equal(zones[1].subtotal, 6300);
   assert.equal(zones[0].name, 'salpicadera izquierda');
   assert.equal(zones[1].name, 'fascia delantera');
+  assert.deepEqual(zones[0].lines.map(workLabel), ['Sustituir', 'Pintar']);
+  assert.equal(zones[0].lines.map(workLabel).join(' ').includes('ontaje'), false);
   const summary = economicSummary(lines, 11800);
   assert.equal(summary.parts, 4600);
   assert.equal(summary.labor, 7200);
@@ -161,6 +165,8 @@ test('RQ agrupa refacción y montaje, y deja sola la mano de obra', () => {
   assert.equal(zones[0].grouped, true);
   assert.equal(zones[0].subtotal, 6300);
   assert.equal(zones[0].lines.length, 2);
+  assert.deepEqual(zones[0].lines.map(workLabel), ['Refacción', 'Montaje y pintura']);
+  assert.equal(workLabel({ role: 'labor', labor: 'paint', part: 'fascia delantera' }), 'Pintura');
   const summary = economicSummary(paired, 6300);
   assert.equal(summary.parts, 2700);
   assert.equal(summary.labor, 3600);
@@ -195,6 +201,34 @@ test('RQ agrupa refacción y montaje, y deja sola la mano de obra', () => {
   assert.equal(onePiece.length, 1);
   assert.equal(onePiece[0].lines.length, 1);
   assert.equal(onePiece[0].subtotal, 1900);
+});
+
+test('una confirmación parcial deja la zona sin cerrar', async () => {
+  const calls = [];
+  const partial = await confirmZoneLines(['L03', 'L04'], async (lineId) => {
+    calls.push(lineId);
+    if (lineId === 'L04') throw new Error('failed');
+  });
+  assert.deepEqual(calls, ['L03', 'L04']);
+  assert.deepEqual(partial.recorded, ['L03']);
+  assert.deepEqual(partial.pending, ['L04']);
+  assert.equal(partial.complete, false);
+
+  const rejected = await confirmZoneLines(['L03', 'L04'], async () => {
+    throw new Error('failed');
+  });
+  assert.deepEqual(rejected.recorded, []);
+  assert.deepEqual(rejected.pending, ['L03', 'L04']);
+
+  const lines = [
+    afLine('L03', 'fascia delantera', 'replace', 2700, note('validated', 'authenticated_owner', 'medio')),
+    afLine('L04', 'fascia delantera', 'paint', 3600, note('proposed', 'visual_inference', 'fuerte', 'visual_assessment')),
+  ];
+  const zones = groupWorkZones(lines);
+  assert.equal(zones.length, 2);
+  assert.equal(zones.every((zone) => zone.grouped === false), true);
+  assert.equal(economicSummary(lines, 6300).zoneSum, 6300);
+  assert.deepEqual(lines.map((line) => line.priceMxn), [2700, 3600]);
 });
 
 test('las rutas de calibración no apuntan a un almacenamiento externo', () => {

@@ -56,6 +56,46 @@ export function lineAmount(line) {
   return declaredAmount(line?.quotedMxn, line?.quotedValidation);
 }
 
+const TREATMENT_LABELS = {
+  repair_paint: 'Reparar y pintar',
+  paint: 'Pintar',
+  replace_paint: 'Sustituir y pintar',
+  replace: 'Sustituir',
+  other: 'Otro',
+  uncertain: 'Incierto',
+};
+
+const LABOR_LABELS = {
+  mount_and_paint: 'Montaje y pintura',
+  paint: 'Pintura',
+  repair: 'Reparación',
+};
+
+export function workLabel(line) {
+  if (line?.role === 'labor') return LABOR_LABELS[line.labor] ?? line.labor ?? 'Mano de obra';
+  if (line?.role === 'part') return 'Refacción';
+  if (line?.treatment) return TREATMENT_LABELS[line.treatment] ?? line.treatment;
+  return 'Partida';
+}
+
+export async function confirmZoneLines(lineIds, confirm) {
+  const recorded = [];
+  const pending = [];
+  for (const lineId of [...new Set((lineIds ?? []).filter(Boolean))]) {
+    try {
+      await confirm(lineId);
+      recorded.push(lineId);
+    } catch {
+      pending.push(lineId);
+    }
+  }
+  return {
+    recorded,
+    pending,
+    complete: pending.length === 0 && recorded.length > 0,
+  };
+}
+
 export function lineCharge(line) {
   if (line?.role === 'part') return 'part';
   if (line?.role === 'labor') {
