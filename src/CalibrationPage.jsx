@@ -16,20 +16,21 @@ import {
   loadEvidencePreview,
 } from './calibrationApi.js';
 import {
-  amountLabel,
   confirmTargets,
   confirmZoneLines,
+  correspondencePending,
   declaredAmount,
-  economicSummary,
+  financialPresentation,
   galleryMove,
+  groupObservations,
   groupWorkZones,
   lineAmount,
   listAmount,
+  presentedAmountLabel,
   severityChangeRequested,
   severityHistoryRows,
   severityPresentation,
   sumDeclared,
-  workLabel,
 } from './calibrationView.js';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
@@ -514,18 +515,14 @@ export function VisualDetail({ record }) {
         </div>
       </header>
       <WorkBoard lines={record.lines} documentTotal={record.quotedTotalMxn} subjectId={record.id} />
-      {record.observations?.length ? (
-        <section>
-          <h3 className="text-sm font-semibold">Observaciones</h3>
-          <ul className="mt-2 flex flex-col gap-2">
-            {record.observations.map((item) => (
-              <li key={item} className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-300">{item}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <ObservationBoard observations={record.observations} lines={record.lines} />
       <section>
         <h3 className="text-sm font-semibold">Fotografías</h3>
+        {correspondencePending(record.observations, record.lines) ? (
+          <p className="mt-2 break-words text-xs leading-4 text-amber-800 dark:text-amber-200">
+            Correspondencia pendiente de revisión. Estas fotografías no confirman la zona cotizada.
+          </p>
+        ) : null}
         {record.photos?.length ? (
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {record.photos.map((photo) => (
@@ -1168,6 +1165,37 @@ function zoneSeverity(lines) {
   };
 }
 
+function ObservationBoard({ observations, lines }) {
+  const groups = groupObservations(observations, lines);
+  const sections = [
+    ['human', 'Declaraciones humanas', groups.human],
+    ['visual', 'Observaciones visuales', groups.visual],
+    ['review', 'Aspectos por verificar', groups.review],
+    ['unknown', 'Procedencia no determinada', groups.unknown],
+  ].filter(([, , items]) => items.length > 0);
+  if (sections.length === 0) return null;
+  return (
+    <section aria-label="Observaciones">
+      <h3 className="text-sm font-semibold">Observaciones</h3>
+      {sections.map(([id, title, items]) => (
+        <div key={id} className="mt-3">
+          <h4 className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{title}</h4>
+          <ul className="mt-1 divide-y divide-gray-100 dark:divide-gray-800">
+            {items.map((item) => (
+              <li key={item.text} className="py-2">
+                <p className="break-words text-sm leading-5 text-gray-700 dark:text-gray-200">{item.text}</p>
+                {item.note && item.note !== title ? (
+                  <p className="mt-1 break-words text-xs leading-4 text-amber-800 dark:text-amber-200">{item.note}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function EconomicSummary({ summary }) {
   return (
     <section className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
@@ -1175,16 +1203,26 @@ function EconomicSummary({ summary }) {
         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total cotizado del documento</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.documentTotal == null ? 'No proporcionado' : money.format(summary.documentTotal)}</p>
       </article>
-      <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Refacciones</p>
-        <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'parts')}</p>
-      </article>
-      <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Mano de obra y pintura</p>
-        <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'labor')}</p>
-      </article>
-      {summary.unclassified > 0 ? (
-        <p className="text-xs text-gray-500 min-[390px]:col-span-2">Partidas sin categoría inequívoca: {summary.unclassified}</p>
+      {summary.mode === 'combined' ? (
+        <p className="break-words text-sm text-gray-600 min-[390px]:col-span-2 dark:text-gray-300">Precio conjunto · Sin desglose de componentes</p>
+      ) : null}
+      {summary.showParts ? (
+        <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Refacciones</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'parts')}</p>
+        </article>
+      ) : null}
+      {summary.showLabor ? (
+        <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Mano de obra y pintura</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">{categoryAmount(summary, 'labor')}</p>
+        </article>
+      ) : null}
+      {summary.showUnclassified ? (
+        <article className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800 min-[390px]:col-span-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Importes sin desglose</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">{summary.unclassifiedAmount == null ? 'No proporcionado' : money.format(summary.unclassifiedAmount)}</p>
+        </article>
       ) : null}
       {summary.reconciles ? null : (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 min-[390px]:col-span-2 dark:bg-amber-950/50 dark:text-amber-100">
@@ -1195,10 +1233,10 @@ function EconomicSummary({ summary }) {
   );
 }
 
-function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds }) {
+function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds, mode }) {
   const [open, setOpen] = useState(true);
   const panelId = `zone-${subjectId}-${zone.id}`;
-  const labels = zone.lines.map(workLabel).filter(Boolean).join(' · ');
+  const labels = zone.lines.map((line) => presentedAmountLabel(line, mode)).filter(Boolean).join(' · ');
   const severity = zoneSeverity(zone.lines);
   return (
     <li className="min-w-0 rounded-xl border border-gray-200 p-3 dark:border-gray-800">
@@ -1229,7 +1267,7 @@ function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds }
             return (
               <li key={line.lineId ?? `${line.role}-${line.part}`} className="flex min-w-0 flex-col gap-0.5 text-sm">
                 <span className="flex min-w-0 items-start justify-between gap-3">
-                  <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{amountLabel(line)}</span>
+                  <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{presentedAmountLabel(line, mode)}</span>
                   <span className="shrink-0 tabular-nums">{amount == null ? 'No proporcionado' : money.format(amount)}</span>
                 </span>
                 {contracted == null ? null : <span className="text-xs text-gray-500">Contratado {money.format(contracted)}</span>}
@@ -1245,7 +1283,7 @@ function ZoneCard({ zone, subjectId, compact = false, onZoneResult, pendingIds }
 
 function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
   const zones = groupWorkZones(lines);
-  const summary = economicSummary(lines, documentTotal);
+  const summary = financialPresentation(lines, documentTotal);
   const [severityNotice, setSeverityNotice] = useState(null);
   const onZoneResult = (result) => {
     if (result?.complete) setSeverityNotice(null);
@@ -1268,7 +1306,7 @@ function WorkBoard({ lines, documentTotal, subjectId, compact = false }) {
       {zones.length ? (
         <ul className="flex flex-col gap-3">
           {zones.map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} subjectId={subjectId} compact={compact} onZoneResult={compact ? undefined : onZoneResult} pendingIds={severityNotice?.pending} />
+            <ZoneCard key={`${subjectId}-${zone.id}`} zone={zone} subjectId={subjectId} compact={compact} mode={summary.mode} onZoneResult={compact ? undefined : onZoneResult} pendingIds={severityNotice?.pending} />
           ))}
         </ul>
       ) : <p className="text-sm text-gray-500">Sin piezas registradas.</p>}

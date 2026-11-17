@@ -9,12 +9,16 @@ import {
   amountLabel,
   confirmTargets,
   confirmZoneLines,
+  correspondencePending,
   declaredAmount,
   economicSummary,
+  financialPresentation,
   galleryMove,
+  groupObservations,
   groupRepairLines,
   groupWorkZones,
   listAmount,
+  presentedAmountLabel,
   severityChangeRequested,
   severityHistoryRows,
   severityPresentation,
@@ -528,4 +532,126 @@ test('un fallo de la API conserva la última consulta y la marca sin confirmar',
   }), 'quiet');
   rejectCachedSession(client);
   assert.equal(client.getQueryData(summaryKey()), undefined);
+});
+
+test('la procedencia de una observación sale de una atribución explícita', () => {
+  const declared = 'salpicadera trasera izquierda';
+  const lines = [afLine('L01', declared, 'repair_paint', 8500)];
+  const human = 'La cotizacion describe el dano de la salpicadera trasera izquierda como fuerte.';
+  const visual = 'El vehiculo se observa de color blanco.';
+  const review = 'Las fotografias muestran la esquina trasera derecha. La salpicadera trasera izquierda no aparece en las imagenes.';
+  const unknown = 'Tiempo estimado de entrega de 3 a 4 dias habiles.';
+  const warranty = 'Garantia de un ano por escrito.';
+  const groups = groupObservations([human, visual, review, unknown, warranty, human], lines);
+  assert.deepEqual(groups.human.map((item) => item.text), [human]);
+  assert.equal(groups.human[0].note, 'Atribuida a la cotización');
+  assert.deepEqual(groups.visual.map((item) => item.text), [visual]);
+  assert.equal(groups.visual[0].note, 'No es un hecho confirmado');
+  assert.deepEqual(groups.review.map((item) => item.text), [review]);
+  assert.equal(groups.review[0].correspondence, true);
+  assert.match(groups.review[0].note, /No es un hecho confirmado/);
+  assert.deepEqual(groups.unknown.map((item) => item.text), [unknown, warranty]);
+  assert.equal(groups.unknown.every((item) => item.note === 'Procedencia no determinada'), true);
+  assert.equal(groups.human.some((item) => item.text === visual), false);
+  assert.equal(correspondencePending([review], lines), true);
+  assert.equal(correspondencePending([visual], lines), false);
+  assert.equal(lines[0].part, declared);
+  assert.equal(lines[0].priceMxn, 8500);
+  assert.deepEqual(groupObservations([], lines), { human: [], visual: [], review: [], unknown: [] });
+  assert.equal(groupObservations(undefined, lines).human.length, 0);
+});
+
+test('una discrepancia sellada no se vuelve declaración y no se duplica', () => {
+  const stamped = 'Posible discrepancia visual: la fotografía parece mostrar el lado contrario de la pieza declarada. Procedencia: visual_inference. No es un hecho confirmado.';
+  const warning = 'Advertencia visual no aplicada: la inferencia no sustituye la severidad declarada. Procedencia: visual_inference.';
+  const groups = groupObservations([stamped, warning, stamped], []);
+  assert.equal(groups.human.length, 0);
+  assert.equal(groups.review.length, 1);
+  assert.equal(groups.review[0].correspondence, true);
+  assert.equal(groups.visual.length, 1);
+  assert.equal(groups.visual[0].text, warning);
+  assert.equal(groups.unknown.length, 0);
+  const mixed = groupObservations(['AutoFix indica la pieza. El vehiculo se observa golpeado.'], []);
+  assert.equal(mixed.human.length, 0);
+  assert.equal(mixed.visual.length, 0);
+  assert.equal(mixed.review[0].note.includes('Procedencia no determinada'), true);
+  const incomplete = groupObservations(['AutoFix indica que es la puerta trasera. El lado no fue declarado.'], []);
+  assert.equal(incomplete.review.length, 1);
+  assert.equal(incomplete.human.length, 0);
+  assert.equal(incomplete.review[0].correspondence, false);
+});
+
+test('el precio conjunto oculta subtotales vacíos y conserva el desglose real', () => {
+  const fender = [afLine('L01', 'salpicadera trasera izquierda', 'repair_paint', 8500)];
+  const combined = financialPresentation(fender, 8500);
+  assert.equal(combined.mode, 'combined');
+  assert.equal(combined.documentTotal, 8500);
+  assert.equal(combined.showParts, false);
+  assert.equal(combined.showLabor, false);
+  assert.equal(combined.showUnclassified, false);
+  assert.equal(combined.reconciles, true);
+  assert.equal(presentedAmountLabel(fender[0], combined.mode), 'Reparación y pintura');
+  assert.equal(fender[0].priceMxn, 8500);
+  assert.equal(fender[0].treatment, 'repair_paint');
+
+  const door = [afLine('L01', 'puerta trasera', 'repair_paint', 3600)];
+  const jolion = financialPresentation(door, 3600);
+  assert.equal(jolion.mode, 'combined');
+  assert.equal(jolion.documentTotal, 3600);
+  assert.equal(presentedAmountLabel(door[0], jolion.mode), 'Reparación y pintura');
+
+  const mazda = [
+    afLine('L01', 'salpicadera izquierda', 'replace', 1900),
+    afLine('L02', 'salpicadera izquierda', 'paint', 3600),
+    afLine('L03', 'fascia delantera', 'replace', 2700),
+    afLine('L04', 'fascia delantera', 'paint', 3600),
+  ];
+  const split = financialPresentation(mazda, 11800);
+  assert.equal(split.mode, 'classified');
+  assert.equal(split.parts, 4600);
+  assert.equal(split.labor, 7200);
+  assert.equal(split.documentTotal, 11800);
+  assert.equal(split.showParts, true);
+  assert.equal(split.showLabor, true);
+  assert.equal(split.reconciles, true);
+  assert.deepEqual(mazda.map((line) => line.priceMxn), [1900, 3600, 2700, 3600]);
+
+  const partialLines = [
+    afLine('L01', 'salpicadera izquierda', 'replace', 1900),
+    afLine('L02', 'puerta trasera', 'repair_paint', 3600),
+  ];
+  const partial = financialPresentation(partialLines, 5500);
+  assert.equal(partial.mode, 'partial');
+  assert.equal(partial.parts, 1900);
+  assert.equal(partial.labor, 0);
+  assert.equal(partial.showParts, true);
+  assert.equal(partial.showLabor, false);
+  assert.equal(partial.showUnclassified, true);
+  assert.equal(partial.unclassifiedAmount, 3600);
+  assert.equal(partial.reconciles, true);
+  assert.equal(presentedAmountLabel(partialLines[1], partial.mode), 'Reparar y pintar');
+
+  const ambiguous = financialPresentation([afLine('L01', 'cofre', 'replace_paint', 1900)], 1900);
+  assert.equal(ambiguous.mode, 'partial');
+  assert.equal(ambiguous.showParts, false);
+  assert.equal(ambiguous.showLabor, false);
+  assert.equal(ambiguous.unclassifiedAmount, 1900);
+  assert.equal(presentedAmountLabel({ treatment: 'replace_paint' }, ambiguous.mode), 'Sustituir y pintar');
+
+  const mismatch = financialPresentation(fender, 9000);
+  assert.equal(mismatch.mode, 'combined');
+  assert.equal(mismatch.documentTotal, 9000);
+  assert.equal(mismatch.reconciles, false);
+  assert.equal(fender[0].priceMxn, 8500);
+
+  const repair = [
+    { lineId: 'L01', part: 'Fascia delantera', role: 'part', labor: null, quotedMxn: 2700, quotedValidation: 'human_confirmed' },
+    { lineId: 'L02', part: 'fascia delantera', role: 'labor', labor: 'mount_and_paint', quotedMxn: 3600, quotedValidation: 'human_confirmed' },
+  ];
+  const rq = financialPresentation(repair, 6300);
+  assert.equal(rq.mode, 'classified');
+  assert.equal(rq.parts, 2700);
+  assert.equal(rq.labor, 3600);
+  assert.equal(rq.showParts, true);
+  assert.equal(rq.showLabor, true);
 });

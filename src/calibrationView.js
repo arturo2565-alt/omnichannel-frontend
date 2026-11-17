@@ -285,3 +285,146 @@ export function economicSummary(lines = [], documentTotal) {
     reconciles: total != null && complete && zoneSum === total,
   };
 }
+
+function unclassifiedAmount(lines) {
+  const amounts = lines.filter((line) => lineCharge(line) == null).map(lineAmount);
+  if (amounts.length === 0 || amounts.some((amount) => amount == null)) return null;
+  return amounts.reduce((sum, amount) => sum + amount, 0);
+}
+
+export function financialPresentation(lines = [], documentTotal) {
+  const summary = economicSummary(lines, documentTotal);
+  const single = lines.length === 1 ? lines[0] : null;
+  const combined = Boolean(
+    single
+    && single.role == null
+    && single.treatment === 'repair_paint'
+    && lineCharge(single) == null
+    && lineAmount(single) != null,
+  );
+  const mode = combined ? 'combined' : summary.unclassified > 0 ? 'partial' : 'classified';
+  return {
+    ...summary,
+    mode,
+    unclassifiedAmount: summary.unclassified > 0 ? unclassifiedAmount(lines) : null,
+    showParts: mode === 'classified' || (mode === 'partial' && summary.partsCount > 0),
+    showLabor: mode === 'classified' || (mode === 'partial' && summary.laborCount > 0),
+    showUnclassified: mode === 'partial',
+  };
+}
+
+export function presentedAmountLabel(line, mode) {
+  if (mode === 'combined' && line?.role == null && line?.treatment === 'repair_paint') {
+    return 'Reparación y pintura';
+  }
+  return amountLabel(line);
+}
+
+const SYSTEM_DISCREPANCY = 'Posible discrepancia visual: la fotografía parece mostrar el lado contrario de la pieza declarada. Procedencia: visual_inference. No es un hecho confirmado.';
+const SYSTEM_VISUAL = 'Advertencia visual no aplicada: la inferencia no sustituye la severidad declarada. Procedencia: visual_inference.';
+const SYSTEM_CLARIFICATION = 'La severidad escrita no es un nivel explícito de severity-v1 y queda sin clasificación.';
+const HUMAN_QUOTE = /^la cotizacion (?:declara|describe)\b/;
+const HUMAN_OPERATOR = /^autofix indica\b/;
+const PHOTO_SOURCE = /\b(?:las fotografias muestran|la fotografia muestra)\b/;
+const VISUAL_SOURCE = /\bse observa\b/;
+const UNDECLARED = /\bno (?:fue declarado|fueron declarados)\b/;
+const NOT_IN_IMAGE = /\bno (?:aparece|se observa) en (?:las imagenes|la imagen)\b/;
+
+function foldText(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('es-MX')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sideOfName(value) {
+  const found = new Set(foldText(value).match(/\b(?:derecha|izquierda)\b/gu) ?? []);
+  if (found.size !== 1) return null;
+  return [...found][0];
+}
+
+function oppositeName(part, side) {
+  const other = side === 'derecha' ? 'izquierda' : 'derecha';
+  return foldText(part).replace(new RegExp(`\\b${side}\\b`, 'u'), other);
+}
+
+function questionsCorrespondence(folded, lines) {
+  if (!PHOTO_SOURCE.test(folded)) return false;
+  return (lines ?? []).some((line) => {
+    const part = typeof line?.part === 'string' ? line.part : '';
+    const side = sideOfName(part);
+    const declared = foldText(part);
+    if (!side || !declared) return false;
+    const declaredMissing = NOT_IN_IMAGE.test(folded) && folded.includes(declared);
+    const namesOpposite = folded.includes(oppositeName(part, side));
+    return declaredMissing || namesOpposite;
+  });
+}
+
+function classifyObservation(text, lines) {
+  const folded = foldText(text);
+  if (folded === foldText(SYSTEM_DISCREPANCY)) {
+    return {
+      kind: 'review',
+      correspondence: true,
+      note: 'Posible discrepancia · Pendiente de revisión · No es un hecho confirmado',
+    };
+  }
+  if (folded === foldText(SYSTEM_VISUAL)) {
+    return { kind: 'visual', correspondence: false, note: 'No es un hecho confirmado' };
+  }
+  if (folded === foldText(SYSTEM_CLARIFICATION)) {
+    return { kind: 'review', correspondence: false, note: 'Dato incompleto · Procedencia no determinada' };
+  }
+  const human = HUMAN_QUOTE.test(folded) || HUMAN_OPERATOR.test(folded);
+  const visual = PHOTO_SOURCE.test(folded) || VISUAL_SOURCE.test(folded);
+  if (questionsCorrespondence(folded, lines)) {
+    return {
+      kind: 'review',
+      correspondence: true,
+      note: 'Posible discrepancia · Pendiente de revisión · No es un hecho confirmado',
+    };
+  }
+  if (UNDECLARED.test(folded)) {
+    return { kind: 'review', correspondence: false, note: 'Dato incompleto · Pendiente de revisión' };
+  }
+  if (human && visual) {
+    return { kind: 'review', correspondence: false, note: 'Atribuciones mezcladas · Procedencia no determinada' };
+  }
+  if (human) {
+    return {
+      kind: 'human',
+      correspondence: false,
+      note: HUMAN_OPERATOR.test(folded) ? 'Atribuida a AutoFix' : 'Atribuida a la cotización',
+    };
+  }
+  if (visual) {
+    return { kind: 'visual', correspondence: false, note: 'No es un hecho confirmado' };
+  }
+  return { kind: 'unknown', correspondence: false, note: 'Procedencia no determinada' };
+}
+
+export function groupObservations(observations = [], lines = []) {
+  const groups = { human: [], visual: [], review: [], unknown: [] };
+  const seen = new Set();
+  for (const item of observations ?? []) {
+    if (typeof item !== 'string') continue;
+    const text = item.trim();
+    const key = foldText(text);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const reading = classifyObservation(text, lines);
+    groups[reading.kind].push({
+      text,
+      note: reading.note,
+      correspondence: reading.correspondence,
+    });
+  }
+  return groups;
+}
+
+export function correspondencePending(observations = [], lines = []) {
+  return groupObservations(observations, lines).review.some((item) => item.correspondence);
+}

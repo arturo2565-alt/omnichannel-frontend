@@ -22,6 +22,13 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Archivo pendiente/);
   assert.match(page, /record\.observations/);
   assert.match(page, /Observaciones/);
+  assert.match(page, /Declaraciones humanas/);
+  assert.match(page, /Observaciones visuales/);
+  assert.match(page, /Aspectos por verificar/);
+  assert.match(page, /Procedencia no determinada/);
+  assert.match(page, /Precio conjunto · Sin desglose de componentes/);
+  assert.match(page, /Importes sin desglose/);
+  assert.match(page, /no confirman la zona cotizada/);
   assert.match(page, /Más registros/);
   assert.match(page, /repair-work/);
   assert.match(page, /expedientes/);
@@ -48,6 +55,8 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Advertencia de severidad/);
   assert.match(page, /confirmZoneLines/);
   const view = read('../src/calibrationView.js');
+  assert.match(view, /groupObservations/);
+  assert.match(view, /financialPresentation/);
   assert.match(view, /paint: 'Pintar'/);
   assert.match(view, /paint: 'Pintura'/);
   assert.match(view, /mount_and_paint: 'Montaje y pintura'/);
