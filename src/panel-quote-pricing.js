@@ -85,11 +85,20 @@ function integralBaseMapFromCatalog(integralBases) {
   return map;
 }
 
+function fenderTariffsConflict(left, right) {
+  const rear = 'salpicadera trasera';
+  const a = String(left ?? '').trim().toLowerCase();
+  const b = String(right ?? '').trim().toLowerCase();
+  const rearSide = (name) => name === rear || name.startsWith(`${rear} `);
+  return (rearSide(a) && b === 'salpicadera') || (a === 'salpicadera' && rearSide(b));
+}
+
 function lookupCatalogBasePrice(catalogPieza, pieceBasesMap) {
   const key = String(catalogPieza ?? '').trim();
   if (!key) return 0;
   if (pieceBasesMap.has(key)) return pieceBasesMap.get(key);
   for (const [servicio, price] of pieceBasesMap.entries()) {
+    if (fenderTariffsConflict(key, servicio)) continue;
     if (
       servicio.toLowerCase() === key.toLowerCase() ||
       key.toLowerCase().includes(servicio.toLowerCase()) ||
@@ -160,6 +169,8 @@ export function computePanelPiecePrice(
       rules: mergeRules(pricingCtx.rules),
     });
   }
+
+  if (Array.isArray(pricingCtx.pieceBases)) return 0;
 
   const legacySev = MAGNITUDE_TO_LEGACY[magnitude] ?? 'DL';
   return Math.max(0, Math.round(calculateEstimate(pieza, legacySev) || 0));
