@@ -227,6 +227,28 @@ test('la severidad validada se distingue de la propuesta y el historial no inven
   const proposal = severityPresentation({ status: 'proposed', provenance: 'visual_inference', inferenceMethod: 'visual_assessment', level: 'fuerte' });
   const validated = severityPresentation({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' });
   assert.deepEqual(proposal, { level: 'Fuerte', state: 'Propuesta IA' });
+  assert.deepEqual(severityPresentation({
+    status: 'validated',
+    provenance: 'human_declaration',
+    authorization: 'authorized_intake',
+    level: 'leve',
+  }), { level: 'Leve', state: 'Verificado en origen' });
+  assert.equal(colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'proposed',
+    exteriorColor: 'rojo',
+    exteriorProvenance: 'visual_inference',
+    inferenceMethod: 'body_pixel_sample',
+    inferenceStatus: 'clear',
+  }).state, 'Propuesta IA');
+  assert.equal(colorPresentation({
+    contractVersion: 'color-v1',
+    status: 'unknown',
+    exteriorColor: null,
+    exteriorProvenance: 'unknown',
+    inferenceMethod: 'body_pixel_sample',
+    inferenceStatus: 'contradictory',
+  }).state, 'Desconocido');
   assert.deepEqual(validated, { level: 'Medio', state: 'Validado' });
   assert.equal(severityChangeRequested({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' }, 'medio'), false);
   assert.equal(severityChangeRequested({ status: 'validated', provenance: 'authenticated_owner', level: 'medio' }, 'fuerte'), true);

@@ -111,6 +111,9 @@ export function severityPresentation(annotation) {
   if (annotation.status === 'validated' && annotation.provenance === 'authenticated_owner') {
     return { level: SEVERITY_LEVEL_NAMES[annotation.level] ?? 'Desconocido', state: 'Validado' };
   }
+  if (annotation.status === 'validated' && annotation.authorization === 'authorized_intake' && annotation.provenance === 'human_declaration') {
+    return { level: SEVERITY_LEVEL_NAMES[annotation.level] ?? 'Desconocido', state: 'Verificado en origen' };
+  }
   if (annotation.status === 'unknown' && annotation.provenance === 'insufficient_evidence') {
     return { level: 'Desconocido', state: null };
   }
@@ -149,6 +152,7 @@ export function colorPresentation(annotation) {
       original: null,
       provenance: 'unknown',
       showProvenance: true,
+      state: 'Desconocido',
     };
   }
   if (requested) {
@@ -165,6 +169,7 @@ export function colorPresentation(annotation) {
       original: originalLabel,
       provenance: shown,
       showProvenance: true,
+      state: colorState(annotation, requestedProvenance ?? provenance),
     };
   }
   if (!exterior && originalLabel) {
@@ -176,6 +181,7 @@ export function colorPresentation(annotation) {
       original: originalLabel,
       provenance: 'human_declaration',
       showProvenance: true,
+      state: 'Pendiente de validación',
     };
   }
   if (!provenance || !exterior) return null;
@@ -187,7 +193,17 @@ export function colorPresentation(annotation) {
     original: originalLabel,
     provenance,
     showProvenance: true,
+    state: colorState(annotation, provenance),
   };
+}
+
+function colorState(annotation, provenance) {
+  if (annotation.status === 'validated' && provenance === 'authenticated_owner') return 'Validado';
+  if (provenance === 'visual_inference' && annotation.inferenceMethod === 'body_pixel_sample') return 'Propuesta IA';
+  if (provenance === 'visual_inference') return 'Propuesta IA';
+  if (provenance === 'human_declaration' && annotation.status === 'proposed') return 'Pendiente de validación';
+  if (annotation.status === 'unknown' || provenance === 'unknown') return 'Desconocido';
+  return null;
 }
 
 export function vehicleColorSuffix(annotation) {

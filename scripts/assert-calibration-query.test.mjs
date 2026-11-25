@@ -54,7 +54,7 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /Advertencia de conciliación/);
   assert.match(page, /Advertencia de severidad/);
   assert.match(page, /confirmZoneLines/);
-  assert.match(page, /Validar severidades declaradas/);
+  assert.match(page, /Aprobar resumen declarado/);
   assert.match(page, /Corregir color/);
   assert.match(page, /Color actual/);
   assert.match(page, /Color solicitado/);
@@ -64,6 +64,8 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(api, /colorReviewed: true/);
   assert.match(page, /Reintentar declaraciones pendientes/);
   assert.match(page, /declaredSeverityReview/);
+  assert.match(api, /severity-summary/);
+  assert.match(api, /summaryReviewed: true/);
   assert.match(api, /severity-declarations/);
   assert.match(api, /declarationsReviewed: true/);
   const view = read('../src/calibrationView.js');

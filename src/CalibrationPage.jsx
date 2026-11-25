@@ -7,7 +7,7 @@ import {
   calibrationListPath,
   cancelEvidencePreview,
   confirmCalibrationSeverity,
-  confirmDeclaredSeverities,
+  approveSeveritySummary,
   confirmVehicleColor,
   confirmEvidenceArchive,
   fetchCalibrationDocument,
@@ -1044,12 +1044,14 @@ function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneR
   const formKey = ids.join('-') || 'zona';
   const historyId = `severity-history-${subjectId}-${formKey}`;
   const validated = annotation?.status === 'validated' && annotation?.provenance === 'authenticated_owner';
+  const originVerified = annotation?.status === 'validated' && annotation?.authorization === 'authorized_intake' && annotation?.provenance === 'human_declaration';
   const [editing, setEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [level, setLevel] = useState('');
   const headline = severityPresentation(annotation);
   const history = severityHistoryRows(annotation?.history);
-  const showEditor = !compact && Boolean(subjectId) && ids.length > 0 && (!validated || editing);
+  const pendingHuman = annotation?.status === 'proposed' && annotation?.provenance === 'human_declaration' && annotation?.inferenceMethod == null;
+  const showEditor = !compact && Boolean(subjectId) && ids.length > 0 && ((!validated && !originVerified && !pendingHuman) || editing);
   const showConfirm = severityChangeRequested(annotation, level);
   const save = useMutation({
     mutationFn: (next) => confirmZoneLines(
@@ -1074,7 +1076,7 @@ function SeverityNote({ subjectId, lineIds, annotation, compact = false, onZoneR
           <p className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-gray-100">{headline.level}</p>
           {headline.state ? <p className="text-xs text-gray-500 dark:text-gray-400">{headline.state}</p> : null}
         </div>
-        {validated && !editing && !compact && subjectId ? (
+        {(validated || originVerified || pendingHuman) && !editing && !compact && subjectId ? (
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -1292,7 +1294,7 @@ function DeclarationReview({ subjectId, lines }) {
   const review = declaredSeverityReview(lines);
   const [result, setResult] = useState(null);
   const save = useMutation({
-    mutationFn: (items) => confirmDeclaredSeverities({ subjectId, items }),
+    mutationFn: (items) => approveSeveritySummary({ subjectId, items }),
     onSuccess: async (report) => {
       setResult(report);
       await client.invalidateQueries({
@@ -1311,7 +1313,7 @@ function DeclarationReview({ subjectId, lines }) {
         {review.map((item) => (
           <li key={item.annotationId} className="flex min-w-0 flex-col gap-0.5 py-2 min-[390px]:flex-row min-[390px]:items-baseline min-[390px]:justify-between">
             <span className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-200">{item.name}</span>
-            <span className="shrink-0 text-xs text-gray-500">{severityLevelLabel(item.level)} · {item.provenance}</span>
+            <span className="shrink-0 text-xs text-gray-500">{severityLevelLabel(item.level)} · Pendiente de validación</span>
           </li>
         ))}
       </ul>
@@ -1321,10 +1323,10 @@ function DeclarationReview({ subjectId, lines }) {
         onClick={() => save.mutate(targets)}
         className="mt-2 rounded-lg bg-sky-700 px-3 py-2 text-xs font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 disabled:opacity-50"
       >
-        {pending.length > 0 ? 'Reintentar declaraciones pendientes' : 'Validar severidades declaradas'}
+        {pending.length > 0 ? 'Reintentar declaraciones pendientes' : 'Aprobar resumen declarado'}
       </button>
       {save.isError ? <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">La confirmación no se registró.</p> : null}
-      {result?.complete ? <p className="mt-2 text-xs text-gray-500">Declaraciones validadas.</p> : null}
+      {result?.complete ? <p className="mt-2 text-xs text-gray-500">Resumen verificado en origen.</p> : null}
       {result && !result.complete ? (
         <p className="mt-2 break-words text-xs text-amber-800 dark:text-amber-200">
           La confirmación no cubre todas las declaraciones. Sin confirmar: {result.conflicts.map((item) => item.lineId).join(', ')}.
@@ -1524,13 +1526,13 @@ export function VehicleIdentity({ record, subjectId, heading = false }) {
       <Tag className={heading ? 'break-words text-2xl font-semibold tracking-tight' : 'break-words'}>
         {title || (heading ? (record?.id || 'Vehículo incompleto') : 'Vehículo incompleto')}
         {color?.showProvenance && color.mode === 'single' ? (
-          <span className="ml-2 align-middle text-[11px] font-normal text-gray-400">{color.provenance}</span>
+          <span className="ml-2 align-middle text-[11px] font-normal text-gray-400">{color.state || color.provenance}</span>
         ) : null}
       </Tag>
       {color?.mode === 'change' ? (
         <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">
           {color.current ? `Color actual ${color.current} → ` : ''}Color solicitado {color.requested}
-          {color.showProvenance ? <span className="ml-2 text-[11px] text-gray-400">{color.provenance}</span> : null}
+          {color.showProvenance ? <span className="ml-2 text-[11px] text-gray-400">{color.state || color.provenance}</span> : null}
         </p>
       ) : null}
       {color?.original ? (
@@ -1539,7 +1541,7 @@ export function VehicleIdentity({ record, subjectId, heading = false }) {
       {color?.mode === 'unknown' ? (
         <p className="mt-1 break-words text-xs text-gray-400">
           Color no determinado
-          <span className="ml-2 text-[11px]">{color.provenance}</span>
+          <span className="ml-2 text-[11px]">{color.state || color.provenance}</span>
         </p>
       ) : null}
       {subjectId ? <ColorCorrection subjectId={subjectId} /> : null}
