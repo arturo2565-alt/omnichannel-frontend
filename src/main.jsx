@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
@@ -14,6 +14,10 @@ import ProtectedRoute from './ProtectedRoute.jsx'
 import { AuthProvider } from './AuthContext.jsx'
 import { ThemeProvider } from './ThemeContext.jsx'
 
+const SupervisionPreviewPage = import.meta.env.DEV
+  ? lazy(() => import('./supervision/SupervisionPreviewPage.jsx'))
+  : null
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
@@ -21,6 +25,16 @@ createRoot(document.getElementById('root')).render(
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {import.meta.env.DEV && SupervisionPreviewPage ? (
+            <Route
+              path="/dev/supervision"
+              element={
+                <Suspense fallback={null}>
+                  <SupervisionPreviewPage />
+                </Suspense>
+              }
+            />
+          ) : null}
           <Route
             path="/"
             element={

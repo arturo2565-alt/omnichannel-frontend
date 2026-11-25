@@ -6,18 +6,24 @@ import QuickReplies from './QuickReplies';
 import { OmnichannelLeftRail } from './OmnichannelLeftRail.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetchWebhook, apiFetchOrigin, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
+import { apiFetchWebhook, apiFetchOrigin, expireAuthSession, markClienteAtendidoRequest, transitionConversationStatus } from './apiClient.js';
+import { getAuthTallerId } from './authStorage.js';
+import { connectWorkshopSocket } from './realtimeSocket.js';
 import {
   beginQueryEpoch,
   finishQueryEpoch,
   hasSessionScope,
   normalizeCatalogView,
   readWorkshopResponse,
+  schedulingEventMatches,
   sessionScope,
+  upsertCachedAppointment,
   workshopKey,
 } from './sessionQuery.js';
 import LabClientComposer from './LabClientComposer.jsx';
 import { isLabChannel } from './labInbox.js';
+import AgentSupervisionPanel from './supervision/AgentSupervisionPanel.jsx';
+import { buildSupervisionModel } from './supervision/supervision-model.js';
 import {
   PANEL_DAMAGE_MAGNITUDES,
   PANEL_SEVERITY_LABELS,
@@ -2139,6 +2145,7 @@ function ChatView({
 
   const [conversationAppointmentWhen, setConversationAppointmentWhen] =
     useState(null);
+  const [conversationAppointment, setConversationAppointment] = useState(null);
 
   useEffect(() => {
     if (
@@ -2146,6 +2153,7 @@ function ChatView({
       !apiBaseUrl ||
       leadStatusForQuote !== 'agendado'
     ) {
+      setConversationAppointment(null);
       setConversationAppointmentWhen(null);
       return;
     }
@@ -2189,15 +2197,43 @@ function ChatView({
         const when = active?.scheduledAt
           ? formatAppointmentCitaWhen(active.scheduledAt)
           : null;
+        setConversationAppointment(active ?? null);
         setConversationAppointmentWhen(when);
       } catch (e) {
         if (e?.name !== 'AbortError') {
+          setConversationAppointment(null);
           setConversationAppointmentWhen(null);
         }
       }
     })();
     return () => ac.abort();
   }, [selectedConvId, apiBaseUrl, leadStatusForQuote, queryClient, user, taller]);
+
+  useEffect(() => {
+    if (!selectedConvId) return undefined;
+    const socket = connectWorkshopSocket({
+      onUnauthorized: () => expireAuthSession(),
+    });
+    if (!socket) return undefined;
+    const onAppointment = (payload) => {
+      if (!schedulingEventMatches(payload, getAuthTallerId())) return;
+      upsertCachedAppointment(queryClient, sessionScope(user, taller), payload);
+      if (String(payload?.conversationId ?? '') !== String(selectedConvId)) return;
+      const status = String(payload?.status ?? '').toLowerCase();
+      if (!['confirmada', 'pendiente'].includes(status) || !payload?.scheduledAt) {
+        return;
+      }
+      setConversationAppointment(payload);
+      setConversationAppointmentWhen(formatAppointmentCitaWhen(payload.scheduledAt));
+    };
+    socket.on('appointmentCreated', onAppointment);
+    socket.on('appointmentUpdated', onAppointment);
+    return () => {
+      socket.off('appointmentCreated', onAppointment);
+      socket.off('appointmentUpdated', onAppointment);
+      socket.disconnect();
+    };
+  }, [selectedConvId, queryClient, user, taller]);
 
   const panelBackendClienteNarrative = useMemo(
     () =>
@@ -2846,8 +2882,7 @@ function ChatView({
     [setSelectedConvId],
   );
 
-  const showMobileQuoteCta =
-    Boolean(selectedConvId && hasPanelQuote);
+  const showMobileQuoteCta = Boolean(selectedConvId);
   const quotePanelPendingApproval =
     panelDisplayQuote?.status === 'PENDING_APPROVAL';
 
@@ -3489,6 +3524,121 @@ function ChatView({
     </div>
   );
 
+  const supervisionModel = useMemo(() => {
+    if (!selectedConvId) return null;
+    const canonical = activeDraftForPanel?.canonicalQuoteV1 ?? null;
+    const peritajeVehicles = activeDraftForPanel?.canonicalPeritajeV1?.vehicles ?? [];
+    const canonicalLines = Array.isArray(canonical?.lines) ? canonical.lines : [];
+    const rowByLineId = new Map();
+    for (const row of panelRowsForDisplay) {
+      const lineId = String(row.quoteLineId ?? '').trim();
+      if (lineId) rowByLineId.set(lineId, row);
+    }
+    const lines =
+      canonicalLines.length > 0
+        ? canonicalLines.map((line) => {
+            const row = rowByLineId.get(String(line.quoteLineId ?? '')) ?? null;
+            return {
+              id: line.quoteLineId,
+              label: line.description,
+              code: row?.pieza ?? '',
+              amount: line.amount,
+              severity: row?.severidad,
+              treatment: row?.tratamiento,
+              priceSource: line.pricingSource ?? row?.priceSource,
+              pricingStatus: line.pricingStatus ?? row?.pricingStatus,
+            };
+          })
+        : panelRowsForDisplay.map((row) => ({
+            id: row.id,
+            label: getPiezaClienteDisplayName(String(row.pieza ?? '')),
+            code: row.pieza,
+            amount: rowAmountForPanelTotal(row),
+            severity: row.severidad,
+            treatment: row.tratamiento,
+            priceSource: row.priceSource,
+            pricingStatus: row.pricingStatus,
+          }));
+    const evidence = [];
+    for (const row of panelRowsForDisplay) {
+      for (const url of row.urls_origen ?? []) {
+        const clean = String(url ?? '').trim();
+        if (!clean || !isImage(clean)) continue;
+        evidence.push({
+          url: clean,
+          panel: getPiezaClienteDisplayName(String(row.pieza ?? '')),
+          severity: row.severidad,
+          treatment: row.tratamiento,
+        });
+      }
+    }
+    for (const url of quoteEvidenceImageUrls) {
+      if (!evidence.some((item) => item.url === url)) evidence.push({ url });
+    }
+    const canonicalTotal =
+      canonical && Number.isFinite(Number(canonical.total))
+        ? Math.round(Number(canonical.total))
+        : null;
+    const sentTotal =
+      lastSendSnapshot && Number.isFinite(Number(lastSendSnapshot.total))
+        ? Math.round(Number(lastSendSnapshot.total))
+        : null;
+    return buildSupervisionModel({
+      autopilotOn: selectedContact?.isAutoPilotActive !== false,
+      leadStatus: leadStatusForQuote,
+      contact: {
+        name: selectedContact?.contactName,
+        channel: selectedContact?.platform,
+      },
+      vehicles: peritajeVehicles,
+      quote: {
+        hasQuote: hasPanelQuote || canonicalTotal != null,
+        sent: quoteSendCount > 0 || Boolean(lastSendSnapshot),
+        partial: Boolean(canonical?.isPartial || lastSendSnapshot?.canonicalFreeze?.isPartial),
+        cartEditable: isComplementCart || isCartModifiedSinceSend,
+        total:
+          canonicalTotal != null
+            ? canonicalTotal
+            : hasPanelQuote
+              ? granTotalPanel || cartTotalGlobal
+              : 0,
+        sentTotal,
+      },
+      lines,
+      evidence,
+      awaitingVehicle: isAwaitingVehicleBanioDraft,
+      error: quoteSaveError || '',
+      appointment: conversationAppointment
+        ? {
+            status: conversationAppointment.status,
+            when: conversationAppointmentWhen,
+            scheduledAt: conversationAppointment.scheduledAt,
+            clientName: conversationAppointment.clientName,
+            vehicle: conversationAppointment.vehicle,
+            phone: conversationAppointment.phone,
+          }
+        : null,
+    });
+  }, [
+    selectedConvId,
+    activeDraftForPanel,
+    panelRowsForDisplay,
+    quoteEvidenceImageUrls,
+    selectedContact,
+    leadStatusForQuote,
+    hasPanelQuote,
+    quoteSendCount,
+    lastSendSnapshot,
+    isComplementCart,
+    isCartModifiedSinceSend,
+    granTotalPanel,
+    cartTotalGlobal,
+    isAwaitingVehicleBanioDraft,
+    quoteSaveError,
+    conversationAppointment,
+    conversationAppointmentWhen,
+  ]);
+
   const renderQuoteActionButtons = () => (
     <div className="flex flex-col gap-2">
       <button
@@ -3635,16 +3785,6 @@ function ChatView({
     </>
   );
 
-  const renderDraftQuotePanelBody = () => (
-    <>
-      {renderDraftQuotePanelScrollContent()}
-      {hasPanelQuote && selectedConvId ? (
-        <div className="mt-3 flex flex-col gap-2 border-t border-gray-200 pt-3">
-          {renderQuoteActionButtons()}
-        </div>
-      ) : null}
-    </>
-  );
   const mobileChatOpen = Boolean(showChatWindow && selectedConvId);
 
   return (
@@ -3885,10 +4025,10 @@ function ChatView({
                   <span className="truncate">
                     {quotePanelPendingApproval ? (
                       <span className="animate-pulse">
-                        Ver Cotización de IA (Pendiente)
+                        Supervisión · cotización pendiente
                       </span>
                     ) : (
-                      'Ver Cotización de IA'
+                      'Supervisión'
                     )}
                   </span>
                 </button>
@@ -4081,19 +4221,24 @@ function ChatView({
         )}
       </div>
 
-      {/* 4. Panel de Cotización — escritorio */}
+      {/* 4. Supervisión del agente — escritorio */}
       <aside className="hidden min-h-0 flex-col border-l border-gray-200 bg-slate-50 shadow-inner dark:border-gray-800 dark:bg-gray-950 lg:col-span-3 lg:flex">
-        <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
-          <h2 className="text-sm font-bold tracking-tight text-gray-900 dark:text-gray-100">
-            Panel de Cotización
-          </h2>
-          <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-            Borrador generado por IA · requiere tu validación
-          </p>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
-          {renderDraftQuotePanelBody()}
-        </div>
+        <AgentSupervisionPanel
+          model={supervisionModel}
+          onToggleAutonomy={handleAutoPilotToggle}
+          autonomyBusy={autoPilotToggleBusy}
+          onOpenEvidence={setLabPhotoLightbox}
+        >
+          {hasPanelQuote || hasPanelPeritajeOnly ? (
+            <details className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
+              <summary className="cursor-pointer text-xs font-semibold text-gray-700 dark:text-gray-200">
+                Corregir cotización
+              </summary>
+              <div className="mt-2">{renderDraftQuotePanelScrollContent()}</div>
+            </details>
+          ) : null}
+          {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
+        </AgentSupervisionPanel>
       </aside>
 
       {/* Panel de Cotización — móvil (bottom drawer) */}
@@ -4102,7 +4247,7 @@ function ChatView({
           className="fixed inset-0 z-50 flex flex-col justify-end lg:hidden"
           role="dialog"
           aria-modal="true"
-          aria-label="Cotización de IA"
+          aria-label="Supervisión del agente"
         >
           <button
             type="button"
@@ -4115,10 +4260,10 @@ function ChatView({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-bold tracking-tight text-gray-900 dark:text-gray-100">
-                    Cotización de IA
+                    Supervisión del agente
                   </h2>
                   <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-                    Revisa, edita y envía al cliente
+                    Expediente, cotización y cita
                   </p>
                 </div>
                 <button
@@ -4133,14 +4278,25 @@ function ChatView({
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y px-4 pb-32 space-y-4 [-webkit-overflow-scrolling:touch]">
-                {renderDraftQuotePanelScrollContent()}
+              <div className="flex-1 overflow-y-auto overscroll-y-contain touch-pan-y [-webkit-overflow-scrolling:touch]">
+                <AgentSupervisionPanel
+                  embedded
+                  model={supervisionModel}
+                  onToggleAutonomy={handleAutoPilotToggle}
+                  autonomyBusy={autoPilotToggleBusy}
+                  onOpenEvidence={setLabPhotoLightbox}
+                >
+                  {hasPanelQuote || hasPanelPeritajeOnly ? (
+                    <details className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
+                      <summary className="cursor-pointer text-xs font-semibold text-gray-700 dark:text-gray-200">
+                        Corregir cotización
+                      </summary>
+                      <div className="mt-2">{renderDraftQuotePanelScrollContent()}</div>
+                    </details>
+                  ) : null}
+                  {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
+                </AgentSupervisionPanel>
               </div>
-              {hasPanelQuote && selectedConvId ? (
-                <div className="sticky bottom-0 z-10 shrink-0 border-t border-gray-200 bg-white px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] dark:border-gray-800 dark:bg-gray-900">
-                  {renderQuoteActionButtons()}
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
