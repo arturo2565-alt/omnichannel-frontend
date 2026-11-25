@@ -3651,7 +3651,7 @@ function ChatView({
           !activeDraftForPanel?.id
         }
         onClick={handleGuardarCambios}
-        className="min-h-12 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-12 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 shadow-sm transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-100 dark:hover:bg-indigo-900"
       >
         {isSavingQuote ? 'Guardando…' : 'Guardar Cambios'}
       </button>
@@ -3679,7 +3679,7 @@ function ChatView({
           document.getElementById('chat-reply-input')?.focus?.();
           setQuoteDrawerOpen(false);
         }}
-        className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
       >
         Copiar mensaje al cliente al cuadro de respuesta
       </button>
@@ -4230,14 +4230,16 @@ function ChatView({
           onOpenEvidence={setLabPhotoLightbox}
         >
           {hasPanelQuote || hasPanelPeritajeOnly ? (
-            <details className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
+            <details className="group rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
               <summary className="cursor-pointer text-xs font-semibold text-gray-700 dark:text-gray-200">
                 Corregir cotización
               </summary>
-              <div className="mt-2">{renderDraftQuotePanelScrollContent()}</div>
+              <div className="mt-2 hidden flex-col gap-3 group-open:flex">
+                {renderDraftQuotePanelScrollContent()}
+                {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
+              </div>
             </details>
           ) : null}
-          {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
         </AgentSupervisionPanel>
       </aside>
 
@@ -4287,14 +4289,16 @@ function ChatView({
                   onOpenEvidence={setLabPhotoLightbox}
                 >
                   {hasPanelQuote || hasPanelPeritajeOnly ? (
-                    <details className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
+                    <details className="group rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
                       <summary className="cursor-pointer text-xs font-semibold text-gray-700 dark:text-gray-200">
                         Corregir cotización
                       </summary>
-                      <div className="mt-2">{renderDraftQuotePanelScrollContent()}</div>
+                      <div className="mt-2 hidden flex-col gap-3 group-open:flex">
+                        {renderDraftQuotePanelScrollContent()}
+                        {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
+                      </div>
                     </details>
                   ) : null}
-                  {hasPanelQuote && selectedConvId ? renderQuoteActionButtons() : null}
                 </AgentSupervisionPanel>
               </div>
             </div>

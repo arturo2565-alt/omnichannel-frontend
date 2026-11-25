@@ -73,9 +73,22 @@ export default function SupervisionPreviewPage() {
               onToggleAutonomy={() => setAutopilotOn((value) => !value)}
               onOpenEvidence={setPhoto}
             >
-              <p className="rounded-lg bg-gray-50 px-2 py-2 text-[11px] text-gray-500 dark:bg-gray-800/80">
-                Corregir cotización y enviar siguen en la bandeja real. Aquí no hay una cotización que guardar.
-              </p>
+              <details className="group rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-950">
+                <summary className="cursor-pointer text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  Corregir cotización
+                </summary>
+                <div className="mt-2 hidden flex-col gap-2 group-open:flex">
+                  <p className="text-[11px] text-gray-500">
+                    Esta vista no guarda ni envía. Los botones aparecen solo al abrir la corrección.
+                  </p>
+                  <button type="button" className="min-h-12 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-100">
+                    Guardar Cambios
+                  </button>
+                  <button type="button" className="min-h-12 rounded-xl bg-emerald-600 px-4 py-3 text-base font-bold text-white">
+                    Enviar Cotización Final
+                  </button>
+                </div>
+              </details>
             </AgentSupervisionPanel>
           </div>
         </div>

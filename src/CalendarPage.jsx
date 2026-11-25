@@ -29,6 +29,13 @@ import {
   workshopKey,
 } from './sessionQuery.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import {
+  appointmentOrigin,
+  canCall,
+  canContactByWhatsApp,
+  telHref,
+  whatsappHref,
+} from './appointmentChannel.js';
 
 const WORKSHOP_TZ = 'America/Mexico_City';
 
@@ -121,27 +128,6 @@ function displayClientName(name) {
   const s = String(name ?? '').trim();
   if (!s || s.toLowerCase() === 'cliente desconocido') return 'Cliente';
   return s;
-}
-
-function digitsOnly(value) {
-  return String(value ?? '').replace(/\D/g, '');
-}
-
-function telHref(phone) {
-  const digits = digitsOnly(phone);
-  return digits ? `tel:${digits}` : null;
-}
-
-function whatsappHref(phone) {
-  const digits = digitsOnly(phone);
-  if (!digits) return null;
-  let n = digits;
-  if (n.startsWith('52') && n.length >= 12) {
-    /* ya es MX con lada */
-  } else if (n.length === 10) {
-    n = `52${n}`;
-  }
-  return `https://wa.me/${n}`;
 }
 
 function visitOf(appointment) {
@@ -254,8 +240,9 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
   const badge = appointmentBadge(appointment);
   const name = displayClientName(appointment.clientName);
   const phone = String(appointment.phone ?? '').trim();
-  const callUrl = telHref(phone);
-  const waUrl = whatsappHref(phone);
+  const origin = appointmentOrigin(appointment);
+  const callUrl = canCall(appointment) ? telHref(phone) : null;
+  const waUrl = canContactByWhatsApp(appointment) ? whatsappHref(phone) : null;
   const chatTo = appointment.conversationId
     ? `/?conversation=${encodeURIComponent(appointment.conversationId)}`
     : null;
@@ -316,7 +303,10 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-1.5 lg:w-48 lg:shrink-0">
+      <div className="flex flex-col gap-1.5 lg:w-52 lg:shrink-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Origen: {origin.label}
+        </p>
         {callUrl ? (
           <a
             href={callUrl}
@@ -325,6 +315,8 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
             <Phone className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
             <span className="truncate">{phone}</span>
           </a>
+        ) : phone ? (
+          <span className="text-sm text-gray-700 dark:text-gray-200">{phone}</span>
         ) : (
           <span className="text-xs italic text-gray-400">Sin teléfono</span>
         )}
@@ -335,7 +327,7 @@ function AppointmentRow({ appointment, busy, onPatioChange }) {
             rel="noopener noreferrer"
             className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700"
           >
-            WhatsApp
+            Contactar por WhatsApp
           </a>
         ) : null}
       </div>

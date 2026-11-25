@@ -153,6 +153,16 @@ test('crear y reprogramar una cita manual se ve en CRM y calendario', () => {
   const manual = client.getQueryData(workshopKey(scope, 'crm-appointments'))[0];
   assert.equal(manual.scheduledAt, '2026-11-15T16:00:00.000Z');
   assert.equal(manual.clientName, 'Luis');
+  upsertCachedAppointment(client, scope, {
+    id: 'lab1',
+    source: 'autopilot',
+    conversationPlatform: 'lab',
+    phone: '5512345678',
+  });
+  patchCachedAppointment(client, scope, 'lab1', { visitStatus: 'realizada' });
+  const lab = client.getQueryData(workshopKey(scope, 'appointments')).find((row) => row.id === 'lab1');
+  assert.equal(lab.conversationPlatform, 'lab');
+  assert.equal(lab.visitStatus, 'realizada');
 });
 
 test('el socket y la mutación comparten una sola actualización', async () => {
