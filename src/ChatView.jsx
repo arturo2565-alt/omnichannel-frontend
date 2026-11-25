@@ -3547,6 +3547,7 @@ function ChatView({
               treatment: row?.tratamiento,
               priceSource: line.pricingSource ?? row?.priceSource,
               pricingStatus: line.pricingStatus ?? row?.pricingStatus,
+              pricingTrace: line.pricingTrace ?? null,
             };
           })
         : panelRowsForDisplay.map((row) => ({

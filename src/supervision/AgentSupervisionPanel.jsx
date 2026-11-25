@@ -1,4 +1,4 @@
-import { formatSupervisionMoney } from './supervision-model.js';
+import { describePricingTrace, formatSupervisionMoney } from './supervision-model.js';
 
 function Section({ title, children }) {
   return (
@@ -17,6 +17,30 @@ function Row({ label, value }) {
       <span className="text-gray-500 dark:text-gray-400">{label}</span>
       <span className="min-w-0 truncate text-right font-medium">{value || '—'}</span>
     </p>
+  );
+}
+
+function TraceLine({ line }) {
+  const trace = line.trace;
+  return (
+    <div className="rounded-lg bg-gray-50 px-2 py-2 text-[11px] leading-5 dark:bg-gray-800/80">
+      <p className="font-medium">{line.label}</p>
+      {!trace ? (
+        <p>Trazabilidad no disponible.</p>
+      ) : !line.traceAgrees ? (
+        <p>La traza no corresponde al importe autorizado.</p>
+      ) : (
+        <>
+          <p>Código: {trace.physicalPanelKey || line.code || 'no consta'}</p>
+          {describePricingTrace(trace).map((fact) => (
+            <p key={`${line.id}-${fact.label}`}>
+              {fact.label}: {fact.value}
+            </p>
+          ))}
+        </>
+      )}
+      <p>Importe: {formatSupervisionMoney(line.amount)}</p>
+    </div>
   );
 }
 
@@ -150,16 +174,7 @@ export default function AgentSupervisionPanel({
               <p className="text-xs text-gray-500">No hay servicios que trazar.</p>
             ) : (
               model.quote.lines.map((line) => (
-                <div key={`trace-${line.id}`} className="rounded-lg bg-gray-50 px-2 py-2 text-[11px] leading-5 dark:bg-gray-800/80">
-                  <p className="font-medium">{line.label}</p>
-                  <p>Código: {line.code || 'no indicado'}</p>
-                  <p>Fuente: {line.priceSource || 'no indicada'}</p>
-                  <p>Base: {line.base == null ? 'el expediente no trae la base' : formatSupervisionMoney(line.base)}</p>
-                  <p>Factores: {line.factors || 'el expediente no trae los factores'}</p>
-                  <p>Precio: {formatSupervisionMoney(line.amount)}</p>
-                  <p>Estado: {line.pricingStatus || 'no indicado'}</p>
-                  {line.pricingStatus === 'UNCONFIGURED' ? <p>Bloqueo: tarifa no configurada.</p> : null}
-                </div>
+                <TraceLine key={`trace-${line.id}`} line={line} />
               ))
             )}
           </div>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildSupervisionModel } from './supervision-model.js';
+import { buildSupervisionModel, describePricingTrace } from './supervision-model.js';
 
 test('cotización completa enviada y vehículo declarado', () => {
   const model = buildSupervisionModel({
@@ -75,6 +75,81 @@ test('cita confirmada detecta el vehículo perdido y no inventa factores', () =>
   assert.match(model.appointment.discrepancy, /no lo registró/);
   assert.equal(model.quote.lines[0].base, null);
   assert.equal(model.quote.lines[0].factors, '');
+  assert.equal(model.quote.lines[0].trace, null);
+});
+
+test('una cotización histórica sin traza no se reconstruye', () => {
+  const model = buildSupervisionModel({
+    lines: [{ label: 'Costado trasero izquierdo', code: 'STI', amount: 4050, base: 3100, factors: 'x 1.3' }],
+  });
+  assert.equal(model.quote.lines[0].trace, null);
+  assert.equal(model.quote.lines[0].base, null);
+  assert.equal(model.quote.lines[0].amount, 4050);
+});
+
+test('la traza real se muestra y una traza distinta al importe no lo justifica', () => {
+  const traced = buildSupervisionModel({
+    lines: [{
+      label: 'Costado trasero izquierdo',
+      amount: 3750,
+      pricingTrace: {
+        schemaVersion: 1,
+        pricingMethod: 'catalog_piece',
+        physicalPanelKey: 'STI',
+        catalogService: 'Salpicadera trasera',
+        matrixSeverityKey: 'LEVE',
+        basePriceMx: 2900,
+        vehicleSizeTier: 'Compacto',
+        sizeFactor: 1,
+        premiumFactor: 1,
+        damageMagnitude: 'FUERTE',
+        severityFactor: 1.3,
+        roundToMx: 50,
+        calculatedAmountMx: 3750,
+        pricingSource: 'AUTOFIX_CATALOG',
+        pricingStatus: 'OK',
+      },
+    }],
+  });
+  const line = traced.quote.lines[0];
+  assert.equal(line.trace.catalogService, 'Salpicadera trasera');
+  assert.equal(line.trace.matrixSeverityKey, 'LEVE');
+  assert.equal(line.base, 2900);
+  assert.equal(line.amount, 3750);
+  assert.equal(line.traceAgrees, true);
+
+  const manual = buildSupervisionModel({
+    lines: [{
+      label: 'Fascia',
+      amount: 1800,
+      pricingTrace: {
+        schemaVersion: 1,
+        pricingMethod: 'manual',
+        calculatedAmountMx: 1800,
+        pricingSource: 'MANUAL',
+        pricingStatus: 'OK',
+      },
+    }],
+  });
+  assert.equal(manual.quote.lines[0].trace.pricingMethod, 'manual');
+  assert.equal(manual.quote.lines[0].trace.basePriceMx, null);
+  assert.equal(manual.quote.lines[0].base, null);
+
+  const stale = buildSupervisionModel({
+    lines: [{
+      label: 'Costado',
+      amount: 4050,
+      pricingTrace: {
+        schemaVersion: 1,
+        pricingMethod: 'catalog_piece',
+        basePriceMx: 2900,
+        calculatedAmountMx: 3750,
+        pricingStatus: 'OK',
+      },
+    }],
+  });
+  assert.equal(stale.quote.lines[0].traceAgrees, false);
+  assert.equal(stale.quote.lines[0].amount, 4050);
 });
 
 test('vehículo inferido, varios vehículos e intervención humana', () => {
@@ -110,6 +185,32 @@ test('separa el total enviado del expediente cuando el carrito cambió', () => {
   assert.equal(model.quote.totalLabel, '$6,950');
   assert.equal(model.quote.liveTotalLabel, '$2,900');
   assert.equal(model.quote.liveCaption, 'Subtotal del expediente');
+});
+
+test('el premium previo a la severidad conserva el factor real', () => {
+  const facts = describePricingTrace({
+    pricingMethod: 'catalog_piece',
+    catalogService: 'Salpicadera',
+    matrixSeverityKey: 'Mediano|LEVE',
+    catalogBasePriceMx: 1500,
+    effectiveBasePriceMx: 1650,
+    premiumApplied: true,
+    premiumFactor: 1.1,
+    operationOrder: 'premium_round_then_severity',
+    intermediateRoundToMx: 50,
+    vehicleSizeTier: 'Mediano',
+    damageMagnitude: 'LEVE',
+    severityFactor: 1,
+    roundToMx: 50,
+    pricingSource: 'AUTOFIX_CATALOG',
+    pricingStatus: 'OK',
+  });
+  const text = facts.map((fact) => `${fact.label} ${fact.value}`).join('\n');
+  assert.match(text, /Base de catálogo/);
+  assert.match(text, /Base efectiva/);
+  assert.match(text, /Premium × 1\.1/);
+  assert.match(text, /Redondeo intermedio/);
+  assert.doesNotMatch(text, /Premium × 1$/m);
 });
 
 test('estado sin datos', () => {

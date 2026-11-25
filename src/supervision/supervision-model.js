@@ -10,6 +10,64 @@ const LEAD_LABELS = {
   transferido: 'Transferido',
 };
 
+export function describePricingTrace(trace) {
+  if (!trace) return [];
+  const money = (value) => formatSupervisionMoney(value);
+  const rows = [];
+  if (trace.pricingMethod === 'manual') {
+    rows.push(['Procedencia', 'Precio manual autorizado. No usa una fórmula de catálogo.']);
+  } else if (trace.pricingMethod === 'market_part') {
+    rows.push(['Procedencia', 'Refacción de mercado. No procede de price_matrix.']);
+  } else if (trace.pricingMethod === 'unconfigured') {
+    rows.push(['Procedencia', 'Tarifa no configurada.']);
+  }
+  if (trace.catalogService) rows.push(['Tarifa', trace.catalogService]);
+  if (trace.matrixSeverityKey) {
+    rows.push([
+      'Celda',
+      trace.matrixRowId ? `${trace.matrixSeverityKey} · ${trace.matrixRowId}` : trace.matrixSeverityKey,
+    ]);
+  }
+  if (trace.operationOrder === 'premium_round_then_severity') {
+    if (trace.catalogBasePriceMx != null) rows.push(['Base de catálogo', money(trace.catalogBasePriceMx)]);
+    if (trace.premiumApplied && trace.premiumFactor != null) {
+      rows.push(['Premium', `× ${trace.premiumFactor}`]);
+    }
+    if (trace.intermediateRoundToMx != null) {
+      rows.push(['Redondeo intermedio', money(trace.intermediateRoundToMx)]);
+    }
+    if (trace.effectiveBasePriceMx != null) rows.push(['Base efectiva', money(trace.effectiveBasePriceMx)]);
+    rows.push(['Orden', 'Premium y redondeo, después la severidad.']);
+    if (trace.vehicleSizeTier) {
+      rows.push(['Vehículo', `${trace.vehicleSizeTier}. La celda ya corresponde a ese tamaño.`]);
+    }
+  } else if (trace.operationOrder === 'tier_cell_then_severity') {
+    if (trace.catalogBasePriceMx != null) rows.push(['Base de catálogo', money(trace.catalogBasePriceMx)]);
+    if (trace.vehicleSizeTier) {
+      rows.push(['Vehículo', `${trace.vehicleSizeTier}. La celda ya corresponde a ese tamaño.`]);
+    }
+    rows.push(['Orden', 'Celda de tamaño, después la severidad.']);
+  } else {
+    if (trace.catalogBasePriceMx != null) rows.push(['Base', money(trace.catalogBasePriceMx)]);
+    else if (trace.basePriceMx != null) rows.push(['Base', money(trace.basePriceMx)]);
+    if (trace.vehicleSizeTier) {
+      const factor = trace.sizeFactor != null ? ` × ${trace.sizeFactor}` : '';
+      rows.push(['Vehículo', `${trace.vehicleSizeTier}${factor}`]);
+    }
+    if (trace.premiumApplied && trace.premiumFactor != null) {
+      rows.push(['Premium', `× ${trace.premiumFactor}`]);
+    }
+  }
+  if (trace.damageMagnitude) {
+    const factor = trace.severityFactor != null ? ` × ${trace.severityFactor}` : '';
+    rows.push(['Severidad', `${trace.damageMagnitude}${factor}`]);
+  }
+  if (trace.roundToMx != null) rows.push(['Redondeo', money(trace.roundToMx)]);
+  if (trace.pricingSource) rows.push(['Fuente', trace.pricingSource]);
+  if (trace.pricingStatus) rows.push(['Estado', trace.pricingStatus]);
+  return rows.map(([label, value]) => ({ label, value }));
+}
+
 export function formatSupervisionMoney(amount) {
   const value = Math.round(Number(amount) || 0);
   return value.toLocaleString('es-MX', {
@@ -17,6 +75,39 @@ export function formatSupervisionMoney(amount) {
     currency: 'MXN',
     maximumFractionDigits: 0,
   });
+}
+
+function readPricingTrace(raw) {
+  if (!raw || typeof raw !== 'object' || raw.schemaVersion !== 1) return null;
+  const text = (value) => String(value ?? '').trim();
+  const num = (value) =>
+    value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+  const pricingMethod = text(raw.pricingMethod);
+  if (!pricingMethod) return null;
+  return {
+    pricingMethod,
+    physicalPanelKey: text(raw.physicalPanelKey),
+    catalogService: text(raw.catalogService),
+    matrixSeverityKey: text(raw.matrixSeverityKey),
+    matrixRowId: text(raw.matrixRowId),
+    catalogBasePriceMx: num(raw.catalogBasePriceMx),
+    effectiveBasePriceMx: num(raw.effectiveBasePriceMx),
+    basePriceMx: num(raw.basePriceMx),
+    vehicleSizeTier: text(raw.vehicleSizeTier),
+    formulaSizeTier: text(raw.formulaSizeTier),
+    sizeFactor: num(raw.sizeFactor),
+    premiumApplied: raw.premiumApplied === true,
+    formulaPremiumApplied: raw.formulaPremiumApplied === true,
+    premiumFactor: num(raw.premiumFactor),
+    operationOrder: text(raw.operationOrder),
+    intermediateRoundToMx: num(raw.intermediateRoundToMx),
+    damageMagnitude: text(raw.damageMagnitude),
+    severityFactor: num(raw.severityFactor),
+    roundToMx: num(raw.roundToMx),
+    calculatedAmountMx: num(raw.calculatedAmountMx),
+    pricingSource: text(raw.pricingSource),
+    pricingStatus: text(raw.pricingStatus),
+  };
 }
 
 function fold(value) {
@@ -135,18 +226,24 @@ export function buildSupervisionModel(input = {}) {
     vehicleDiscrepancy = 'El cliente declaró un vehículo y la cita no lo registró.';
   }
 
-  const lines = (Array.isArray(input.lines) ? input.lines : []).map((line, index) => ({
-    id: String(line.id ?? line.quoteLineId ?? index),
-    label: String(line.label ?? line.description ?? 'Partida').trim() || 'Partida',
-    code: String(line.code ?? line.physicalPanelKey ?? '').trim(),
-    amount: Math.round(Number(line.amount ?? line.precioMx) || 0),
-    severity: String(line.severity ?? line.severidad ?? '').trim(),
-    treatment: String(line.treatment ?? line.tratamiento ?? '').trim(),
-    priceSource: String(line.priceSource ?? line.pricingSource ?? '').trim(),
-    pricingStatus: String(line.pricingStatus ?? '').trim(),
-    base: line.base == null || line.base === '' ? null : Math.round(Number(line.base) || 0),
-    factors: String(line.factors ?? '').trim(),
-  }));
+  const lines = (Array.isArray(input.lines) ? input.lines : []).map((line, index) => {
+    const trace = readPricingTrace(line.pricingTrace);
+    const amount = Math.round(Number(line.amount ?? line.precioMx) || 0);
+    return {
+      id: String(line.id ?? line.quoteLineId ?? index),
+      label: String(line.label ?? line.description ?? 'Partida').trim() || 'Partida',
+      code: String(trace?.physicalPanelKey || line.code || line.physicalPanelKey || '').trim(),
+      amount,
+      severity: String(line.severity ?? line.severidad ?? '').trim(),
+      treatment: String(line.treatment ?? line.tratamiento ?? '').trim(),
+      priceSource: String(trace?.pricingSource || line.priceSource || line.pricingSource || '').trim(),
+      pricingStatus: String(trace?.pricingStatus || line.pricingStatus || '').trim(),
+      base: trace?.basePriceMx ?? null,
+      factors: '',
+      trace,
+      traceAgrees: !trace || trace.calculatedAmountMx === amount,
+    };
+  });
 
   const blocked = [];
   if (input.awaitingVehicle) blocked.push('Falta la identidad del vehículo para cotizar.');
