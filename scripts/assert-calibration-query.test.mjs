@@ -56,8 +56,9 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(page, /confirmZoneLines/);
   assert.match(page, /Aprobar resumen declarado/);
   assert.match(page, /Corregir color/);
-  assert.match(page, /Color actual/);
-  assert.match(page, /Color solicitado/);
+  assert.match(page, /Color exterior:/);
+  assert.match(page, /Color actual:/);
+  assert.match(page, /Color solicitado:/);
   assert.match(page, /Color no determinado/);
   assert.match(page, /colorPresentation/);
   assert.match(api, /\/api\/calibration\/color/);
@@ -80,6 +81,7 @@ test('la calibración queda protegida y fuera de la barra inferior', () => {
   assert.match(view, /Costo de refacción estimado/);
   assert.match(view, /Refacción · procedencia no registrada/);
   assert.match(view, /Propuesta IA/);
+  assert.match(view, /Declarado por AutoFix/);
   assert.match(view, /Pendiente de validación/);
   assert.match(view, /visual_assessment/);
   assert.match(page, /Ver historial de severidad/);

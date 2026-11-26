@@ -281,6 +281,9 @@ test('el color declarado no se presenta como validado y el cambio conserva los d
   assert.equal(declared.mode, 'single');
   assert.equal(declared.label, 'Rojo');
   assert.equal(declared.provenance, 'human_declaration');
+  assert.equal(declared.state, 'Declarado por AutoFix');
+  assert.notEqual(declared.state, 'Propuesta IA');
+  assert.notEqual(declared.state, 'Validado');
   assert.equal(vehicleColorSuffix({
     contractVersion: 'color-v1',
     status: 'proposed',
@@ -295,6 +298,8 @@ test('el color declarado no se presenta como validado y el cambio conserva los d
     requestedColor: null,
   });
   assert.equal(inferred.provenance, 'visual_inference');
+  assert.equal(inferred.state, 'Propuesta IA');
+  assert.notEqual(inferred.state, 'Declarado por AutoFix');
   assert.notEqual(inferred.provenance, 'authenticated_owner');
   const unknown = colorPresentation({
     contractVersion: 'color-v1',
@@ -316,6 +321,7 @@ test('el color declarado no se presenta como validado y el cambio conserva los d
   assert.equal(change.mode, 'change');
   assert.equal(change.current, 'Blanco');
   assert.equal(change.requested, 'Negro');
+  assert.equal(change.state, 'Declarado por AutoFix');
   const bath = colorPresentation({
     contractVersion: 'color-v1',
     status: 'proposed',

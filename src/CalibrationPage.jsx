@@ -1519,21 +1519,25 @@ function vehicleColorText(record) {
 export function VehicleIdentity({ record, subjectId, heading = false }) {
   const name = vehicle(record);
   const color = colorPresentation(record?.colorAnnotation);
-  const title = name ? `${name}${color?.mode === 'single' ? ` · ${color.label}` : ''}` : '';
+  const title = name || '';
   const Tag = heading ? 'h2' : 'p';
   return (
     <div className="min-w-0 break-words">
       <Tag className={heading ? 'break-words text-2xl font-semibold tracking-tight' : 'break-words'}>
         {title || (heading ? (record?.id || 'Vehículo incompleto') : 'Vehículo incompleto')}
-        {color?.showProvenance && color.mode === 'single' ? (
-          <span className="ml-2 align-middle text-[11px] font-normal text-gray-400">{color.state || color.provenance}</span>
-        ) : null}
       </Tag>
-      {color?.mode === 'change' ? (
-        <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">
-          {color.current ? `Color actual ${color.current} → ` : ''}Color solicitado {color.requested}
-          {color.showProvenance ? <span className="ml-2 text-[11px] text-gray-400">{color.state || color.provenance}</span> : null}
+      {color?.mode === 'single' ? (
+        <p className="mt-1 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Color exterior: {color.label}
+          <span className="mt-0.5 block text-xs font-medium text-gray-500 dark:text-gray-400">{color.state}</span>
         </p>
+      ) : null}
+      {color?.mode === 'change' ? (
+        <div className="mt-1 break-words text-sm text-gray-900 dark:text-gray-100">
+          {color.current ? <p className="font-semibold">Color actual: {color.current}</p> : null}
+          <p className="font-semibold">Color solicitado: {color.requested}</p>
+          {color.state ? <p className="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{color.state}</p> : null}
+        </div>
       ) : null}
       {color?.original ? (
         <p className="mt-1 break-words text-xs text-gray-400">Color original {color.original}</p>

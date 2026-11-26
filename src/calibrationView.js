@@ -181,7 +181,7 @@ export function colorPresentation(annotation) {
       original: originalLabel,
       provenance: 'human_declaration',
       showProvenance: true,
-      state: 'Pendiente de validación',
+      state: 'Declarado por AutoFix',
     };
   }
   if (!provenance || !exterior) return null;
@@ -201,7 +201,7 @@ function colorState(annotation, provenance) {
   if (annotation.status === 'validated' && provenance === 'authenticated_owner') return 'Validado';
   if (provenance === 'visual_inference' && annotation.inferenceMethod === 'body_pixel_sample') return 'Propuesta IA';
   if (provenance === 'visual_inference') return 'Propuesta IA';
-  if (provenance === 'human_declaration' && annotation.status === 'proposed') return 'Pendiente de validación';
+  if (provenance === 'human_declaration' && annotation.status === 'proposed') return 'Declarado por AutoFix';
   if (annotation.status === 'unknown' || provenance === 'unknown') return 'Desconocido';
   return null;
 }
